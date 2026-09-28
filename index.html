@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>나만의 Work Space</title>
+  <meta name="description" content="일정·프로젝트·프로그램을 한 곳에서 관리하는 개인용 Neumorphism 대시보드" />
+  <link rel="manifest" href="public/manifest.json" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8C%82%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/modules/auth.css" />
+  <link rel="stylesheet" href="css/modules/briefing.css" />
+  <link rel="stylesheet" href="css/modules/home.css" />
+  <link rel="stylesheet" href="css/modules/challenges.css" />
+  <link rel="stylesheet" href="css/modules/projects.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <!--
+    일반 <script> 태그만 사용한다 (ES 모듈 아님).
+    이유: <script type="module">은 file:// 프로토콜(그냥 더블클릭해서 열기)에서
+    CORS로 차단되어 화면이 비어 보이는 문제가 있었다. QMS 프로젝트와 동일하게
+    "각 파일이 window.X = X로 전역 등록 + 로드 순서로 의존성 관리" 방식을 쓴다.
+    아래 순서(의존하는 파일이 먼저)를 반드시 지켜야 한다.
+  -->
+  <script src="js/config.js"></script>
+  <script src="js/utils/id.js"></script>
+  <script src="js/utils/date.js"></script>
+  <script src="js/utils/dom.js"></script>
+  <script src="js/utils/csv.js"></script>
+  <script src="js/predict.js"></script>
+  <script src="js/rules.js"></script>
+  <script src="js/store/localStore.js"></script>
+  <script src="js/store/supabaseStore.js"></script>
+  <script src="js/store/index.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/services/sessionGuard.js"></script>
+  <script src="js/services/automationService.js"></script>
+  <script src="js/services/briefingService.js"></script>
+  <script src="js/services/feedService.js"></script>
+  <script src="js/components/modal.js"></script>
+  <script src="js/components/briefingModal.js"></script>
+  <script src="js/modules/auth.js"></script>
+  <script src="js/modules/home.js"></script>
+  <script src="js/modules/schedule.js"></script>
+  <script src="js/modules/projects.js"></script>
+  <script src="js/modules/challenges.js"></script>
+  <script src="js/modules/playlist.js"></script>
+  <script src="js/modules/vehicles.js"></script>
+  <script src="js/modules/health.js"></script>
+  <script src="js/modules/briefing.js"></script>
+  <script src="js/modules/devlog.js"></script>
+  <script src="js/modules/knowledge.js"></script>
+  <script src="js/modules/automation.js"></script>
+  <script src="js/modules/integrations.js"></script>
+  <script src="js/modules/analytics.js"></script>
+  <script src="js/modules/programs.js"></script>
+  <script src="js/modules/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
