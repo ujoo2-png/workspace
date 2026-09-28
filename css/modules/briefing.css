@@ -1,0 +1,32 @@
+.briefing-modal { max-width: 560px; }
+.briefing-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.briefing-header h2 { font-size: 20px; margin-bottom: 2px; }
+.briefing-section { margin-bottom: 18px; }
+.briefing-section h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.briefing-weather {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-pressed);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.briefing-empty { color: var(--text-muted); font-size: 13px; padding: 8px 2px; }
+.briefing-alert-row { display: flex; gap: 10px; align-items: flex-start; }
+.briefing-alert-row + .briefing-alert-row { margin-top: 8px; }
+.briefing-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 6px; flex-shrink: 0;
+  background: var(--info);
+}
+.briefing-dot--critical { background: var(--danger); }
+.briefing-dot--warning { background: var(--warning); }

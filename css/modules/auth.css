@@ -1,0 +1,201 @@
+/* ============================================================
+   로그인 화면 — 기존 QMS 프로젝트의 로그인 창과 동일한 구조/스타일.
+   클래스명(.lo, .lo-card, .lo-card-top, .lo-mark, .lo-sys-name,
+   .lfg, .lo-btn, .lo-footer 등)과 토큰 값을 QMS 쪽 qms-style.css 그대로 가져왔다.
+   이 앱의 다른 화면은 Neumorphism(--bg/--surface 등)을 쓰지만, 로그인 화면만은
+   요청에 따라 QMS 원본과 동일한 그라디언트 카드 UI를 그대로 사용한다.
+   ============================================================ */
+.lo {
+  --lo-pri: #1a4f8a;
+  --lo-pri2: #2563a8;
+  --lo-acc: #0ea5e9;
+  --lo-bg: #f0f4f8;
+  --lo-tx: #1e293b;
+  --lo-tm: #64748b;
+  --lo-tl: #94a3b8;
+  --lo-bd: #e2e8f0;
+  --lo-err: #ef4444;
+  --lo-r: 8px;
+  --lo-t: 0.17s ease;
+
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f2744 0%, #1a4f8a 55%, #0ea5e9 100%);
+  overflow-y: auto;
+  padding: 20px;
+  font-family: 'Pretendard', 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.lo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none'%3E%3Cg fill='%23fff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+.lo-card {
+  position: relative;
+  z-index: 1;
+  background: #fff;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lo-card-top {
+  background: linear-gradient(135deg, var(--lo-pri), var(--lo-pri2));
+  padding: 26px 32px 22px;
+  text-align: center;
+}
+.lo-def-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.lo-mark {
+  width: 52px;
+  height: 52px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(8px);
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+}
+.lo-sys-name {
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.5px;
+  text-align: left;
+}
+.lo-sys-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: left;
+  margin-top: 2px;
+}
+.lo-card-body { padding: 28px 32px 24px; }
+
+/* 로그인/회원가입 탭 (QMS 스타일 아이디·비밀번호 로그인 + 회원가입) */
+.lo-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--lo-bg);
+  padding: 4px;
+  border-radius: var(--lo-r);
+}
+.lo-tab {
+  flex: 1;
+  padding: 9px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lo-tm);
+  cursor: pointer;
+  transition: var(--lo-t);
+  font-family: inherit;
+}
+.lo-tab--active {
+  background: #fff;
+  color: var(--lo-pri);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+.lo-tab:hover:not(.lo-tab--active) { color: var(--lo-pri2); }
+
+/* 폼 요소 */
+.lfg { margin-bottom: 14px; }
+.lfg label {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--lo-tm);
+  margin-bottom: 5px;
+}
+.lfg .lo-input-wrap { position: relative; }
+.lfg input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1.5px solid var(--lo-bd);
+  border-radius: var(--lo-r);
+  font-size: 14px;
+  transition: var(--lo-t);
+  background: #fafbfc;
+  color: var(--lo-tx);
+  font-family: inherit;
+}
+.lfg input:focus {
+  outline: none;
+  border-color: var(--lo-acc);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+.lfg input.err { border-color: var(--lo-err); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1); }
+.lo-errmsg { font-size: 12px; color: var(--lo-err); margin-top: 5px; display: none; }
+.lo-errmsg.show { display: block; }
+
+.lo-btn {
+  width: 100%;
+  padding: 13px;
+  background: linear-gradient(135deg, var(--lo-pri), var(--lo-pri2));
+  color: #fff;
+  border-radius: var(--lo-r);
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 4px;
+  transition: var(--lo-t);
+  box-shadow: 0 4px 12px rgba(26, 79, 138, 0.3);
+  cursor: pointer;
+  border: none;
+}
+.lo-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(26, 79, 138, 0.4); }
+.lo-btn:active { transform: none; }
+.lo-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
+
+.lo-forgot-link {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: none;
+  border: none;
+  color: var(--lo-acc);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lo-forgot-link:hover { text-decoration: underline; }
+
+.lo-hint {
+  font-size: 11px;
+  color: var(--lo-tl);
+  text-align: center;
+  margin-top: 14px;
+  padding: 10px;
+  background: var(--lo-bg);
+  border-radius: var(--lo-r);
+  line-height: 1.6;
+}
+.lo-footer {
+  padding: 14px 32px;
+  border-top: 1px solid var(--lo-bd);
+  text-align: center;
+  font-size: 11px;
+  color: var(--lo-tl);
+  background: #fafbfc;
+}
