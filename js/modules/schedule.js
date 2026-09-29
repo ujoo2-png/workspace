@@ -147,6 +147,11 @@
                   onclick: () => appState.updateSchedule(s.id, { done: !s.done }),
                 }, s.done ? '↺' : '✓'),
                 el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openScheduleForm(s) }, '✎'),
+                el('button', {
+                  class: 'nm-btn nm-btn--icon',
+                  title: '첨부파일',
+                  onclick: () => window.openAttachmentsModal('schedules', s.id, s.title),
+                }, '📎'),
                 el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(s) }, '🗑'),
               ]),
             ]),

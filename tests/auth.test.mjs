@@ -20,6 +20,7 @@ class FakeLocalStorage {
   removeItem(k) { this._data.delete(k); }
 }
 globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
 globalThis.window = globalThis; // localStore.js는 window.addEventListener를 호출한다
 globalThis.window.addEventListener = () => {};
 
@@ -31,6 +32,7 @@ const { LocalStore } = globalThis;
 
 test('첫 번째 가입자는 즉시 관리자(admin)로 승인된다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   const result = await store.signUp({ username: 'alice', password: 'pw1234', name: '앨리스' });
   assert.equal(result.pending, false);
@@ -42,6 +44,7 @@ test('첫 번째 가입자는 즉시 관리자(admin)로 승인된다', async ()
 
 test('두 번째 이후 가입자는 승인 대기 상태이며 승인 전에는 로그인할 수 없다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   const result = await store.signUp({ username: 'bob', password: 'pw5678' });
@@ -63,6 +66,7 @@ test('두 번째 이후 가입자는 승인 대기 상태이며 승인 전에는
 
 test('거절된 사용자는 로그인할 수 없다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   await store.signUp({ username: 'carol', password: 'pw0000' });
@@ -73,6 +77,7 @@ test('거절된 사용자는 로그인할 수 없다', async () => {
 
 test('틀린 비밀번호로는 로그인할 수 없다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   await assert.rejects(() => store.signIn('alice', 'wrong-pw'), /아이디 또는 비밀번호/);
@@ -80,6 +85,7 @@ test('틀린 비밀번호로는 로그인할 수 없다', async () => {
 
 test('본인이 현재 비밀번호를 알고 있으면 비밀번호를 변경할 수 있다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   const session = await store.signIn('alice', 'pw1234');
@@ -91,6 +97,7 @@ test('본인이 현재 비밀번호를 알고 있으면 비밀번호를 변경�
 
 test('현재 비밀번호가 틀리면 비밀번호를 바꿀 수 없다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   const session = await store.signIn('alice', 'pw1234');
@@ -99,6 +106,7 @@ test('현재 비밀번호가 틀리면 비밀번호를 바꿀 수 없다', async
 
 test('관리자는 다른 사용자의 비밀번호를 새로 지정할 수 있다(비밀번호 분실 대응)', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   await store.signUp({ username: 'bob', password: 'pw5678' });
@@ -112,7 +120,34 @@ test('관리자는 다른 사용자의 비밀번호를 새로 지정할 수 있�
 
 test('중복된 아이디로는 가입할 수 없다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   const store = new LocalStore();
   await store.signUp({ username: 'alice', password: 'pw1234' });
   await assert.rejects(() => store.signUp({ username: 'alice', password: 'pw9999' }), /이미 사용 중/);
+});
+
+test('"로그인 상태 유지"를 체크하지 않으면 세션이 sessionStorage에만 저장된다', async () => {
+  globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
+  const store = new LocalStore();
+  await store.signUp({ username: 'alice', password: 'pw1234' });
+  await store.signIn('alice', 'pw1234', false);
+  assert.equal(globalThis.localStorage.getItem('workspace:auth:v1'), null);
+  assert.notEqual(globalThis.sessionStorage.getItem('workspace:auth:v1'), null);
+  const session = await store.getSession();
+  assert.equal(session.user.email, 'alice');
+});
+
+test('"로그인 상태 유지"를 체크하면 세션이 localStorage에 저장되어 재방문 후에도 유지된다', async () => {
+  globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
+  const store = new LocalStore();
+  await store.signUp({ username: 'alice', password: 'pw1234' });
+  await store.signIn('alice', 'pw1234', true);
+  assert.notEqual(globalThis.localStorage.getItem('workspace:auth:v1'), null);
+  // 새 브라우저 세션을 흉내내기 위해 sessionStorage만 비운다(탭/브라우저 재시작 시나리오).
+  globalThis.sessionStorage = new FakeLocalStorage();
+  const store2 = new LocalStore();
+  const session = await store2.getSession();
+  assert.equal(session.user.email, 'alice');
 });

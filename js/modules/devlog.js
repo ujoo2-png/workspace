@@ -76,6 +76,7 @@
             ]),
             el('div', { class: 'icon-row' }, [
               el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openLogForm(d) }, '✎'),
+              el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('devlogs', d.id, d.title) }, '📎'),
               el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(d) }, '🗑'),
             ]),
           ])

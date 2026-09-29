@@ -3,6 +3,32 @@
 // supabase-js는 CDN(ESM)에서 동적 import() 하므로, 'local' 모드에서는 네트워크 요청조차 나가지 않는다.
 // 동적 import()는 이 파일 자체가 일반 <script>(비-모듈)여도 그대로 사용할 수 있다.
 (function () {
+  // "로그인 상태 유지"를 체크하지 않으면 Supabase 세션을 sessionStorage에만 저장해
+  // 탭/브라우저를 닫으면 사라지게 한다(로컬 모드와 동일한 정책). Supabase 클라이언트는
+  // 세션을 이 storage 어댑터로만 읽고 쓰므로, 로그인 시점에 REMEMBER_KEY만 바꿔주면
+  // 이후의 모든 내부 저장이 알아서 올바른 저장소로 향한다.
+  const REMEMBER_KEY = 'workspace:auth:remember';
+  const dynamicStorage = {
+    getItem(key) {
+      try {
+        const remember = localStorage.getItem(REMEMBER_KEY) === '1';
+        return (remember ? localStorage : sessionStorage).getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    setItem(key, value) {
+      try {
+        const remember = localStorage.getItem(REMEMBER_KEY) === '1';
+        (remember ? localStorage : sessionStorage).setItem(key, value);
+      } catch {}
+    },
+    removeItem(key) {
+      try { localStorage.removeItem(key); } catch {}
+      try { sessionStorage.removeItem(key); } catch {}
+    },
+  };
+
   class SupabaseStore {
     constructor({ url, anonKey }) {
       if (!url || !anonKey) {
@@ -18,7 +44,7 @@
       if (this._client) return this._client;
       const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
       this._client = createClient(this._url, this._anonKey, {
-        auth: { persistSession: true, autoRefreshToken: true },
+        auth: { persistSession: true, autoRefreshToken: true, storage: dynamicStorage },
       });
       return this._client;
     }
@@ -65,7 +91,9 @@
       return { pending: true, message: '회원가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다. (이메일 확인이 필요할 수 있습니다)' };
     }
 
-    async signIn(email, password) {
+    async signIn(email, password, remember = false) {
+      // dynamicStorage가 참조하는 플래그이므로, 클라이언트가 세션을 저장하기 전에 먼저 세팅한다.
+      try { localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0'); } catch {}
       const client = await this._ensureClient();
       const { data, error } = await client.auth.signInWithPassword({ email, password });
       if (error) throw new Error('아이디(이메일) 또는 비밀번호가 올바르지 않습니다.');

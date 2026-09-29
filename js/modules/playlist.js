@@ -12,6 +12,20 @@
     const container = el('div', {});
     root.append(container);
     let filter = 'all'; // all | to_watch | watched
+    let trending = { loading: false, items: null }; // null = 아직 로드 전
+
+    async function loadTrending() {
+      if (!window.getTmdbApiKey || !window.getTmdbApiKey()) {
+        trending = { loading: false, items: [] };
+        draw();
+        return;
+      }
+      trending = { loading: true, items: null };
+      draw();
+      const items = await window.fetchTrendingMovies();
+      trending = { loading: false, items };
+      draw();
+    }
 
     function draw() {
       container.innerHTML = '';
@@ -21,6 +35,8 @@
           el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openItemForm() }, '+ 등록'),
         ])
       );
+
+      container.append(trendingSection());
 
       container.append(
         el('div', { class: 'row wrap', style: 'margin-bottom:14px' }, [
@@ -67,12 +83,64 @@
                 ? el('button', { class: 'nm-btn nm-btn--icon', title: '캘린더에 추가', onclick: () => addToSchedule(p) }, '🗓️')
                 : null,
               el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openItemForm(p) }, '✎'),
+              el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('playlist_items', p.id, p.title) }, '📎'),
               el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(p) }, '🗑'),
             ]),
           ])
         );
       }
       container.append(grid);
+    }
+
+    // "이번 주 인기 영화"(TMDB 연동). 설정 화면에서 API 키를 입력해야 보인다.
+    function trendingSection() {
+      if (!window.getTmdbApiKey || !window.getTmdbApiKey()) {
+        return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [
+            el('strong', { style: 'font-size:13px' }, '🎬 이번 주 인기 영화'),
+            el('button', { class: 'nm-btn', onclick: () => window.navigate('/settings') }, 'API 키 설정하기'),
+          ]),
+          el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, '설정 화면에서 TMDB API 키를 입력하면 실시간 인기 영화를 볼 수 있습니다.'),
+        ]);
+      }
+      if (trending.items === null) {
+        loadTrending();
+        return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [el('div', { class: 'text-muted' }, '이번 주 인기 영화를 불러오는 중…')]);
+      }
+      if (!trending.items.length) {
+        return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [
+            el('strong', { style: 'font-size:13px' }, '🎬 이번 주 인기 영화'),
+            el('button', { class: 'nm-btn nm-btn--icon', title: '다시 시도', onclick: loadTrending }, '↻'),
+          ]),
+          el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, '불러오지 못했습니다. 설정 화면에서 API 키를 확인해 주세요.'),
+        ]);
+      }
+      return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+        el('div', { class: 'row row--between' }, [
+          el('strong', { style: 'font-size:13px' }, '🎬 이번 주 인기 영화(TMDB)'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', onclick: loadTrending }, '↻'),
+        ]),
+        el(
+          'div',
+          { class: 'trending-row' },
+          trending.items.map((m) =>
+            el('div', { class: 'trending-item' }, [
+              m.poster_url ? el('img', { src: m.poster_url, alt: '', class: 'trending-item__poster' }) : el('div', { class: 'trending-item__poster trending-item__poster--empty' }),
+              el('div', { class: 'trending-item__title', title: m.title }, escapeHtml(m.title)),
+              el('div', { class: 'text-muted', style: 'font-size:11px' }, `⭐ ${m.rating?.toFixed(1) ?? '-'} · ${(m.release_date || '').slice(0, 4)}`),
+              el('button', {
+                class: 'nm-btn nm-btn--icon',
+                title: '내 목록에 추가',
+                onclick: async () => {
+                  await appState.addPlaylistItem({ content_type: 'movie', title: m.title, poster_url: m.poster_url, review: m.overview || null, status: 'to_watch' });
+                  toast('내 목록에 추가했습니다.', 'success');
+                },
+              }, '+ 추가'),
+            ])
+          )
+        ),
+      ]);
     }
 
     function filterBtn(key, label) {

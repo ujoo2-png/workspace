@@ -34,6 +34,7 @@ test('users 배열이 없는 옛 데이터를 불러와도 회원가입/로그�
     projects: [],
   };
   globalThis.localStorage = new FakeLocalStorage();
+  globalThis.sessionStorage = new FakeLocalStorage();
   globalThis.localStorage.setItem('workspace:v1', JSON.stringify(oldSchemaDb));
 
   const store = new LocalStore();

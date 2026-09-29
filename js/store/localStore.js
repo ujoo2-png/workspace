@@ -6,6 +6,11 @@
 
   const KEY = 'workspace:v1';
   const AUTH_KEY = 'workspace:auth:v1';
+  // "로그인 상태 유지"를 체크하지 않으면 세션을 sessionStorage에만 저장한다 — 탭/브라우저를
+  // 닫으면 사라지고, 다음 접속 시 로그인 화면부터 다시 보이게 하기 위함. 체크하면 기존처럼
+  // localStorage에 저장해 브라우저를 껐다 켜도 로그인 상태가 유지된다. REMEMBER_KEY 자체는
+  // 세션 데이터가 아니라 "어느 저장소를 볼지"를 가리키는 값이라 localStorage에 둬도 무방하다.
+  const REMEMBER_KEY = 'workspace:auth:remember';
 
   // 이전 버전(로그인 기능 추가 전 등)에 저장된 데이터에는 users처럼 나중에 추가된 배열이
   // 아예 없을 수 있다. 그 상태로 불러오면 this.db.users.find(...)에서 "Cannot read
@@ -20,6 +25,8 @@
       programs: [],
       notifications: [],
       automation_logs: [],
+      attachments: [],
+      vehicle_odometer_logs: [],
     };
   }
 
@@ -82,7 +89,8 @@
     // ---- Auth: 아이디/비밀번호 + 회원가입 + 관리자 승인(QMS 스타일) ----
     async getSession() {
       try {
-        const raw = localStorage.getItem(AUTH_KEY);
+        const remember = localStorage.getItem(REMEMBER_KEY) === '1';
+        const raw = (remember ? localStorage : sessionStorage).getItem(AUTH_KEY);
         return raw ? JSON.parse(raw) : null;
       } catch {
         return null;
@@ -120,7 +128,7 @@
       return { pending: true, message: '회원가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.' };
     }
 
-    async signIn(username, password) {
+    async signIn(username, password, remember = false) {
       const id = (username || '').trim();
       if (!id || !password) throw new Error('아이디와 비밀번호를 입력해 주세요.');
       const user = this.db.users.find((u) => u.username.toLowerCase() === id.toLowerCase());
@@ -132,7 +140,10 @@
 
       const sessionUser = { id: user.id, email: user.username, name: user.name, role: user.role };
       const session = { user: sessionUser, mode: 'local' };
-      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+      localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0');
+      (remember ? localStorage : sessionStorage).setItem(AUTH_KEY, JSON.stringify(session));
+      // 이전에 반대 방식으로 저장된 세션이 남아있지 않도록 정리한다.
+      (remember ? sessionStorage : localStorage).removeItem(AUTH_KEY);
       if (!this.db.profiles.find((p) => p.id === user.id)) {
         this.db.profiles.push({ id: user.id, email: user.username, created_at: new Date().toISOString() });
         saveDb(this.db);
@@ -143,6 +154,7 @@
 
     async signOut() {
       localStorage.removeItem(AUTH_KEY);
+      sessionStorage.removeItem(AUTH_KEY);
       this._authListeners.forEach((cb) => cb(null));
     }
 

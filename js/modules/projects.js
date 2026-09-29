@@ -97,6 +97,7 @@
         el('div', { class: 'nm-card' }, [
           el('div', { class: 'row row--between wrap' }, [
             el('div', {}, [
+              el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:2px' }, `대분류 · ${escapeHtml(p.name)}`),
               el('div', { class: 'row wrap' }, [
                 el('strong', { style: 'font-size:16px' }, escapeHtml(p.name)),
                 el('span', { class: 'nm-badge' }, STATUS_LABEL[p.status] || p.status),
@@ -180,60 +181,82 @@
       ticks.append(el('div', { class: 'gantt-today-line', style: `left:${pct(today)}%`, title: `오늘 ${today}` }));
       gantt.append(el('div', { class: 'gantt-header' }, [el('div', { class: 'gantt-header__label' }, '단계'), ticks]));
 
+      // 중분류(group_name)별로 묶어서 보여준다. 예: 대분류=프로젝트명, 중분류=학기/과목,
+      // 소분류=강의(단계) — group_name이 없는 단계는 "(미분류)"로 묶는다.
+      const groups = new Map();
       for (const s of stages) {
-        const start = s.start_date || s.target_date || today;
-        const end = s.target_date || s.start_date || today;
-        const left = pct(start);
-        const width = Math.max(1.5, pct(end) - pct(start));
-        const overdue = s.status !== 'done' && s.target_date && diffDays(today, s.target_date) < 0;
-        const barClass = overdue ? 'gantt-bar--overdue' : `gantt-bar--${s.status}`;
-        const track = el('div', { class: 'gantt-row__track' }, [
-          el(
-            'div',
-            {
-              class: `gantt-bar ${barClass}`,
-              style: `left:${left}%; width:${width}%`,
-              title: `${s.name} · ${s.start_date || '?'} ~ ${s.target_date || '?'}`,
-              onclick: () => openStageForm(p, s),
-            },
-            s.name
-          ),
-        ]);
-        gantt.append(
-          el('div', { class: 'gantt-row' }, [
-            el('div', { class: 'gantt-row__label' }, [
-              el('span', {}, escapeHtml(s.name)),
-              el('span', { class: 'nm-badge', style: 'font-size:10px' }, STAGE_STATUS_LABEL[s.status] || s.status),
-            ]),
-            track,
-          ])
-        );
+        const key = s.group_name || '(미분류)';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
+      }
+
+      for (const [groupName, groupStages] of groups) {
+        if (groups.size > 1 || groupName !== '(미분류)') {
+          gantt.append(el('div', { class: 'gantt-group-header' }, `중분류 · ${escapeHtml(groupName)}`));
+        }
+        for (const s of groupStages) {
+          const start = s.start_date || s.target_date || today;
+          const end = s.target_date || s.start_date || today;
+          const left = pct(start);
+          const width = Math.max(1.5, pct(end) - pct(start));
+          const overdue = s.status !== 'done' && s.target_date && diffDays(today, s.target_date) < 0;
+          const barClass = overdue ? 'gantt-bar--overdue' : `gantt-bar--${s.status}`;
+          const track = el('div', { class: 'gantt-row__track' }, [
+            el(
+              'div',
+              {
+                class: `gantt-bar ${barClass}`,
+                style: `left:${left}%; width:${width}%`,
+                title: `${s.name} · ${s.start_date || '?'} ~ ${s.target_date || '?'}`,
+                onclick: () => openStageForm(p, s),
+              },
+              s.name
+            ),
+          ]);
+          gantt.append(
+            el('div', { class: 'gantt-row' }, [
+              el('div', { class: 'gantt-row__label' }, [
+                el('span', {}, escapeHtml(s.name)),
+                el('span', { class: 'nm-badge', style: 'font-size:10px' }, STAGE_STATUS_LABEL[s.status] || s.status),
+              ]),
+              track,
+            ])
+          );
+        }
       }
       card.append(gantt);
 
       // 단계 목록(수정/삭제) — 간트 바 클릭으로도 수정 가능하지만 목록으로도 접근하게 한다.
+      // 소분류 라벨은 "이름(시작~목표)" 형태로 보여준다(예: 1강(9/12~9/30)).
       const list = el('div', { class: 'item-list', style: 'margin-top:12px' });
-      for (const s of stages) {
-        list.append(
-          el('div', { class: 'item-row' }, [
-            el('div', { class: 'item-row__main' }, [
-              el('div', { class: 'item-row__title' }, escapeHtml(s.name)),
-              el('div', { class: 'item-row__meta' }, `${s.start_date || '-'} ~ ${s.target_date || '(목표일 없음)'} · ${STAGE_STATUS_LABEL[s.status] || s.status}`),
-            ]),
-            el('div', { class: 'icon-row' }, [
-              el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openStageForm(p, s) }, '✎'),
-              el('button', {
-                class: 'nm-btn nm-btn--icon nm-btn--danger',
-                title: '삭제',
-                onclick: async () => {
-                  if (!confirmDialog(`"${s.name}" 단계를 삭제할까요?`)) return;
-                  await appState.deleteProjectStage(s.id);
-                  toast('삭제했습니다.', 'success');
-                },
-              }, '🗑'),
-            ]),
-          ])
-        );
+      for (const [groupName, groupStages] of groups) {
+        if (groups.size > 1 || groupName !== '(미분류)') {
+          list.append(el('div', { class: 'gantt-group-header', style: 'margin-top:10px' }, `중분류 · ${escapeHtml(groupName)}`));
+        }
+        for (const s of groupStages) {
+          const range = `${s.start_date ? s.start_date.slice(5).replace('-', '/') : '?'}~${s.target_date ? s.target_date.slice(5).replace('-', '/') : '?'}`;
+          list.append(
+            el('div', { class: 'item-row' }, [
+              el('div', { class: 'item-row__main' }, [
+                el('div', { class: 'item-row__title' }, `${escapeHtml(s.name)} (${range})`),
+                el('div', { class: 'item-row__meta' }, `${s.start_date || '-'} ~ ${s.target_date || '(목표일 없음)'} · ${STAGE_STATUS_LABEL[s.status] || s.status}`),
+              ]),
+              el('div', { class: 'icon-row' }, [
+                el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openStageForm(p, s) }, '✎'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('project_stages', s.id, s.name) }, '📎'),
+                el('button', {
+                  class: 'nm-btn nm-btn--icon nm-btn--danger',
+                  title: '삭제',
+                  onclick: async () => {
+                    if (!confirmDialog(`"${s.name}" 단계를 삭제할까요?`)) return;
+                    await appState.deleteProjectStage(s.id);
+                    toast('삭제했습니다.', 'success');
+                  },
+                }, '🗑'),
+              ]),
+            ])
+          );
+        }
       }
       card.append(list);
       return card;
@@ -245,7 +268,8 @@
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
           form.append(
-            field('단계 이름', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
+            field('중분류(선택, 예: 1학기-1과)', el('input', { class: 'nm-input', name: 'group_name', value: existing?.group_name || '', placeholder: '예: 1학기-1과:노인복지론' })),
+            field('단계 이름(소분류, 예: 1강)', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
             field('시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'start_date', value: existing?.start_date || todayISO() })),
             field('목표일(target, 진도 관리에 필요)', el('input', { class: 'nm-input', type: 'date', name: 'target_date', required: true, value: existing?.target_date || '' })),
             field('상태', stageStatusSelect(existing?.status))
@@ -255,6 +279,7 @@
             e.preventDefault();
             const fd = new FormData(form);
             const data = {
+              group_name: fd.get('group_name') || null,
               name: fd.get('name'),
               start_date: fd.get('start_date') || null,
               target_date: fd.get('target_date'),
@@ -266,6 +291,12 @@
             close();
           });
           body.append(form);
+          if (existing) {
+            body.append(el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'));
+            const attachBox = el('div', {});
+            body.append(attachBox);
+            window.renderAttachmentsPanel(attachBox, 'project_stages', existing.id);
+          }
         },
       });
     }

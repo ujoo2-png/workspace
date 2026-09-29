@@ -2,7 +2,106 @@
 // 보험/등록 만료 D-day + 연비 추이. 개발계획서 8장 참고.
 // 일반 <script>로 로드된다.
 (function () {
-  const { appState, el, escapeHtml, toast, confirmDialog, openModal, todayISO, diffDays, predictNextMaintenance, calcFuelEfficiency } = window;
+  const { appState, el, escapeHtml, toast, confirmDialog, openModal, todayISO, diffDays, addDays, predictNextMaintenance, calcFuelEfficiency } = window;
+
+  const FUEL_TYPE_LABEL = { gasoline: '휘발유', diesel: '경유(디젤)', hybrid: '하이브리드', ev: '전기', lpg: 'LPG' };
+
+  // 제조사별 정확한 정비 매뉴얼 대신, 국내에서 통용되는 일반적인 권장 주기(요약)로 제안한다.
+  // 실제 차량은 제조사 매뉴얼을 우선하고, 이 값은 참고용 가이드로 안내한다.
+  const MAINTENANCE_RULES = {
+    gasoline: [
+      { key: 'engine_oil', label: '엔진오일 교체', keywords: ['엔진오일', '오일교체', '오일'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_rotation', label: '타이어 위치교환(로테이션)', keywords: ['로테이션', '위치교환'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_replace', label: '타이어 교체', keywords: ['타이어교체', '타이어 교체'], intervalKm: 40000, intervalMonths: 48 },
+      { key: 'brake_pad', label: '브레이크 패드 점검', keywords: ['브레이크'], intervalKm: 30000, intervalMonths: 36 },
+    ],
+    diesel: [
+      { key: 'engine_oil', label: '엔진오일 교체(디젤)', keywords: ['엔진오일', '오일교체', '오일'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_rotation', label: '타이어 위치교환(로테이션)', keywords: ['로테이션', '위치교환'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_replace', label: '타이어 교체', keywords: ['타이어교체', '타이어 교체'], intervalKm: 40000, intervalMonths: 48 },
+      { key: 'brake_pad', label: '브레이크 패드 점검', keywords: ['브레이크'], intervalKm: 30000, intervalMonths: 36 },
+      { key: 'urea', label: '요소수(AdBlue) 보충', keywords: ['요소수', 'adblue', '애드블루'], intervalKm: 8000, intervalMonths: 6 },
+    ],
+    hybrid: [
+      { key: 'engine_oil', label: '엔진오일 교체', keywords: ['엔진오일', '오일교체', '오일'], intervalKm: 15000, intervalMonths: 12 },
+      { key: 'tire_rotation', label: '타이어 위치교환(로테이션)', keywords: ['로테이션', '위치교환'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_replace', label: '타이어 교체', keywords: ['타이어교체', '타이어 교체'], intervalKm: 40000, intervalMonths: 48 },
+      { key: 'hybrid_battery_check', label: '하이브리드 배터리 점검', keywords: ['배터리 점검', '하이브리드 배터리'], intervalKm: 40000, intervalMonths: 24 },
+    ],
+    ev: [
+      { key: 'tire_rotation', label: '타이어 위치교환(로테이션)', keywords: ['로테이션', '위치교환'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'tire_replace', label: '타이어 교체', keywords: ['타이어교체', '타이어 교체'], intervalKm: 40000, intervalMonths: 48 },
+      { key: 'coolant_check', label: '냉각수/감속기 오일 점검', keywords: ['냉각수', '감속기'], intervalKm: 40000, intervalMonths: 24 },
+    ],
+    lpg: [
+      { key: 'engine_oil', label: '엔진오일 교체', keywords: ['엔진오일', '오일교체', '오일'], intervalKm: 8000, intervalMonths: 12 },
+      { key: 'tire_rotation', label: '타이어 위치교환(로테이션)', keywords: ['로테이션', '위치교환'], intervalKm: 10000, intervalMonths: 12 },
+      { key: 'lpg_filter', label: 'LPG 연료필터 점검', keywords: ['연료필터', 'lpg필터'], intervalKm: 20000, intervalMonths: 24 },
+    ],
+  };
+
+  function getMaintenanceRules(fuelType) {
+    return MAINTENANCE_RULES[fuelType] || MAINTENANCE_RULES.gasoline;
+  }
+
+  // 주유·정비·주행거리 기록을 모두 합쳐 "가장 최근에 확인된 주행거리 + 그 시점"과
+  // 일평균 주행거리(dailyKm) 추세를 함께 구한다. predict.js의 predictNextMaintenance가 쓰는
+  // 방식과 동일한 아이디어(최근 두 지점 사이 거리/일수)를 재사용한다.
+  function combineOdometerSeries(fuels, maints, odoLogs) {
+    const points = [
+      ...(fuels || []).filter((f) => typeof f.odometer === 'number').map((f) => ({ date: f.logged_at, odometer: f.odometer })),
+      ...(maints || []).filter((m) => typeof m.odometer === 'number').map((m) => ({ date: m.service_date, odometer: m.odometer })),
+      ...(odoLogs || []).filter((o) => typeof o.odometer === 'number').map((o) => ({ date: o.logged_at, odometer: o.odometer })),
+    ]
+      .filter((p) => p.date)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return points;
+  }
+
+  function estimateDailyKm(series) {
+    if (series.length < 2) return null;
+    const first = series[0];
+    const last = series[series.length - 1];
+    const days = diffDays(first.date, last.date);
+    if (days <= 0 || last.odometer <= first.odometer) return null;
+    return (last.odometer - first.odometer) / days;
+  }
+
+  // 정비 항목별 다음 예상 시기를 계산한다. 최근 같은 항목 기록이 있으면 그 주행거리/날짜를
+  // 기준으로, 없으면 "권장 주기" 참고 정보만 안내한다.
+  function buildMaintenanceSuggestions(vehicle, maints, odometerSeries, dailyKm, today) {
+    const rules = getMaintenanceRules(vehicle.fuel_type);
+    const currentOdo = odometerSeries.length ? odometerSeries[odometerSeries.length - 1].odometer : null;
+    return rules.map((rule) => {
+      const matches = (maints || [])
+        .filter((m) => rule.keywords.some((k) => (m.item || '').toLowerCase().includes(k.toLowerCase())))
+        .slice()
+        .sort((a, b) => (a.service_date || '').localeCompare(b.service_date || ''));
+      const last = matches[matches.length - 1];
+
+      if (!last) {
+        return { ...rule, status: 'unknown', text: `기록 없음 · 일반 권장 주기 ${rule.intervalKm.toLocaleString()}km 또는 ${rule.intervalMonths}개월` };
+      }
+
+      let predictedDate = null;
+      let remainingKm = null;
+      if (typeof last.odometer === 'number' && currentOdo !== null && dailyKm) {
+        const dueOdo = last.odometer + rule.intervalKm;
+        remainingKm = dueOdo - currentOdo;
+        predictedDate = remainingKm <= 0 ? today : addDays(today, Math.ceil(remainingKm / dailyKm));
+      } else if (last.service_date) {
+        predictedDate = addDays(last.service_date, rule.intervalMonths * 30);
+      }
+
+      if (!predictedDate) {
+        return { ...rule, status: 'unknown', text: `마지막 ${last.service_date || '?'} · 주행거리 기록을 추가하면 예측할 수 있어요` };
+      }
+      const dDay = diffDays(today, predictedDate);
+      const status = dDay < 0 ? 'overdue' : dDay <= 14 ? 'soon' : 'ok';
+      const kmText = remainingKm !== null ? ` · 약 ${Math.max(0, Math.round(remainingKm)).toLocaleString()}km 남음` : '';
+      return { ...rule, status, dDay, predictedDate, text: `${predictedDate} 예상 (D${dDay >= 0 ? '-' + dDay : '+' + -dDay})${kmText}` };
+    });
+  }
 
   function renderVehicles(root) {
     const container = el('div', {});
@@ -28,12 +127,18 @@
       for (const v of rows) {
         const maints = (appState.maintenanceByVehicle[v.id] || []).slice().sort((a, b) => (b.service_date || '').localeCompare(a.service_date || ''));
         const fuels = (appState.fuelLogsByVehicle[v.id] || []).slice().sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
+        const odoLogs = (appState.odometerLogsByVehicle[v.id] || []).slice();
         const lastMaint = maints.find((m) => m.next_due_date || m.next_due_odometer);
         const prediction = predictNextMaintenance(lastMaint, fuels, today);
         const predDDay = prediction.predictedDate ? diffDays(today, prediction.predictedDate) : null;
         const efficiency = calcFuelEfficiency(fuels);
         const insuranceDDay = v.insurance_expiry ? diffDays(today, v.insurance_expiry) : null;
         const registrationDDay = v.registration_expiry ? diffDays(today, v.registration_expiry) : null;
+
+        const odometerSeries = combineOdometerSeries(fuels, maints, odoLogs);
+        const dailyKm = estimateDailyKm(odometerSeries);
+        const currentOdo = odometerSeries.length ? odometerSeries[odometerSeries.length - 1].odometer : null;
+        const aiSuggestions = buildMaintenanceSuggestions(v, maints, odometerSeries, dailyKm, today);
 
         stack.append(
           el('div', { class: 'nm-card' }, [
@@ -42,6 +147,7 @@
                 el('div', { class: 'row wrap' }, [
                   el('strong', { style: 'font-size:15px' }, escapeHtml(v.name)),
                   v.plate_number ? el('span', { class: 'nm-badge' }, escapeHtml(v.plate_number)) : null,
+                  el('span', { class: 'nm-badge' }, FUEL_TYPE_LABEL[v.fuel_type] || FUEL_TYPE_LABEL.gasoline),
                   insuranceDDay !== null
                     ? el('span', { class: `nm-badge ${insuranceDDay <= 30 ? (insuranceDDay <= 7 ? 'nm-badge--critical' : 'nm-badge--warning') : ''}` }, `보험 D${insuranceDDay >= 0 ? '-' + insuranceDDay : '+' + -insuranceDDay}`)
                     : null,
@@ -49,7 +155,7 @@
                     ? el('span', { class: `nm-badge ${registrationDDay <= 30 ? (registrationDDay <= 7 ? 'nm-badge--critical' : 'nm-badge--warning') : ''}` }, `등록 D${registrationDDay >= 0 ? '-' + registrationDDay : '+' + -registrationDDay}`)
                     : null,
                 ]),
-                el('div', { class: 'text-muted', style: 'margin-top:4px; font-size:12px' }, `${v.model ? escapeHtml(v.model) + ' · ' : ''}${v.year || ''}`),
+                el('div', { class: 'text-muted', style: 'margin-top:4px; font-size:12px' }, `${v.model ? escapeHtml(v.model) + ' · ' : ''}${v.year || ''}${currentOdo !== null ? ` · 현재 ${currentOdo.toLocaleString()}km` : ''}`),
               ]),
               el('div', { class: 'icon-row' }, [
                 el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openVehicleForm(v) }, '✎'),
@@ -64,6 +170,31 @@
                 ])
               : el('div', { class: 'text-muted', style: 'margin-top:10px; font-size:12px' }, '예정된 정비 없음(정비 기록에 다음 예정일/주행거리를 입력하면 예측됩니다)'),
             efficiency ? el('div', { class: 'text-muted', style: 'margin-top:6px; font-size:12px' }, `최근 평균 연비: ${efficiency} km/L(또는 kWh)`) : null,
+
+            el('div', { class: 'ai-suggest-box' }, [
+              el('div', { class: 'row row--between', style: 'align-items:center' }, [
+                el('strong', { style: 'font-size:13px' }, '🤖 AI 정비 주기 제안'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '현재 주행거리 입력', onclick: () => openOdometerForm(v) }, '🛣️'),
+              ]),
+              el(
+                'div',
+                { class: 'ai-suggest-list' },
+                aiSuggestions.map((s) =>
+                  el('div', { class: 'ai-suggest-row' }, [
+                    el('span', { class: `nm-badge ${s.status === 'overdue' ? 'nm-badge--critical' : s.status === 'soon' ? 'nm-badge--warning' : ''}` }, s.label),
+                    el('span', { class: 'text-muted', style: 'font-size:12px' }, s.text),
+                  ])
+                )
+              ),
+            ]),
+
+            odometerSeries.length >= 2
+              ? el('div', { class: 'row wrap', style: 'margin-top:12px; gap:16px' }, [
+                  chartBlock('주행거리 추이(km)', window.simpleLineChart(odometerSeries.map((p) => p.date.slice(5)), odometerSeries.map((p) => p.odometer))),
+                  fuelEfficiencyChart(fuels),
+                ].filter(Boolean))
+              : null,
+
             el('div', { class: 'row', style: 'margin-top:12px; gap:8px' }, [
               el('button', { class: 'nm-btn', onclick: () => openMaintenanceForm(v) }, '+ 정비 기록'),
               el('button', { class: 'nm-btn', onclick: () => openFuelForm(v) }, '+ 주유 기록'),
@@ -73,6 +204,54 @@
         );
       }
       container.append(stack);
+    }
+
+    function chartBlock(title, svgNode) {
+      return el('div', { style: 'min-width:260px; flex:1' }, [el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, title), svgNode]);
+    }
+
+    // 연비는 서로 다른 단위(거리 vs km/L)라 하나의 이중축 차트로 합치지 않고, 별도 막대 차트로
+    // 구간별(주유~주유) 연비를 보여준다.
+    function fuelEfficiencyChart(fuels) {
+      const clean = (fuels || [])
+        .filter((f) => typeof f.odometer === 'number')
+        .slice()
+        .sort((a, b) => (a.logged_at < b.logged_at ? -1 : 1));
+      if (clean.length < 2) return null;
+      const labels = [];
+      const values = [];
+      for (let i = 1; i < clean.length; i++) {
+        const km = clean[i].odometer - clean[i - 1].odometer;
+        const amount = clean[i].amount;
+        if (km > 0 && typeof amount === 'number' && amount > 0) {
+          labels.push((clean[i].logged_at || '').slice(5));
+          values.push(Number((km / amount).toFixed(1)));
+        }
+      }
+      if (!values.length) return null;
+      return chartBlock('구간별 연비(km/L·kWh)', window.simpleBarChart(labels, values, '#22c55e'));
+    }
+
+    function openOdometerForm(v) {
+      openModal({
+        title: `${v.name} — 주행거리 기록`,
+        contentBuilder(body, close) {
+          const form = el('form', { class: 'stack' });
+          form.append(
+            field('날짜', el('input', { class: 'nm-input', type: 'date', name: 'logged_at', required: true, value: todayISO() })),
+            field('현재 계기판 주행거리(km)', el('input', { class: 'nm-input', type: 'number', name: 'odometer', required: true }))
+          );
+          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            await appState.addOdometerLog(v.id, { logged_at: fd.get('logged_at'), odometer: Number(fd.get('odometer')) });
+            toast('주행거리를 기록했습니다.', 'success');
+            close();
+          });
+          body.append(form);
+        },
+      });
     }
 
     async function addMaintenanceToSchedule(v, prediction, lastMaint) {
@@ -107,6 +286,7 @@
                     el('div', { class: 'item-row__title' }, escapeHtml(m.item)),
                     el('div', { class: 'item-row__meta' }, `${m.service_date}${m.odometer ? ' · ' + m.odometer + 'km' : ''}${m.cost ? ' · ' + Number(m.cost).toLocaleString() + '원' : ''}${m.next_due_date ? ' · 다음 ' + m.next_due_date : ''}`),
                   ]),
+                  el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('vehicle_maintenance', m.id, m.item) }, '📎'),
                   el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: async () => { await appState.deleteMaintenance(m.id); openHistory(v, appState.maintenanceByVehicle[v.id] || [], fuels); } }, '🗑'),
                 ])
               );
@@ -143,8 +323,9 @@
           form.append(
             field('차량 이름', el('input', { class: 'nm-input', name: 'name', required: true, placeholder: '예: 아반떼 2021', value: existing?.name || '' })),
             field('차량번호(선택)', el('input', { class: 'nm-input', name: 'plate_number', value: existing?.plate_number || '' })),
-            field('모델(선택)', el('input', { class: 'nm-input', name: 'model', value: existing?.model || '' })),
+            field('모델(선택)', el('input', { class: 'nm-input', name: 'model', value: existing?.model || '', placeholder: '예: 티구안 2.0' })),
             field('연식(선택)', el('input', { class: 'nm-input', type: 'number', name: 'year', value: existing?.year || '' })),
+            field('연료 종류(AI 정비 제안에 사용)', fuelTypeSelect(existing?.fuel_type)),
             field('보험 만료일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'insurance_expiry', value: existing?.insurance_expiry || '' })),
             field('등록/검사 만료일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'registration_expiry', value: existing?.registration_expiry || '' }))
           );
@@ -157,6 +338,7 @@
               plate_number: fd.get('plate_number') || null,
               model: fd.get('model') || null,
               year: fd.get('year') ? Number(fd.get('year')) : null,
+              fuel_type: fd.get('fuel_type') || 'gasoline',
               insurance_expiry: fd.get('insurance_expiry') || null,
               registration_expiry: fd.get('registration_expiry') || null,
             };
@@ -232,6 +414,14 @@
           body.append(form);
         },
       });
+    }
+
+    function fuelTypeSelect(selected = 'gasoline') {
+      const select = el('select', { class: 'nm-select', name: 'fuel_type' });
+      for (const [value, label] of Object.entries(FUEL_TYPE_LABEL)) {
+        select.append(el('option', { value, selected: value === selected || undefined }, label));
+      }
+      return select;
     }
 
     function field(label, node) {

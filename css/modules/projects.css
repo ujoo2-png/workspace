@@ -81,6 +81,15 @@
   color: var(--text-muted);
 }
 
+.gantt-group-header {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+  padding: 6px 4px 4px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 4px;
+}
+
 @media (max-width: 900px) {
   .project-layout { grid-template-columns: 1fr; }
 }

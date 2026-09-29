@@ -63,12 +63,14 @@
     function buildLoginPanel() {
       const idInput = el('input', { type: isLocal ? 'text' : 'email', name: 'username', placeholder: isLocal ? '아이디' : 'you@example.com', required: true, autofocus: true, autocomplete: 'username' });
       const pwInput = el('input', { type: 'password', name: 'password', placeholder: '비밀번호', required: true, autocomplete: 'current-password' });
+      const rememberInput = el('input', { type: 'checkbox', name: 'remember' });
       const errMsg = el('div', { class: 'lo-errmsg', id: 'errLogin' });
       const submitBtn = el('button', { class: 'lo-btn', type: 'submit' }, '로그인');
 
       const form = el('form', { class: 'lo-panel on' }, [
         el('div', { class: 'lfg' }, [el('label', {}, idLabel), el('div', { class: 'lo-input-wrap' }, [idInput])]),
         el('div', { class: 'lfg' }, [el('label', {}, '비밀번호'), el('div', { class: 'lo-input-wrap' }, [pwInput]), errMsg]),
+        el('label', { class: 'lo-remember' }, [rememberInput, el('span', {}, '로그인 상태 유지 (체크 해제 시 탭/브라우저를 닫으면 자동 로그아웃)')]),
         submitBtn,
       ]);
 
@@ -80,7 +82,7 @@
         submitBtn.disabled = true;
         submitBtn.textContent = '로그인 중…';
         try {
-          const result = await store.signIn(idInput.value, pwInput.value);
+          const result = await store.signIn(idInput.value, pwInput.value, rememberInput.checked);
           if (result?.pending) {
             toast(result.message, 'error');
             errMsg.textContent = result.message;

@@ -363,3 +363,44 @@ a { color: var(--accent); }
 .priority-dot--high { background: var(--danger); }
 .priority-dot--medium { background: var(--warning); }
 .priority-dot--low { background: var(--text-muted); }
+
+/* 파일 첨부 공통 컴포넌트(js/components/attachments.js) */
+.attach-panel { margin-top: 4px; }
+.attach-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.attach-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.attach-item__name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-item__name:hover { text-decoration: underline; }
+.attach-item__size { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+/* AI 정비 제안(js/modules/vehicles.js) */
+.ai-suggest-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+.ai-suggest-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ai-suggest-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* 문화생활 "이번 주 인기 영화"(js/modules/playlist.js) */
+.trending-row { display: flex; gap: 12px; overflow-x: auto; padding-top: 10px; }
+.trending-item { flex: 0 0 120px; display: flex; flex-direction: column; gap: 4px; }
+.trending-item__poster { width: 120px; height: 170px; object-fit: cover; border-radius: var(--radius-sm); background: var(--surface-2); }
+.trending-item__poster--empty { display: flex; align-items: center; justify-content: center; }
+.trending-item__title { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

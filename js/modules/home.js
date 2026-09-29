@@ -18,6 +18,21 @@
       draw();
     }
 
+    // 대시보드 상단 연동 상태 배지. 현재는 문화생활(TMDB) API 연결 상태를 보여주며,
+    // 향후 다른 외부 연동이 추가되면 여기에 함께 나열한다.
+    function integrationStatusBar() {
+      const STATUS_LABEL = { connected: '✅ 문화생활 API 연결됨', error: '⚠️ 문화생활 API 연결 오류', unset: '⚪ 문화생활 API 미설정' };
+      const status = window.getTmdbStatus ? window.getTmdbStatus() : 'unset';
+      return el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:16px' }, [
+        el('button', {
+          class: `nm-badge ${status === 'error' ? 'nm-badge--warning' : ''}`,
+          style: 'border:none; cursor:pointer',
+          title: '설정 화면에서 API 키를 관리할 수 있습니다.',
+          onclick: () => navigate('/settings'),
+        }, STATUS_LABEL[status] || STATUS_LABEL.unset),
+      ]);
+    }
+
     function draw() {
       container.innerHTML = '';
       const CONFIG = window.CONFIG;
@@ -34,6 +49,8 @@
           el('button', { class: 'nm-btn nm-btn--primary', onclick: () => navigate('/schedule') }, '+ 빠른 등록'),
         ])
       );
+
+      container.append(integrationStatusBar());
 
       container.append(
         el('div', { class: 'kpi-grid' }, [

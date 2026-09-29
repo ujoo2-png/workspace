@@ -20,6 +20,7 @@
       this.vehicles = [];
       this.maintenanceByVehicle = {}; // vehicleId -> [row]
       this.fuelLogsByVehicle = {}; // vehicleId -> [row]
+      this.odometerLogsByVehicle = {}; // vehicleId -> [row]
 
       // Health
       this.healthMetrics = [];
@@ -48,6 +49,9 @@
 
       // 프로젝트 진척(간트차트): 프로젝트를 단계로 쪼갠 항목별 시작일/목표일
       this.projectStagesByProject = {};
+
+      // 파일 첨부(모든 메뉴 공통): key = `${owner_table}:${owner_id}` -> [row]
+      this.attachmentsByOwner = {};
     }
 
     emit(name, detail) {
@@ -67,6 +71,7 @@
         vehicles,
         vehicleMaintenance,
         vehicleFuelLogs,
+        vehicleOdometerLogs,
         healthMetrics,
         healthAppointments,
         playlistItems,
@@ -79,6 +84,7 @@
         integrations,
         devlogs,
         projectStages,
+        attachments,
       ] = await Promise.all([
         this.store.list('schedules', { where: { user_id: uid }, orderBy: 'date' }).catch(() => []),
         this.store.list('projects', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
@@ -90,6 +96,7 @@
         this.store.list('vehicles', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
         this.store.list('vehicle_maintenance').catch(() => []),
         this.store.list('vehicle_fuel_logs').catch(() => []),
+        this.store.list('vehicle_odometer_logs').catch(() => []),
         this.store.list('health_metrics', { where: { user_id: uid }, orderBy: 'recorded_at', ascending: false }).catch(() => []),
         this.store.list('health_appointments', { where: { user_id: uid }, orderBy: 'appointment_date' }).catch(() => []),
         this.store.list('playlist_items', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
@@ -102,6 +109,7 @@
         this.store.list('integrations', { where: { user_id: uid } }).catch(() => []),
         this.store.list('devlogs', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
         this.store.list('project_stages', { where: { user_id: uid }, orderBy: 'seq' }).catch(() => []),
+        this.store.list('attachments', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
       ]);
 
       this.schedules = schedules;
@@ -116,6 +124,7 @@
       this.vehicles = vehicles;
       this.maintenanceByVehicle = this._groupBy(vehicleMaintenance, 'vehicle_id');
       this.fuelLogsByVehicle = this._groupBy(vehicleFuelLogs, 'vehicle_id');
+      this.odometerLogsByVehicle = this._groupBy(vehicleOdometerLogs, 'vehicle_id');
 
       this.healthMetrics = healthMetrics;
       this.healthAppointments = healthAppointments;
@@ -132,6 +141,10 @@
       this.integrations = integrations;
       this.devlogs = devlogs;
       this.projectStagesByProject = this._groupBy(projectStages, 'project_id');
+      this.attachmentsByOwner = this._groupBy(
+        attachments.map((a) => ({ ...a, _ownerKey: `${a.owner_table}:${a.owner_id}` })),
+        '_ownerKey'
+      );
 
       this.emit('change', { schedules, projects: this.projects, programs, notifications });
       return this;
@@ -507,6 +520,48 @@
     }
     async reorderProjectStages(projectId, orderedIds) {
       await Promise.all(orderedIds.map((id, seq) => this.store.update('project_stages', id, { seq })));
+      return this.refreshAll();
+    }
+
+    // ---- 파일 첨부 (모든 메뉴 공통: 일정/프로젝트단계/챌린저/차량/Devlog/문화생활 등) ----
+    getAttachments(ownerTable, ownerId) {
+      return this.attachmentsByOwner[`${ownerTable}:${ownerId}`] || [];
+    }
+    // file: File 객체. base64 Data URL로 인코딩해 저장한다(로컬 모드와 Supabase 모드 모두
+    // 별도 스토리지 버킷 설정 없이 동일하게 동작하게 하기 위함). 데모 성격의 개인 워크스페이스이므로
+    // 용량은 파일당 4MB로 제한한다.
+    async addAttachment(ownerTable, ownerId, file) {
+      const MAX_BYTES = 4 * 1024 * 1024;
+      if (file.size > MAX_BYTES) throw new Error('파일이 너무 큽니다(최대 4MB).');
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('파일을 읽는 중 오류가 발생했습니다.'));
+        reader.readAsDataURL(file);
+      });
+      await this.store.create('attachments', {
+        user_id: this.user.id,
+        owner_table: ownerTable,
+        owner_id: ownerId,
+        name: file.name,
+        mime_type: file.type || 'application/octet-stream',
+        size: file.size,
+        data: dataUrl,
+      });
+      return this.refreshAll();
+    }
+    async deleteAttachment(id) {
+      await this.store.remove('attachments', id);
+      return this.refreshAll();
+    }
+
+    // ---- 차량관리: 주행거리(간단 기록, 주유 없이 계기판만 기록) ----
+    async addOdometerLog(vehicleId, data) {
+      await this.store.create('vehicle_odometer_logs', { ...data, vehicle_id: vehicleId });
+      return this.refreshAll();
+    }
+    async deleteOdometerLog(id) {
+      await this.store.remove('vehicle_odometer_logs', id);
       return this.refreshAll();
     }
 

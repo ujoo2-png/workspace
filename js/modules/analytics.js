@@ -90,7 +90,7 @@
   }
 
   // 얇은 세로 막대 + 4px 둥근 상단 + 직접 라벨. 단일 지표이므로 범례 없음.
-  function barChart(labels, values) {
+  function barChart(labels, values, hue = HUE) {
     const W = 320;
     const H = 160;
     const padL = 8;
@@ -109,7 +109,7 @@
       const x = padL + slot * i + (slot - barW) / 2;
       const barH = max > 0 ? ((H - padB - padT) * v) / max : 0;
       const y = H - padB - barH;
-      svg.append(rectEl(x, y, barW, Math.max(barH, 1), HUE, 4));
+      svg.append(rectEl(x, y, barW, Math.max(barH, 1), hue, 4));
       svg.append(textEl(x + barW / 2, y - 4, String(v), { fontSize: 11, fill: '#1e293b', anchor: 'middle' }));
       svg.append(textEl(x + barW / 2, H - padB + 14, labels[i], { fontSize: 10, fill: AXIS_COLOR, anchor: 'middle' }));
     });
@@ -117,7 +117,7 @@
   }
 
   // 얇은 선(2px) + 마커(>=8px 히트영역 대응은 생략, 값이 적어 직접 라벨만) + 축 하나.
-  function lineChart(labels, values) {
+  function lineChart(labels, values, hue = HUE) {
     const W = 320;
     const H = 160;
     const padL = 8;
@@ -138,14 +138,14 @@
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', pathD);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', HUE);
+    path.setAttribute('stroke', hue);
     path.setAttribute('stroke-width', '2');
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
     svg.append(path);
 
     points.forEach(([x, y], i) => {
-      svg.append(circleEl(x, y, 3, HUE));
+      svg.append(circleEl(x, y, 3, hue));
       if (i === points.length - 1 || i === 0 || values[i] === max) {
         svg.append(textEl(x, y - 8, String(values[i]), { fontSize: 10, fill: '#1e293b', anchor: 'middle' }));
       }
@@ -192,4 +192,8 @@
   }
 
   window.renderAnalytics = renderAnalytics;
+  // 다른 화면(차량관리의 주행거리·연비 추이 등)에서도 같은 인라인 SVG 차트를 재사용할 수 있게
+  // 공개한다. 색상만 바꿔 쓸 수 있게 hue 인자를 추가로 받는다(기본은 이 화면과 동일한 파랑).
+  window.simpleBarChart = function (labels, values, hue) { return barChart(labels, values, hue); };
+  window.simpleLineChart = function (labels, values, hue) { return lineChart(labels, values, hue); };
 })();

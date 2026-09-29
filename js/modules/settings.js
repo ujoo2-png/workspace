@@ -54,6 +54,7 @@
           ]),
         ]),
         weatherCard(),
+        tmdbCard(),
         ...(appState.user?.role === 'admin' ? [userManagementCard()] : []),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '테마'),
@@ -155,6 +156,39 @@
         card.append(el('p', { class: 'text-muted', style: 'font-size:12px' }, `최대 ${CONFIG.weather.maxCities}개까지 등록할 수 있습니다.`));
       }
       return card;
+    }
+
+    // 문화생활 화면의 "이번 주 인기 영화" 연동에 쓸 TMDB API 키. 대시보드 상단 상태 배지가
+    // 여기서 저장한 연결 상태(workspace:tmdbStatus)를 그대로 보여준다.
+    function tmdbCard() {
+      const STATUS_LABEL = { connected: '✅ 연결됨', error: '⚠️ 연결 오류', unset: '미설정' };
+      const keyInput = el('input', { class: 'nm-input', type: 'password', name: 'tmdb_key', placeholder: 'TMDB API 키(v3 auth)', value: window.getTmdbApiKey() });
+      const statusBadge = el('span', { class: 'nm-badge' }, STATUS_LABEL[window.getTmdbStatus()]);
+      const testBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: async () => {
+          window.setTmdbApiKey(keyInput.value.trim());
+          if (!keyInput.value.trim()) {
+            statusBadge.textContent = STATUS_LABEL.unset;
+            toast('API 키를 삭제했습니다.', 'info');
+            return;
+          }
+          testBtn.disabled = true;
+          testBtn.textContent = '확인 중…';
+          const ok = await window.testTmdbConnection(keyInput.value.trim());
+          statusBadge.textContent = STATUS_LABEL[ok ? 'connected' : 'error'];
+          toast(ok ? 'TMDB에 연결되었습니다.' : '연결에 실패했습니다. 키를 확인해 주세요.', ok ? 'success' : 'error');
+          testBtn.disabled = false;
+          testBtn.textContent = '저장 및 연결 테스트';
+        },
+      }, '저장 및 연결 테스트');
+
+      return el('div', { class: 'nm-card' }, [
+        el('div', { class: 'row row--between' }, [el('h3', {}, '문화생활 · 인기 영화 연동(TMDB)'), statusBadge]),
+        el('p', { class: 'text-muted', style: 'font-size:12px' }, 'themoviedb.org에서 무료로 발급받은 API 키를 입력하면 문화생활 화면에서 이번 주 인기 영화를 볼 수 있습니다. 연결 상태는 대시보드 상단에도 표시됩니다.'),
+        el('div', { class: 'row', style: 'gap:8px' }, [keyInput, testBtn]),
+      ]);
     }
 
     // 관리자 전용: 회원가입 승인 대기 목록 + 전체 사용자 목록(QMS 스타일 승인 관리).
