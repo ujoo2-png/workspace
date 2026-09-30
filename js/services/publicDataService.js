@@ -146,15 +146,40 @@
     const key = getOpinetKey();
     if (!key) throw new Error('설정 화면에서 오피넷 API 키를 먼저 등록해 주세요.');
 
-    const url = `https://www.opinet.co.kr/api/avgAllPrice.do?code=${encodeURIComponent(key)}&out=json`;
-    let res;
+    // 오피넷은 브라우저(fetch)에서 직접 호출하면 CORS로 막힌다(Access-Control-Allow-Origin 헤더를
+    // 내려주지 않음 — 서버 간 호출용으로만 열려 있는 API). 그래서 1) 같은 출처의 서버리스 프록시
+    // (Vercel이면 /api/opinet-fuel.js)가 있으면 그걸 우선 쓰고, 2) 프록시가 없는 환경(로컬 데모 등)
+    // 에서는 직접 호출을 시도해서 안 되면 그 사실을 명확한 에러로 알려준다.
+    // 파라미터명은 code(인증키)이며, "certkey"가 아니다 — 오피넷 자체 문서 페이지의 표기와 달리
+    // 실제 avgAllPrice.do 엔드포인트는 code로만 인증을 통과시킨다(실제 호출로 확인됨).
+    const directUrl = `https://www.opinet.co.kr/api/avgAllPrice.do?code=${encodeURIComponent(key)}&out=json`;
+    const proxyUrl = `/api/opinet-fuel?key=${encodeURIComponent(key)}`;
+
+    let json;
     try {
-      res = await fetch(url);
+      const proxyRes = await fetch(proxyUrl);
+      if (proxyRes.ok) {
+        json = await proxyRes.json();
+      } else if (proxyRes.status !== 404) {
+        // 프록시는 있는데 오피넷 쪽에서 에러를 낸 경우 — 그대로 전달된 본문을 읽어본다.
+        const text = await proxyRes.text().catch(() => '');
+        throw new Error(`유가정보 요청이 실패했습니다(HTTP ${proxyRes.status})${text ? ': ' + text.slice(0, 200) : ''}`);
+      }
     } catch (e) {
-      throw new Error('오피넷에 연결하지 못했습니다(네트워크 또는 CORS 문제일 수 있습니다).');
+      if (e instanceof Error && e.message.startsWith('유가정보 요청이 실패했습니다')) throw e;
+      // 프록시 자체가 없는 환경(로컬 데모 등) — 직접 호출로 폴백
     }
-    if (!res.ok) throw new Error(`유가정보 요청이 실패했습니다(HTTP ${res.status}).`);
-    const json = await res.json();
+
+    if (!json) {
+      let res;
+      try {
+        res = await fetch(directUrl);
+      } catch (e) {
+        throw new Error('오피넷에 연결하지 못했습니다. 브라우저가 CORS 정책으로 직접 호출을 막았을 가능성이 높습니다(개발자 도구 Console에 "CORS" 관련 오류가 보이면 확정입니다). 이 경우 Vercel 배포에 포함된 /api/opinet-fuel.js 서버리스 프록시를 통해야 하며, 이 zip에 이미 포함되어 있으니 재배포 후 다시 시도해 주세요.');
+      }
+      if (!res.ok) throw new Error(`유가정보 요청이 실패했습니다(HTTP ${res.status}).`);
+      json = await res.json();
+    }
     const rows = json?.RESULT?.OIL || [];
     const result = rows.map((r) => ({
       productCode: r.PRODCD,
