@@ -25,6 +25,14 @@
 .calendar-cell--outside { opacity: 0.4; }
 .calendar-cell--today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .calendar-cell__daynum { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.calendar-cell__holiday {
+  font-size: 10px;
+  color: #ef4444;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+}
 .calendar-cell__item {
   font-size: 11px;
   padding: 1px 4px;

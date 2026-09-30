@@ -56,6 +56,7 @@
         weatherCard(),
         tmdbCard(),
         publicDataCard(),
+        customApiCard(),
         ...(appState.user?.role === 'admin' ? [userManagementCard()] : []),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '테마'),
@@ -336,6 +337,114 @@
           kopisToggle,
         ]),
       ]);
+    }
+
+    // 커스텀 API 관리 — 공공데이터포털처럼 미리 정해둔 서비스가 아니라, 사용자가 이름/요청
+    // URL/키를 직접 입력해 등록하고 원하는 메뉴에 체크박스로 연결한다. 연결된 메뉴 화면 하단에
+    // 그 API의 원본 응답을 보여주는 카드가 자동으로 나타난다(js/router.js가 처리).
+    function customApiCard() {
+      const card = el('div', { class: 'nm-card' }, [
+        el('div', { class: 'row row--between' }, [
+          el('h3', {}, '커스텀 API 관리'),
+          el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openCustomApiForm() }, '+ API 등록'),
+        ]),
+        el('p', { class: 'text-muted', style: 'font-size:12px' }, '이름·요청 URL·키를 직접 등록하고, 연결할 메뉴를 체크하면 그 화면 하단에 원본 응답을 보여주는 카드가 자동으로 생깁니다. 요청 URL에 API 키를 넣을 자리는 {key}로 표시하세요(예: https://api.example.com/data?serviceKey={key}&type=json).'),
+      ]);
+      const list = el('div', { class: 'item-list', style: 'margin-top:10px' });
+      card.append(list);
+      renderList();
+
+      function renderList() {
+        list.innerHTML = '';
+        const apis = window.listCustomApis();
+        if (!apis.length) {
+          list.append(el('p', { class: 'text-muted', style: 'font-size:13px' }, '등록된 커스텀 API가 없습니다.'));
+          return;
+        }
+        for (const api of apis) {
+          const menuLabels = (api.menus || [])
+            .map((path) => (window.NAV_ITEMS || []).find((n) => n.path === path)?.label || path)
+            .join(', ');
+          list.append(
+            el('div', { class: 'item-row' }, [
+              el('div', { class: 'item-row__main' }, [
+                el('div', { class: 'item-row__title' }, escapeHtml(api.name)),
+                el('div', { class: 'text-muted', style: 'font-size:12px' }, `연결: ${menuLabels || '없음'}`),
+              ]),
+              el('div', { class: 'row', style: 'gap:6px; align-items:center' }, [
+                el('button', {
+                  class: `nm-toggle ${api.enabled !== false ? 'nm-toggle--on' : ''}`,
+                  title: api.enabled !== false ? '사용 중(눌러서 끄기)' : '꺼짐(눌러서 켜기)',
+                  onclick: () => {
+                    window.upsertCustomApi({ ...api, enabled: api.enabled === false });
+                    renderList();
+                  },
+                }),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openCustomApiForm(api) }, '✎'),
+                el('button', {
+                  class: 'nm-btn nm-btn--icon nm-btn--danger',
+                  title: '삭제',
+                  onclick: () => {
+                    if (!confirmDialog(`"${api.name}"을(를) 삭제할까요?`)) return;
+                    window.deleteCustomApi(api.id);
+                    renderList();
+                  },
+                }, '🗑'),
+              ]),
+            ])
+          );
+        }
+      }
+
+      function openCustomApiForm(existing) {
+        openModal({
+          title: existing ? 'API 수정' : 'API 등록',
+          contentBuilder(body, close) {
+            const nameInput = el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' });
+            const urlInput = el('input', { class: 'nm-input', name: 'url', required: true, placeholder: 'https://api.example.com/data?serviceKey={key}&type=json', value: existing?.urlTemplate || '' });
+            const keyInput = el('input', { class: 'nm-input', type: 'password', name: 'key', placeholder: '키가 필요 없는 공개 API면 비워두세요', value: existing?.keyValue || '' });
+            const enabledCheckbox = el('input', { type: 'checkbox', name: 'enabled', checked: existing ? existing.enabled !== false : true });
+            const menuChecks = (window.NAV_ITEMS || []).map((item) =>
+              el('label', { class: 'row', style: 'gap:6px; align-items:center; font-size:13px' }, [
+                el('input', { type: 'checkbox', name: 'menu', value: item.path, checked: (existing?.menus || []).includes(item.path) || undefined }),
+                el('span', {}, `${item.icon} ${item.label}`),
+              ])
+            );
+            const form = el('form', { class: 'stack' }, [
+              el('div', { class: 'nm-field' }, [el('label', {}, '이름'), nameInput]),
+              el('div', { class: 'nm-field' }, [el('label', {}, '요청 URL(전체, {key}로 키 위치 표시)'), urlInput]),
+              el('div', { class: 'nm-field' }, [el('label', {}, 'API 키(선택)'), keyInput]),
+              el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [enabledCheckbox, el('span', { class: 'text-muted' }, '사용함')]),
+              el('div', { class: 'nm-field' }, [
+                el('label', {}, '연결할 메뉴(체크한 화면 하단에 카드가 나타납니다)'),
+                el('div', { class: 'row wrap', style: 'gap:10px; max-height:180px; overflow-y:auto; padding:4px 0' }, menuChecks),
+              ]),
+              el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'),
+            ]);
+            form.addEventListener('submit', (e) => {
+              e.preventDefault();
+              const menus = menuChecks
+                .map((label) => label.querySelector('input'))
+                .filter((cb) => cb.checked)
+                .map((cb) => cb.value);
+              window.upsertCustomApi({
+                id: existing?.id || `api_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                name: nameInput.value.trim() || '이름 없는 API',
+                urlTemplate: urlInput.value.trim(),
+                keyValue: keyInput.value.trim(),
+                enabled: enabledCheckbox.checked,
+                menus,
+              });
+              toast('저장했습니다.', 'success');
+              renderList();
+              close();
+            });
+            body.append(form);
+          },
+        });
+      }
+
+      return card;
     }
 
     // 관리자 전용: 회원가입 승인 대기 목록 + 전체 사용자 목록(QMS 스타일 승인 관리).

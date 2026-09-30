@@ -174,7 +174,7 @@ a { color: var(--accent); }
 }
 .nm-textarea { resize: vertical; min-height: 72px; }
 
-.nm-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.nm-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 9px; }
 .nm-field label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
 
 .nm-badge {
@@ -246,15 +246,38 @@ a { color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  padding: 28px;
+  padding: 18px 22px 20px;
   width: 100%;
   max-width: 480px;
-  max-height: 86vh;
+  max-height: 92vh;
   overflow-y: auto;
+  /* 드래그 중에는 flex 중앙정렬에서 position:fixed(js/components/modal.js)로 전환된다 */
 }
 .nm-modal__close {
   float: right;
 }
+/* 등록창(모달)을 마우스로 원하는 자리로 옮길 수 있게 하는 드래그 손잡이.
+   손잡이 자체와, 제목이 있는 모달은 제목줄도 함께 드래그로 움직일 수 있다. */
+.nm-modal__draghandle {
+  height: 14px;
+  margin: -18px -22px 6px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  cursor: move;
+  position: relative;
+}
+.nm-modal__draghandle::before {
+  content: '';
+  position: absolute;
+  top: 5px; left: 50%;
+  transform: translateX(-50%);
+  width: 36px; height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.nm-modal__title { cursor: move; margin-bottom: 6px; margin-top: 4px; }
+.nm-modal--dragging { box-shadow: 0 16px 40px rgba(15, 23, 42, 0.28); opacity: 0.96; user-select: none; }
+.nm-modal__body h3 { margin: 0 0 6px; font-size: 15px; }
+.nm-modal__body .stack { gap: 8px; }
 
 /* ---- 토스트 ---- */
 .toast-host {

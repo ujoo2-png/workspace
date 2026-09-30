@@ -22,6 +22,9 @@
     { path: '/settings', label: '설정', icon: '⚙️' },
   ];
 
+  // 설정 화면의 "커스텀 API 관리"가 메뉴 체크박스 목록을 만들 때 재사용한다.
+  window.NAV_ITEMS = NAV_ITEMS;
+
   window.applyTheme(localStorage.getItem('workspace:theme') || 'auto');
 
   const app = document.getElementById('app');

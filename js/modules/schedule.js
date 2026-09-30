@@ -16,8 +16,11 @@
     let hideDone = localStorage.getItem(HIDE_DONE_KEY) !== '0'; // 기본값: 숨김
     let sortKey = 'date';
     let sortDir = 'asc';
-    let viewMode = localStorage.getItem('workspace:schedule:viewMode') || 'list'; // list | calendar
     let calMonth = todayISO().slice(0, 7); // YYYY-MM
+    // 공휴일은 "내 일정"이 아니라 달력의 참고 표시일 뿐이므로, appState.schedules와는 완전히
+    // 분리된 로컬 상태로만 들고 있는다(schedules 테이블에는 전혀 쓰지 않는다).
+    let holidayMap = {}; // dateIso -> 공휴일명
+    let holidaysLoaded = false;
 
     function draw() {
       container.innerHTML = '';
@@ -25,22 +28,20 @@
         el('div', { class: 'page-header' }, [
           el('h1', {}, '일정'),
           el('div', { class: 'row', style: 'gap:8px' }, [
-            el('div', { class: 'row', style: 'gap:2px' }, [
-              viewToggleBtn('list', '📋 목록'),
-              viewToggleBtn('calendar', '📅 달력'),
-            ]),
             window.getPublicDataEnabled().holidays
-              ? el('button', { class: 'nm-btn', onclick: () => importHolidays() }, '📅 공휴일 가져오기')
+              ? el('button', { class: 'nm-btn', onclick: () => showHolidayList() }, '📅 공휴일 목록(참고용)')
               : null,
             el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openScheduleForm() }, '+ 일정 등록'),
           ]),
         ])
       );
 
-      if (viewMode === 'calendar') {
-        drawCalendar();
-        return;
-      }
+      // 목록과 달력을 함께 보여준다(달력은 등록된 일정 + 공휴일을 날짜에 바로 보여주는 참고용,
+      // 아래 목록은 검색·필터·정렬이 가능한 상세 관리용).
+      drawCalendar();
+      container.append(el('h3', { style: 'margin:20px 0 10px' }, '📋 목록'));
+
+      if (window.getPublicDataEnabled().holidays && !holidaysLoaded) loadHolidaysForCalendar();
 
       const today = todayISO();
       const weekEnd = window.addDays(today, 6);
@@ -188,15 +189,6 @@
       }
     }
 
-    function viewToggleBtn(key, label) {
-      const active = viewMode === key;
-      return el(
-        'button',
-        { class: `nm-btn ${active ? 'nm-btn--primary' : ''}`, onclick: () => { viewMode = key; localStorage.setItem('workspace:schedule:viewMode', key); draw(); } },
-        label
-      );
-    }
-
     function shiftMonth(ym, delta) {
       const [y, m] = ym.split('-').map(Number);
       const d = new Date(y, m - 1 + delta, 1);
@@ -241,7 +233,10 @@
             onclick: () => openScheduleForm(null, iso),
           },
           [
-            el('div', { class: 'calendar-cell__daynum' }, String(Number(iso.slice(8, 10)))),
+            el('div', { class: 'row', style: 'gap:4px; align-items:baseline' }, [
+              el('div', { class: 'calendar-cell__daynum' }, String(Number(iso.slice(8, 10)))),
+              holidayMap[iso] ? el('div', { class: 'calendar-cell__holiday', title: holidayMap[iso] }, escapeHtml(holidayMap[iso])) : null,
+            ]),
             ...dayItems.slice(0, 3).map((s) =>
               el(
                 'div',
@@ -283,29 +278,66 @@
       );
     }
 
-    // 공공데이터포털 특일정보(공휴일) API로 올해·내년 공휴일을 가져와 일정에 등록한다.
-    // 이미 등록된 날짜(#공휴일 태그 기준)는 건너뛴다.
-    async function importHolidays() {
+    // 공공데이터포털 특일정보(공휴일) API로 올해·내년 공휴일을 가져와 "달력 참고 표시"로만 쓴다.
+    // appState.schedules(내 일정)에는 전혀 쓰지 않는다 — 등록/수정/삭제 대상이 아닌 순수 참고 정보다.
+    async function loadHolidaysForCalendar() {
+      holidaysLoaded = true; // 실패해도 매 draw()마다 재시도하지 않도록 먼저 표시해둔다.
+      if (!window.getPublicDataKey()) return;
+      try {
+        const year = new Date().getFullYear();
+        const [thisYear, nextYear] = await Promise.all([window.fetchHolidays(year), window.fetchHolidays(year + 1)]);
+        const map = {};
+        for (const h of [...thisYear, ...nextYear]) {
+          if (h.isHoliday) map[h.dateIso] = h.name;
+        }
+        holidayMap = map;
+        draw();
+      } catch (e) {
+        // 달력 참고 표시는 실패해도 조용히 무시한다(버튼으로 다시 시도할 수 있다).
+      }
+    }
+
+    // "공휴일 목록(참고용)" 버튼 — 목록을 보여줄 뿐, 여기서 어떤 것도 내 일정에 추가하지 않는다.
+    async function showHolidayList() {
       if (!window.getPublicDataKey()) {
         toast('설정 화면에서 공공데이터포털 API 키를 먼저 등록해 주세요.', 'error');
         return;
       }
-      try {
-        const year = new Date().getFullYear();
-        const [thisYear, nextYear] = await Promise.all([window.fetchHolidays(year), window.fetchHolidays(year + 1)]);
-        const holidays = [...thisYear, ...nextYear].filter((h) => h.isHoliday);
-        const existingDates = new Set(appState.schedules.filter((s) => (s.tags || []).includes('공휴일')).map((s) => s.date));
-        let added = 0;
-        for (const h of holidays) {
-          if (existingDates.has(h.dateIso)) continue;
-          await appState.addSchedule({ title: h.name, date: h.dateIso, priority: 'low', tags: ['공휴일'], memo: null });
-          existingDates.add(h.dateIso);
-          added++;
-        }
-        toast(added ? `공휴일 ${added}건을 일정에 추가했습니다.` : '이미 모든 공휴일이 등록되어 있습니다.', 'success');
-      } catch (e) {
-        toast('공휴일을 가져오지 못했습니다: ' + e.message, 'error');
-      }
+      openModal({
+        title: '📅 공휴일 목록(참고용 — 내 일정에는 반영되지 않습니다)',
+        async contentBuilder(body) {
+          body.append(el('div', { class: 'text-muted' }, '불러오는 중…'));
+          try {
+            const year = new Date().getFullYear();
+            const [thisYear, nextYear] = await Promise.all([window.fetchHolidays(year), window.fetchHolidays(year + 1)]);
+            const holidays = [...thisYear, ...nextYear].filter((h) => h.isHoliday).sort((a, b) => a.dateIso.localeCompare(b.dateIso));
+            const map = {};
+            for (const h of holidays) map[h.dateIso] = h.name;
+            holidayMap = map;
+            draw();
+            body.innerHTML = '';
+            if (!holidays.length) {
+              body.append(el('div', { class: 'empty-state' }, '표시할 공휴일이 없습니다.'));
+              return;
+            }
+            const list = el('div', { class: 'item-list' });
+            for (const h of holidays) {
+              list.append(
+                el('div', { class: 'item-row' }, [
+                  el('div', { class: 'item-row__main' }, [
+                    el('div', { class: 'item-row__title' }, escapeHtml(h.name)),
+                    el('div', { class: 'text-muted', style: 'font-size:12px' }, formatKoreanDate(h.dateIso)),
+                  ]),
+                ])
+              );
+            }
+            body.append(list);
+          } catch (e) {
+            body.innerHTML = '';
+            body.append(el('div', { class: 'text-muted', style: 'color:#ef4444' }, `공휴일을 가져오지 못했습니다: ${e.message}`));
+          }
+        },
+      });
     }
 
     async function remove(s) {

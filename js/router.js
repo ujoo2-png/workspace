@@ -37,6 +37,8 @@
 
     const result = await view(root);
     if (typeof result === 'function') currentUnmount = result;
+    // 설정 화면에서 이 메뉴에 연결해둔 커스텀 API가 있으면 화면 하단에 카드로 보여준다.
+    if (window.renderCustomApiWidgetsForRoute) window.renderCustomApiWidgetsForRoute(root, path);
   }
 
   function startRouter() {

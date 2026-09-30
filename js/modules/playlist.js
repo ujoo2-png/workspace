@@ -5,6 +5,7 @@
   const { appState, el, escapeHtml, toast, confirmDialog, openModal, todayISO } = window;
 
   const TYPE_LABEL = { movie: '영화', music: '음악', theater: '연극', concert: '음악회', musical: '뮤지컬', exhibition: '전시', book: '책', etc: '기타' };
+  const TYPE_ICON = { movie: '🎬', music: '🎵', theater: '🎭', concert: '🎼', musical: '🎤', exhibition: '🖼️', book: '📖', etc: '✨' };
   const STATUS_LABEL = { to_watch: '예정', watched: '완료', in_progress: '진행 중', abandoned: '중단' };
   window.PLAYLIST_TYPE_LABEL = TYPE_LABEL;
 
@@ -64,13 +65,17 @@
       for (const p of rows) {
         const mapUrl = p.venue_name ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.venue_name)}` : null;
         grid.append(
-          el('div', { class: 'nm-card' }, [
-            p.poster_url
-              ? el('img', { src: p.poster_url, alt: '', style: 'width:100%; max-height:180px; object-fit:cover; border-radius:10px; margin-bottom:8px', onerror: "this.style.display='none'" })
-              : null,
-            el('div', { class: 'row row--between' }, [
-              el('span', { class: 'nm-badge' }, TYPE_LABEL[p.content_type] || p.content_type),
-              el('span', { class: 'nm-badge' }, STATUS_LABEL[p.status] || p.status),
+          el('div', { class: 'nm-card playlist-card' }, [
+            // 항목(종류)을 카드 맨 위 헤더에 크게 표기 — 상태 배지는 오른쪽에 나란히.
+            el('div', { class: 'row row--between playlist-card__header' }, [
+              el('span', { class: 'nm-badge playlist-card__type' }, `${TYPE_ICON[p.content_type] || '🎫'} ${TYPE_LABEL[p.content_type] || p.content_type}`),
+              el('span', { class: `nm-badge ${p.status === 'watched' ? 'nm-badge--success' : p.status === 'abandoned' ? 'nm-badge--warning' : ''}` }, STATUS_LABEL[p.status] || p.status),
+            ]),
+            // 포스터 영역은 항상 카드 안에 존재한다 — 실제 포스터가 없으면 종류 아이콘을 큼직하게 보여주는 플레이스홀더.
+            el('div', { class: 'playlist-card__poster' }, [
+              p.poster_url
+                ? el('img', { src: p.poster_url, alt: '', class: 'playlist-card__poster-img', onerror: "this.parentElement.classList.add('playlist-card__poster--empty'); this.remove();" })
+                : el('span', { class: 'playlist-card__poster-icon' }, TYPE_ICON[p.content_type] || '🎫'),
             ]),
             el('div', { style: 'font-weight:700; margin:8px 0 2px' }, escapeHtml(p.title)),
             p.creator ? el('div', { class: 'text-muted', style: 'font-size:12px' }, escapeHtml(p.creator)) : null,
