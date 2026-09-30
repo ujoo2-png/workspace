@@ -55,6 +55,7 @@
         ]),
         weatherCard(),
         tmdbCard(),
+        publicDataCard(),
         ...(appState.user?.role === 'admin' ? [userManagementCard()] : []),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '테마'),
@@ -188,6 +189,96 @@
         el('div', { class: 'row row--between' }, [el('h3', {}, '문화생활 · 인기 영화 연동(TMDB)'), statusBadge]),
         el('p', { class: 'text-muted', style: 'font-size:12px' }, 'themoviedb.org에서 무료로 발급받은 API 키를 입력하면 문화생활 화면에서 이번 주 인기 영화를 볼 수 있습니다. 연결 상태는 대시보드 상단에도 표시됩니다.'),
         el('div', { class: 'row', style: 'gap:8px' }, [keyInput, testBtn]),
+      ]);
+    }
+
+    // 공공데이터포털(data.go.kr) + 오피넷 연동 — 1차: 특일정보(공휴일), 오피넷 유가정보.
+    // 두 서비스는 발급 키 체계가 다르므로 입력칸을 분리한다.
+    function publicDataCard() {
+      const STATUS_LABEL = { connected: '✅ 연결됨', error: '⚠️ 연결 오류', unset: '미설정' };
+      const enabled = window.getPublicDataEnabled();
+
+      const dataGoKrInput = el('input', { class: 'nm-input', type: 'password', name: 'datagokr_key', placeholder: '공공데이터포털 서비스 키', value: window.getPublicDataKey() });
+      const dataGoKrStatus = el('span', { class: 'nm-badge' }, STATUS_LABEL[window.getPublicDataStatus()]);
+      const holidayToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'holidays', checked: enabled.holidays || undefined }),
+        el('span', { class: 'text-muted' }, '특일정보(공휴일) 연동 사용 · 일정 화면에서 "공휴일 가져오기"로 불러옵니다'),
+      ]);
+      const saveHolidayBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: async () => {
+          window.setPublicDataKey(dataGoKrInput.value.trim());
+          window.setPublicDataEnabled({ ...window.getPublicDataEnabled(), holidays: holidayToggle.querySelector('input').checked });
+          if (!dataGoKrInput.value.trim()) {
+            dataGoKrStatus.textContent = STATUS_LABEL.unset;
+            toast('공공데이터포털 키를 삭제했습니다.', 'info');
+            return;
+          }
+          saveHolidayBtn.disabled = true;
+          saveHolidayBtn.textContent = '확인 중…';
+          try {
+            await window.fetchHolidays(new Date().getFullYear());
+            dataGoKrStatus.textContent = STATUS_LABEL.connected;
+            toast('공공데이터포털(특일정보)에 연결되었습니다.', 'success');
+          } catch (e) {
+            dataGoKrStatus.textContent = STATUS_LABEL.error;
+            toast('연결에 실패했습니다: ' + e.message, 'error');
+          }
+          saveHolidayBtn.disabled = false;
+          saveHolidayBtn.textContent = '저장 및 연결 테스트';
+        },
+      }, '저장 및 연결 테스트');
+
+      const opinetInput = el('input', { class: 'nm-input', type: 'password', name: 'opinet_key', placeholder: '오피넷 API 키', value: window.getOpinetKey() });
+      const fuelToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'fuelPrice', checked: enabled.fuelPrice || undefined }),
+        el('span', { class: 'text-muted' }, '오피넷 유가정보 연동 사용 · 차량관리 화면에서 전국 평균 유가와 비교합니다'),
+      ]);
+      const saveFuelBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: async () => {
+          window.setOpinetKey(opinetInput.value.trim());
+          window.setPublicDataEnabled({ ...window.getPublicDataEnabled(), fuelPrice: fuelToggle.querySelector('input').checked });
+          if (!opinetInput.value.trim()) {
+            toast('오피넷 키를 삭제했습니다.', 'info');
+            return;
+          }
+          saveFuelBtn.disabled = true;
+          saveFuelBtn.textContent = '확인 중…';
+          try {
+            await window.fetchFuelPrice();
+            toast('오피넷 유가정보에 연결되었습니다.', 'success');
+          } catch (e) {
+            toast('연결에 실패했습니다: ' + e.message, 'error');
+          }
+          saveFuelBtn.disabled = false;
+          saveFuelBtn.textContent = '저장 및 연결 테스트';
+        },
+      }, '저장 및 연결 테스트');
+
+      return el('div', { class: 'nm-card' }, [
+        el('h3', {}, '공공데이터포털 연동'),
+        el('p', { class: 'text-muted', style: 'font-size:12px' }, '공공데이터포털·오피넷에서 무료로 발급받은 서비스 키를 등록하면 공휴일 자동 등록, 전국 평균 유가 비교 기능을 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.'),
+        el('div', { style: 'margin-top:12px' }, [
+          el('div', { class: 'row row--between' }, [el('strong', { style: 'font-size:13px' }, '특일정보(공휴일)'), dataGoKrStatus]),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+            '활용신청: ',
+            el('a', { href: 'https://www.data.go.kr/data/15012690/openapi.do', target: '_blank', rel: 'noopener' }, 'data.go.kr 특일 정보'),
+          ]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [dataGoKrInput, saveHolidayBtn]),
+          holidayToggle,
+        ]),
+        el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
+          el('strong', { style: 'font-size:13px' }, '오피넷 유가정보'),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+            '활용신청: ',
+            el('a', { href: 'https://www.opinet.co.kr/user/custapi/custApiInfo.do', target: '_blank', rel: 'noopener' }, 'opinet.co.kr Open API'),
+          ]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [opinetInput, saveFuelBtn]),
+          fuelToggle,
+        ]),
       ]);
     }
 

@@ -229,6 +229,9 @@
               el('button', { class: 'nm-btn', onclick: () => openMaintenanceForm(v) }, '+ 정비 기록'),
               el('button', { class: 'nm-btn', onclick: () => openFuelForm(v) }, '+ 주유 기록'),
               el('button', { class: 'nm-btn', onclick: () => openHistory(v, maints, fuels) }, '기록 보기'),
+              window.getPublicDataEnabled().fuelPrice
+                ? el('button', { class: 'nm-btn', onclick: () => compareFuelPrice(fuels) }, '⛽ 전국 평균 유가 비교')
+                : null,
             ]),
           ])
         );
@@ -273,6 +276,47 @@
       const labels = clean.map((f) => (f.logged_at || '').slice(5));
       const values = clean.map((f) => Math.round(f.cost / f.amount));
       return chartBlock('리터(kWh)당 단가 추이(원)', window.simpleLineChart(labels, values, '#f59e0b'));
+    }
+
+    // 오피넷 전국 평균 유가와 내 최근 주유 단가를 비교해 보여준다.
+    async function compareFuelPrice(fuels) {
+      if (!window.getOpinetKey()) {
+        toast('설정 화면에서 오피넷 API 키를 먼저 등록해 주세요.', 'error');
+        return;
+      }
+      try {
+        const rows = await window.fetchFuelPrice();
+        const clean = (fuels || [])
+          .filter((f) => typeof f.amount === 'number' && f.amount > 0 && typeof f.cost === 'number' && f.cost > 0)
+          .slice()
+          .sort((a, b) => (a.logged_at < b.logged_at ? -1 : 1));
+        const myLast = clean.length ? Math.round(clean[clean.length - 1].cost / clean[clean.length - 1].amount) : null;
+        openModal({
+          title: '전국 평균 유가 비교(오피넷)',
+          contentBuilder(body) {
+            const list = el('div', { class: 'item-list' });
+            rows.forEach((r) => {
+              const diffText = myLast ? `내 최근 단가 대비 ${myLast - r.price >= 0 ? '+' : ''}${(myLast - r.price).toLocaleString()}원` : null;
+              list.append(
+                el('div', { class: 'item-row' }, [
+                  el('div', { class: 'item-row__main' }, [
+                    el('div', { class: 'item-row__title' }, r.productName),
+                    diffText ? el('div', { class: 'text-muted', style: 'font-size:12px' }, diffText) : null,
+                  ]),
+                  el('div', { style: 'text-align:right' }, [
+                    el('div', { style: 'font-weight:700' }, `${r.price.toLocaleString()}원`),
+                    el('div', { class: 'text-muted', style: 'font-size:11px' }, `${r.diff >= 0 ? '▲' : '▼'} ${Math.abs(r.diff)}원 (전일 대비)`),
+                  ]),
+                ])
+              );
+            });
+            body.append(list);
+            body.append(el('p', { class: 'text-muted', style: 'font-size:11px; margin-top:8px' }, '자료: 한국석유공사 오피넷(전국 주유소 평균, 최대 6시간 단위 캐시)'));
+          },
+        });
+      } catch (e) {
+        toast('유가정보를 가져오지 못했습니다: ' + e.message, 'error');
+      }
     }
 
     function openOdometerForm(v) {

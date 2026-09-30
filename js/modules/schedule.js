@@ -22,7 +22,12 @@
       container.append(
         el('div', { class: 'page-header' }, [
           el('h1', {}, '일정'),
-          el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openScheduleForm() }, '+ 일정 등록'),
+          el('div', { class: 'row', style: 'gap:8px' }, [
+            window.getPublicDataEnabled().holidays
+              ? el('button', { class: 'nm-btn', onclick: () => importHolidays() }, '📅 공휴일 가져오기')
+              : null,
+            el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openScheduleForm() }, '+ 일정 등록'),
+          ]),
         ])
       );
 
@@ -191,6 +196,31 @@
         { class: `quick-tab ${active ? 'quick-tab--active' : ''}`, onclick: () => { quickTab = key; draw(); } },
         [label, count ? el('span', { class: 'quick-tab__count' }, String(count)) : null]
       );
+    }
+
+    // 공공데이터포털 특일정보(공휴일) API로 올해·내년 공휴일을 가져와 일정에 등록한다.
+    // 이미 등록된 날짜(#공휴일 태그 기준)는 건너뛴다.
+    async function importHolidays() {
+      if (!window.getPublicDataKey()) {
+        toast('설정 화면에서 공공데이터포털 API 키를 먼저 등록해 주세요.', 'error');
+        return;
+      }
+      try {
+        const year = new Date().getFullYear();
+        const [thisYear, nextYear] = await Promise.all([window.fetchHolidays(year), window.fetchHolidays(year + 1)]);
+        const holidays = [...thisYear, ...nextYear].filter((h) => h.isHoliday);
+        const existingDates = new Set(appState.schedules.filter((s) => (s.tags || []).includes('공휴일')).map((s) => s.date));
+        let added = 0;
+        for (const h of holidays) {
+          if (existingDates.has(h.dateIso)) continue;
+          await appState.addSchedule({ title: h.name, date: h.dateIso, priority: 'low', tags: ['공휴일'], memo: null });
+          existingDates.add(h.dateIso);
+          added++;
+        }
+        toast(added ? `공휴일 ${added}건을 일정에 추가했습니다.` : '이미 모든 공휴일이 등록되어 있습니다.', 'success');
+      } catch (e) {
+        toast('공휴일을 가져오지 못했습니다: ' + e.message, 'error');
+      }
     }
 
     async function remove(s) {
