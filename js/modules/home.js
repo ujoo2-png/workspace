@@ -10,7 +10,7 @@
   // 다음 방문 때도 유지한다. 새 버전에서 위젯이 추가되면 저장된 순서 뒤에 이어 붙인다.
   const WIDGET_ORDER_KEY = 'workspace:homeWidgetOrder';
   const WIDGET_LABELS = {
-    clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', summary: '📅 이번 주 활동 요약',
+    clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
@@ -38,8 +38,24 @@
     const container = el('div', {});
     root.append(container);
     let weatherState = { loading: true, data: null };
+    const weatherAlertsOn = !!(window.getPublicDataEnabled && window.getPublicDataEnabled().weatherAlerts && window.getPublicDataKey && window.getPublicDataKey());
+    let alertState = { loading: weatherAlertsOn, items: weatherAlertsOn ? null : [] };
     let clockTimer = null;
     let supabaseStatus = { checked: false, ok: null };
+
+    // 기상특보(공공데이터포털, 같은 키를 특일정보와 공유) — 설정에서 켰고 키가 있을 때만 불러온다.
+    // weatherState/loadWeather()와 동일한 패턴: draw() 도중이 아니라 렌더 함수 정의가 끝난 뒤
+    // 한 번만 호출한다(draw() 안에서 호출하면 container를 이중으로 채우는 중첩 렌더 버그가 생긴다).
+    async function loadWeatherAlerts() {
+      if (!weatherAlertsOn) return;
+      try {
+        const items = await window.fetchWeatherAlerts();
+        alertState = { loading: false, items };
+      } catch (e) {
+        alertState = { loading: false, items: [], error: e.message };
+      }
+      draw();
+    }
 
     async function checkSupabaseConnection() {
       const CONFIG = window.CONFIG;
@@ -240,6 +256,34 @@
       }
       widgets.weather = weatherCard;
 
+      // 기상특보(공공데이터포털) — 켜져 있고 활성 특보가 있을 때만 위젯을 보여준다(없으면 렌더 생략).
+      if (weatherAlertsOn) {
+        if (alertState.loading) {
+          widgets.alert = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+            el('h3', {}, '⚠️ 기상특보'),
+            el('div', { class: 'text-muted' }, '확인하는 중…'),
+          ]);
+        } else if (alertState.items && alertState.items.length) {
+          const list = el('div', { class: 'item-list' });
+          for (const a of alertState.items) {
+            list.append(
+              el('div', { class: 'item-row' }, [
+                el('span', { class: 'nm-badge nm-badge--warning' }, ' '),
+                el('div', { class: 'item-row__main' }, [
+                  el('div', { class: 'item-row__title' }, escapeHtml(a.title || '특보')),
+                  el('div', { class: 'item-row__meta' }, `발표 ${a.issuedAt || '-'}${a.effectiveAt ? ' · 발효 ' + a.effectiveAt : ''}`),
+                ]),
+              ])
+            );
+          }
+          widgets.alert = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+            el('h3', {}, '⚠️ 기상특보'),
+            list,
+          ]);
+        }
+        // 특보가 없거나 에러면 위젯 자체를 표시하지 않는다(평소엔 조용히 있는 게 맞는 정보).
+      }
+
       // 이번 주 활동 요약 (프로젝트/일정/챌린저/Health 통합) — 각 지표를 누르면 해당 메뉴로 이동
       const weekly = appState.getWeeklyActivitySummary();
       const summaryCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
@@ -370,6 +414,7 @@
 
     draw();
     loadWeather();
+    loadWeatherAlerts();
     checkSupabaseConnection();
     clockTimer = setInterval(tickClocks, 1000);
     appState.addEventListener('change', draw);

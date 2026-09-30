@@ -204,12 +204,25 @@
         el('input', { type: 'checkbox', name: 'holidays', checked: enabled.holidays || undefined }),
         el('span', { class: 'text-muted' }, '특일정보(공휴일) 연동 사용 · 일정 화면에서 "공휴일 가져오기"로 불러옵니다'),
       ]);
+      const weatherAlertToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'weatherAlerts', checked: enabled.weatherAlerts || undefined }),
+        el('span', { class: 'text-muted' }, '기상특보 연동 사용(같은 키) · 홈 화면에 활성 특보를 보여줍니다'),
+      ]);
+      const evChargerToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'evChargers', checked: enabled.evChargers || undefined }),
+        el('span', { class: 'text-muted' }, '전기차충전소 연동 사용(같은 키) · 전기차 차량관리 화면에서 주변 충전소를 찾습니다'),
+      ]);
       const saveHolidayBtn = el('button', {
         class: 'nm-btn',
         type: 'button',
         onclick: async () => {
           window.setPublicDataKey(dataGoKrInput.value.trim());
-          window.setPublicDataEnabled({ ...window.getPublicDataEnabled(), holidays: holidayToggle.querySelector('input').checked });
+          window.setPublicDataEnabled({
+            ...window.getPublicDataEnabled(),
+            holidays: holidayToggle.querySelector('input').checked,
+            weatherAlerts: weatherAlertToggle.querySelector('input').checked,
+            evChargers: evChargerToggle.querySelector('input').checked,
+          });
           if (!dataGoKrInput.value.trim()) {
             dataGoKrStatus.textContent = STATUS_LABEL.unset;
             toast('공공데이터포털 키를 삭제했습니다.', 'info');
@@ -300,6 +313,9 @@
           ]),
           el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [dataGoKrInput, saveHolidayBtn]),
           holidayToggle,
+          el('p', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, '아래 두 서비스도 같은 공공데이터포털 키를 쓰지만, data.go.kr에서 각각 별도로 "활용신청"해야 승인됩니다.'),
+          weatherAlertToggle,
+          evChargerToggle,
         ]),
         el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
           el('strong', { style: 'font-size:13px' }, '오피넷 유가정보'),

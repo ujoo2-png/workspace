@@ -232,6 +232,9 @@
               window.getPublicDataEnabled().fuelPrice
                 ? el('button', { class: 'nm-btn', onclick: () => compareFuelPrice(fuels) }, '⛽ 전국 평균 유가 비교')
                 : null,
+              (v.fuel_type === 'ev' || v.fuel_type === 'hybrid') && window.getPublicDataEnabled().evChargers
+                ? el('button', { class: 'nm-btn', onclick: () => openEvChargerFinder() }, '⚡ 주변 충전소 찾기')
+                : null,
             ]),
           ])
         );
@@ -317,6 +320,60 @@
       } catch (e) {
         toast('유가정보를 가져오지 못했습니다: ' + e.message, 'error');
       }
+    }
+
+    // 전기차 충전소 찾기(한국환경공단, 공공데이터포털 키 공유) — 시/도(+선택: 시군구코드)로 검색한다.
+    function openEvChargerFinder() {
+      openModal({
+        title: '⚡ 주변 충전소 찾기',
+        contentBuilder(body) {
+          const zcodeSelect = el(
+            'select',
+            { class: 'nm-select', style: 'width:140px' },
+            Object.entries(window.EV_ZCODE_LABEL || {}).map(([code, label]) => el('option', { value: code }, label))
+          );
+          const zscodeInput = el('input', { class: 'nm-input', placeholder: '시군구코드(선택)', style: 'width:140px' });
+          const searchBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'button' }, '검색');
+          const resultBox = el('div', { style: 'margin-top:12px' });
+          body.append(
+            el('div', { class: 'stack' }, [
+              el('div', { class: 'row wrap', style: 'gap:8px' }, [zcodeSelect, zscodeInput, searchBtn]),
+              el('p', { class: 'text-muted', style: 'font-size:11px' }, '시군구코드를 모르면 비워두고 시/도 전체로 검색할 수 있습니다.'),
+              resultBox,
+            ])
+          );
+
+          searchBtn.addEventListener('click', async () => {
+            resultBox.innerHTML = '';
+            resultBox.append(el('div', { class: 'text-muted' }, '검색 중…'));
+            try {
+              const chargers = await window.fetchEvChargers({ zcode: zcodeSelect.value, zscode: zscodeInput.value.trim() || undefined, rows: 30 });
+              resultBox.innerHTML = '';
+              if (!chargers.length) {
+                resultBox.append(el('div', { class: 'text-muted' }, '검색 결과가 없습니다.'));
+                return;
+              }
+              const list = el('div', { class: 'item-list' });
+              chargers.forEach((c) => {
+                const mapUrl = c.lat && c.lng ? `https://www.google.com/maps/search/?api=1&query=${c.lat},${c.lng}` : null;
+                list.append(
+                  el('div', { class: 'item-row' }, [
+                    el('div', { class: 'item-row__main' }, [
+                      el('div', { class: 'item-row__title' }, escapeHtml(c.name || '-')),
+                      el('div', { class: 'text-muted', style: 'font-size:12px' }, escapeHtml(c.addr || '')),
+                    ]),
+                    mapUrl ? el('a', { href: mapUrl, target: '_blank', rel: 'noopener', class: 'nm-btn nm-btn--icon', title: '지도에서 보기' }, '🗺️') : null,
+                  ])
+                );
+              });
+              resultBox.append(list);
+            } catch (e) {
+              resultBox.innerHTML = '';
+              resultBox.append(el('div', { class: 'text-muted', style: 'color:#ef4444' }, `검색에 실패했습니다: ${e.message}`));
+            }
+          });
+        },
+      });
     }
 
     function openOdometerForm(v) {

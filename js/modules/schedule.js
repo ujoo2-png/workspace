@@ -16,6 +16,8 @@
     let hideDone = localStorage.getItem(HIDE_DONE_KEY) !== '0'; // 기본값: 숨김
     let sortKey = 'date';
     let sortDir = 'asc';
+    let viewMode = localStorage.getItem('workspace:schedule:viewMode') || 'list'; // list | calendar
+    let calMonth = todayISO().slice(0, 7); // YYYY-MM
 
     function draw() {
       container.innerHTML = '';
@@ -23,6 +25,10 @@
         el('div', { class: 'page-header' }, [
           el('h1', {}, '일정'),
           el('div', { class: 'row', style: 'gap:8px' }, [
+            el('div', { class: 'row', style: 'gap:2px' }, [
+              viewToggleBtn('list', '📋 목록'),
+              viewToggleBtn('calendar', '📅 달력'),
+            ]),
             window.getPublicDataEnabled().holidays
               ? el('button', { class: 'nm-btn', onclick: () => importHolidays() }, '📅 공휴일 가져오기')
               : null,
@@ -30,6 +36,11 @@
           ]),
         ])
       );
+
+      if (viewMode === 'calendar') {
+        drawCalendar();
+        return;
+      }
 
       const today = todayISO();
       const weekEnd = window.addDays(today, 6);
@@ -177,6 +188,80 @@
       }
     }
 
+    function viewToggleBtn(key, label) {
+      const active = viewMode === key;
+      return el(
+        'button',
+        { class: `nm-btn ${active ? 'nm-btn--primary' : ''}`, onclick: () => { viewMode = key; localStorage.setItem('workspace:schedule:viewMode', key); draw(); } },
+        label
+      );
+    }
+
+    function shiftMonth(ym, delta) {
+      const [y, m] = ym.split('-').map(Number);
+      const d = new Date(y, m - 1 + delta, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // 등록된 일정을 실제 날짜에 표시하는 월간 달력 보기. 날짜 칸의 빈 곳을 누르면 그 날짜로
+    // 일정 등록 폼이 뜨고, 개별 일정 칩을 누르면 그 일정 수정 폼이 뜬다.
+    function drawCalendar() {
+      const today = todayISO();
+      container.append(
+        el('div', { class: 'row row--between', style: 'margin-bottom:10px' }, [
+          el('button', { class: 'nm-btn nm-btn--icon', onclick: () => { calMonth = shiftMonth(calMonth, -1); draw(); } }, '◀'),
+          el('strong', { style: 'font-size:15px' }, `${calMonth.slice(0, 4)}년 ${Number(calMonth.slice(5, 7))}월`),
+          el('div', { class: 'row', style: 'gap:6px' }, [
+            el('button', { class: 'nm-btn', onclick: () => { calMonth = today.slice(0, 7); draw(); } }, '오늘'),
+            el('button', { class: 'nm-btn nm-btn--icon', onclick: () => { calMonth = shiftMonth(calMonth, 1); draw(); } }, '▶'),
+          ]),
+        ])
+      );
+
+      const grid = el('div', { class: 'calendar-grid' });
+      ['일', '월', '화', '수', '목', '금', '토'].forEach((d) => grid.append(el('div', { class: 'calendar-weekday' }, d)));
+
+      const firstIso = `${calMonth}-01`;
+      const firstWeekday = new Date(`${firstIso}T00:00:00`).getDay();
+      let cursor = window.addDays(firstIso, -firstWeekday);
+      const byDate = {};
+      for (const s of appState.schedules) {
+        if (!byDate[s.date]) byDate[s.date] = [];
+        byDate[s.date].push(s);
+      }
+
+      for (let i = 0; i < 42; i++) {
+        const iso = cursor;
+        const inMonth = iso.slice(0, 7) === calMonth;
+        const dayItems = (byDate[iso] || []).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        const cell = el(
+          'div',
+          {
+            class: `calendar-cell ${inMonth ? '' : 'calendar-cell--outside'} ${iso === today ? 'calendar-cell--today' : ''}`,
+            onclick: () => openScheduleForm(null, iso),
+          },
+          [
+            el('div', { class: 'calendar-cell__daynum' }, String(Number(iso.slice(8, 10)))),
+            ...dayItems.slice(0, 3).map((s) =>
+              el(
+                'div',
+                {
+                  class: `calendar-cell__item ${s.done ? 'calendar-cell__item--done' : ''}`,
+                  title: s.title,
+                  onclick: (e) => { e.stopPropagation(); openScheduleForm(s); },
+                },
+                escapeHtml(s.title)
+              )
+            ),
+            dayItems.length > 3 ? el('div', { class: 'calendar-cell__more' }, `+${dayItems.length - 3}개`) : null,
+          ]
+        );
+        grid.append(cell);
+        cursor = window.addDays(cursor, 1);
+      }
+      container.append(grid);
+    }
+
     function toggleSort(key) {
       if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
       else { sortKey = key; sortDir = 'asc'; }
@@ -229,14 +314,15 @@
       toast('일정을 삭제했습니다.', 'success');
     }
 
-    function openScheduleForm(existing) {
+    // prefillDate: 달력 보기에서 빈 날짜 칸을 눌렀을 때 그 날짜로 새 일정 폼을 채워준다(existing과는 무관).
+    function openScheduleForm(existing, prefillDate) {
       openModal({
         title: existing ? '일정 수정' : '일정 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
           form.append(
             field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' })),
-            field('날짜', el('input', { class: 'nm-input', type: 'date', name: 'date', required: true, value: existing?.date || todayISO() })),
+            field('날짜', el('input', { class: 'nm-input', type: 'date', name: 'date', required: true, value: existing?.date || prefillDate || todayISO() })),
             field('시간(선택)', el('input', { class: 'nm-input', type: 'time', name: 'time', value: existing?.time || '' })),
             field('우선순위', prioritySelect(existing?.priority)),
             field('중요 표시(플래그)', flagCheckbox(existing?.flagged)),

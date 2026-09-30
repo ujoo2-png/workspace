@@ -6,10 +6,10 @@
   const KEY_STORAGE = 'workspace:publicData:dataGoKrKey';
   const OPINET_KEY_STORAGE = 'workspace:publicData:opinetKey';
   const KOPIS_KEY_STORAGE = 'workspace:publicData:kopisKey';
-  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays:bool, fuelPrice:bool, cultureEvents:bool}
+  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays, fuelPrice, cultureEvents, weatherAlerts, evChargers}
   const STATUS_STORAGE = 'workspace:publicData:status'; // connected|error|unset (공휴일 API 기준)
   const CACHE_PREFIX = 'workspace:publicData:cache:';
-  const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true };
+  const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true, weatherAlerts: true, evChargers: true };
 
   function getPublicDataKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
   function setPublicDataKey(key) { localStorage.setItem(KEY_STORAGE, key || ''); }
@@ -250,6 +250,117 @@
     return items;
   }
 
+  // 기상특보 조회서비스(기상청, getWthrWrnList) — 공공데이터포털 키(특일정보와 동일한 키)를 그대로
+  // 사용한다(활용신청만 별도로 필요). stnId는 예보구역코드이며, 기본값 108은 서울/수도권이다.
+  // https://www.data.go.kr/data/15000415/openapi.do
+  // 필드명이 완전히 확정되지 않은 응답 구조를 감안해, 알려진 후보 필드명을 순서대로 시도하고
+  // 못 찾으면 원본 객체를 함께 반환해 화면에서 최소한 내용은 보이게 한다.
+  async function fetchWeatherAlerts(stnId = '108') {
+    const cacheKey = `weatherAlerts:${stnId}`;
+    const cached = cacheGet(cacheKey, 1000 * 60 * 60); // 1시간 캐시(특보는 빠르게 바뀔 수 있음)
+    if (cached) return cached;
+
+    const key = getPublicDataKey();
+    if (!key) throw new Error('설정 화면에서 공공데이터포털 API 키를 먼저 등록해 주세요.');
+
+    const today = new Date();
+    const toTmFc = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const fromTmFc = new Date(today.getTime() - 3 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+    const base = 'https://apis.data.go.kr/1360000/WthrWrnInfoService/getWthrWrnList';
+    const url = `${base}?ServiceKey=${encodeURIComponent(key)}&pageNo=1&numOfRows=20&dataType=JSON&stnId=${encodeURIComponent(stnId)}&fromTmFc=${fromTmFc}&toTmFc=${toTmFc}`;
+
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (e) {
+      throw new Error('기상특보 조회에 실패했습니다(네트워크 또는 CORS 문제일 수 있습니다).');
+    }
+    if (!res.ok) throw new Error(`기상특보 요청이 실패했습니다(HTTP ${res.status}). 서비스 키의 "기상청_기상특보 조회서비스" 활용신청 승인 여부를 확인해 주세요.`);
+
+    const text = await res.text();
+    let rawItems = [];
+    try {
+      const json = JSON.parse(text);
+      const header = json?.response?.header;
+      if (header && header.resultCode && header.resultCode !== '00' && header.resultCode !== '03') {
+        // 03(NODATA_ERROR)은 "해당 기간에 특보 없음"을 의미하는 경우가 많아 에러로 취급하지 않는다.
+        throw new Error(header.resultMsg || 'API 오류가 발생했습니다.');
+      }
+      const raw = json?.response?.body?.items?.item;
+      rawItems = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+    } catch (jsonErr) {
+      if (jsonErr instanceof Error && !jsonErr.message.includes('JSON')) throw jsonErr;
+      rawItems = parseSimpleXmlItems(text);
+    }
+
+    const alerts = rawItems.map((it) => ({
+      title: it.warnStress || it.title || it.t6 || it.command || '특보 정보',
+      issuedAt: it.tmFc || it.t1 || null,
+      effectiveAt: it.tmEf || it.t2 || null,
+      raw: it,
+    }));
+    cacheSet(cacheKey, alerts);
+    return alerts;
+  }
+
+  // 전기차 충전소 정보(한국환경공단, getChargerInfo) — 공공데이터포털 키를 그대로 사용한다
+  // (활용신청만 별도로 필요). zcode는 시도코드(01서울~17제주), zscode는 시군구코드(선택).
+  // https://www.data.go.kr/data/15076352/openapi.do
+  const ZCODE_LABEL = {
+    '01': '서울', '02': '부산', '03': '대구', '04': '인천', '05': '광주', '06': '대전', '07': '울산',
+    '08': '세종', '09': '경기', '10': '강원', '11': '충북', '12': '충남', '13': '전북', '14': '전남',
+    '15': '경북', '16': '경남', '17': '제주',
+  };
+
+  async function fetchEvChargers({ zcode, zscode, rows: rowLimit = 20 } = {}) {
+    if (!zcode) throw new Error('시/도를 선택해 주세요.');
+    const cacheKey = `evChargers:${zcode}:${zscode || ''}`;
+    const cached = cacheGet(cacheKey, 1000 * 60 * 60 * 6); // 6시간 캐시
+    if (cached) return cached;
+
+    const key = getPublicDataKey();
+    if (!key) throw new Error('설정 화면에서 공공데이터포털 API 키를 먼저 등록해 주세요.');
+
+    const qs = new URLSearchParams({ serviceKey: key, numOfRows: String(rowLimit), pageNo: '1', dataType: 'JSON', zcode });
+    if (zscode) qs.set('zscode', zscode);
+    const url = `https://apis.data.go.kr/B552584/EvCharger/getChargerInfo?${qs.toString()}`;
+
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (e) {
+      throw new Error('전기차 충전소 조회에 실패했습니다(네트워크 또는 CORS 문제일 수 있습니다).');
+    }
+    if (!res.ok) throw new Error(`전기차 충전소 요청이 실패했습니다(HTTP ${res.status}). 서비스 키의 "전기차충전소정보" 활용신청 승인 여부를 확인해 주세요.`);
+
+    const text = await res.text();
+    let rawItems = [];
+    try {
+      const json = JSON.parse(text);
+      const header = json?.response?.header;
+      if (header && header.resultCode && header.resultCode !== '00' && header.resultCode !== '03') {
+        throw new Error(header.resultMsg || 'API 오류가 발생했습니다.');
+      }
+      const raw = json?.response?.body?.items?.item;
+      rawItems = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+    } catch (jsonErr) {
+      if (jsonErr instanceof Error && !jsonErr.message.includes('JSON')) throw jsonErr;
+      rawItems = parseSimpleXmlItems(text);
+    }
+
+    const chargers = rawItems.map((it) => ({
+      id: it.statId,
+      name: it.statNm,
+      addr: it.addr,
+      lat: Number(it.lat) || null,
+      lng: Number(it.lng) || null,
+      chgerType: it.chgerType,
+      busiNm: it.busiNm,
+    }));
+    cacheSet(cacheKey, chargers);
+    return chargers;
+  }
+
   window.getPublicDataKey = getPublicDataKey;
   window.setPublicDataKey = setPublicDataKey;
   window.getOpinetKey = getOpinetKey;
@@ -262,4 +373,7 @@
   window.fetchHolidays = fetchHolidays;
   window.fetchFuelPrice = fetchFuelPrice;
   window.fetchCultureEvents = fetchCultureEvents;
+  window.fetchWeatherAlerts = fetchWeatherAlerts;
+  window.fetchEvChargers = fetchEvChargers;
+  window.EV_ZCODE_LABEL = ZCODE_LABEL;
 })();
