@@ -10,6 +10,16 @@
   const PRIORITY_BADGE = { high: 'nm-badge--critical', medium: 'nm-badge--warning', low: '' };
   const STAGE_STATUS_LABEL = { todo: '대기', in_progress: '진행', done: '완료' };
 
+  // 계획일(planned) 대비 실제 완료일(actual)의 차이를 사람이 읽기 쉬운 배지 텍스트로 바꾼다.
+  // 음수(실제가 계획보다 이름) = 조기 완료, 양수 = 지연.
+  function varianceBadge(plannedIso, actualIso) {
+    if (!plannedIso || !actualIso) return null;
+    const delta = diffDays(plannedIso, actualIso); // actual - planned (일수)
+    if (delta === 0) return { text: '계획대로 완료 ✅', cls: 'nm-badge--success' };
+    if (delta < 0) return { text: `계획보다 ${-delta}일 빠름 🎉`, cls: 'nm-badge--success' };
+    return { text: `계획보다 ${delta}일 지연 ⚠️`, cls: 'nm-badge--warning' };
+  }
+
   function renderProjects(root) {
     const container = el('div', {});
     root.append(container);
@@ -102,7 +112,9 @@
                 el('strong', { style: 'font-size:16px' }, escapeHtml(p.name)),
                 el('span', { class: 'nm-badge' }, STATUS_LABEL[p.status] || p.status),
                 p.priority ? el('span', { class: `nm-badge ${PRIORITY_BADGE[p.priority] || ''}` }, `우선순위 ${PRIORITY_LABEL[p.priority]}`) : null,
-                p.deadline ? el('span', { class: `nm-badge ${dDay !== null && dDay < 0 ? 'nm-badge--critical' : dDay !== null && dDay <= 7 ? 'nm-badge--warning' : ''}` }, `마감 ${p.deadline}${dDay !== null ? ` (D${dDay >= 0 ? '-' + dDay : '+' + -dDay})` : ''}`) : null,
+                p.deadline ? el('span', { class: `nm-badge ${dDay !== null && dDay < 0 ? 'nm-badge--critical' : dDay !== null && dDay <= 7 ? 'nm-badge--warning' : ''}` }, `계획 완료 ${p.deadline}${dDay !== null ? ` (D${dDay >= 0 ? '-' + dDay : '+' + -dDay})` : ''}`) : null,
+                p.actual_completion_date ? el('span', { class: 'nm-badge' }, `실제 완료 ${p.actual_completion_date}`) : null,
+                (() => { const v = varianceBadge(p.deadline, p.actual_completion_date); return v ? el('span', { class: `nm-badge ${v.cls}` }, v.text) : null; })(),
               ]),
               p.memo ? el('div', { class: 'text-muted', style: 'margin-top:4px' }, escapeHtml(p.memo)) : null,
               (p.tags || []).length
@@ -240,6 +252,8 @@
               el('div', { class: 'item-row__main' }, [
                 el('div', { class: 'item-row__title' }, `${escapeHtml(s.name)} (${range})`),
                 el('div', { class: 'item-row__meta' }, `${s.start_date || '-'} ~ ${s.target_date || '(목표일 없음)'} · ${STAGE_STATUS_LABEL[s.status] || s.status}`),
+                s.actual_completion_date ? el('div', { class: 'item-row__meta' }, `실제 완료 ${s.actual_completion_date}`) : null,
+                (() => { const v = varianceBadge(s.target_date, s.actual_completion_date); return v ? el('span', { class: `nm-badge ${v.cls}`, style: 'margin-top:4px; display:inline-block' }, v.text) : null; })(),
               ]),
               el('div', { class: 'icon-row' }, [
                 el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openStageForm(p, s) }, '✎'),
@@ -270,8 +284,10 @@
           form.append(
             field('중분류(선택, 예: 1학기-1과)', el('input', { class: 'nm-input', name: 'group_name', value: existing?.group_name || '', placeholder: '예: 1학기-1과:노인복지론' })),
             field('단계 이름(소분류, 예: 1강)', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
-            field('시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'start_date', value: existing?.start_date || todayISO() })),
-            field('목표일(target, 진도 관리에 필요)', el('input', { class: 'nm-input', type: 'date', name: 'target_date', required: true, value: existing?.target_date || '' })),
+            field('계획 시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'start_date', value: existing?.start_date || todayISO() })),
+            field('계획 목표일(target, 진도 관리에 필요)', el('input', { class: 'nm-input', type: 'date', name: 'target_date', required: true, value: existing?.target_date || '' })),
+            field('실제 시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'actual_start_date', value: existing?.actual_start_date || '' })),
+            field('실제 완료일(선택, 완료 시 입력하면 계획대비 실적이 표시됩니다)', el('input', { class: 'nm-input', type: 'date', name: 'actual_completion_date', value: existing?.actual_completion_date || '' })),
             field('상태', stageStatusSelect(existing?.status))
           );
           form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
@@ -283,12 +299,18 @@
               name: fd.get('name'),
               start_date: fd.get('start_date') || null,
               target_date: fd.get('target_date'),
+              actual_start_date: fd.get('actual_start_date') || null,
+              actual_completion_date: fd.get('actual_completion_date') || null,
               status: fd.get('status'),
             };
-            if (existing) await appState.updateProjectStage(existing.id, data);
-            else await appState.addProjectStage(p.id, data);
-            toast('저장했습니다.', 'success');
-            close();
+            try {
+              if (existing) await appState.updateProjectStage(existing.id, data);
+              else await appState.addProjectStage(p.id, data);
+              toast('저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
           if (existing) {
@@ -384,7 +406,8 @@
           const form = el('form', { class: 'stack' });
           form.append(
             field('이름', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
-            field('마감일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'deadline', value: existing?.deadline || '' })),
+            field('계획(마감) 완료일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'deadline', value: existing?.deadline || '' })),
+            field('실제 완료일(선택, 완료 후 입력하면 계획대비 실적이 표시됩니다)', el('input', { class: 'nm-input', type: 'date', name: 'actual_completion_date', value: existing?.actual_completion_date || '' })),
             field('상태', statusSelect(existing?.status)),
             field('우선순위', prioritySelect(existing?.priority)),
             field('태그(쉼표로 구분, 선택)', el('input', { class: 'nm-input', name: 'tags', value: (existing?.tags || []).join(', ') })),
@@ -398,15 +421,20 @@
             const data = {
               name: fd.get('name'),
               deadline: fd.get('deadline') || null,
+              actual_completion_date: fd.get('actual_completion_date') || null,
               status: fd.get('status'),
               priority: fd.get('priority'),
               tags,
               memo: fd.get('memo') || null,
             };
-            if (existing) await appState.updateProject(existing.id, data);
-            else await appState.addProject(data);
-            toast('프로젝트를 저장했습니다.', 'success');
-            close();
+            try {
+              if (existing) await appState.updateProject(existing.id, data);
+              else await appState.addProject(data);
+              toast('프로젝트를 저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },

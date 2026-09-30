@@ -115,9 +115,13 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            await appState.checkinChallenge(c.id, todayISO(), Number(fd.get('value')) || 1, fd.get('memo') || null);
-            toast(existingEntry ? '기록을 수정했습니다.' : '오늘 체크인했습니다! 🎉', 'success');
-            close();
+            try {
+              await appState.checkinChallenge(c.id, todayISO(), Number(fd.get('value')) || 1, fd.get('memo') || null);
+              toast(existingEntry ? '기록을 수정했습니다.' : '오늘 체크인했습니다! 🎉', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },
@@ -184,10 +188,14 @@
               end_date: fd.get('end_date') || null,
               status: fd.get('status'),
             };
-            if (existing) await appState.updateChallenge(existing.id, data);
-            else await appState.addChallenge(data);
-            toast('저장했습니다.', 'success');
-            close();
+            try {
+              if (existing) await appState.updateChallenge(existing.id, data);
+              else await appState.addChallenge(data);
+              toast('저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },

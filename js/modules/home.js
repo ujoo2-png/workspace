@@ -10,6 +10,110 @@
     const container = el('div', {});
     root.append(container);
     let weatherState = { loading: true, data: null };
+    let clockTimer = null;
+    let supabaseStatus = { checked: false, ok: null };
+
+    async function checkSupabaseConnection() {
+      const CONFIG = window.CONFIG;
+      if (CONFIG.mode !== 'supabase') { supabaseStatus = { checked: true, ok: null }; draw(); return; }
+      try {
+        await window.getStore().getSession();
+        supabaseStatus = { checked: true, ok: true };
+      } catch {
+        supabaseStatus = { checked: true, ok: false };
+      }
+      draw();
+    }
+
+    // 대한민국(기본) + 최대 2개까지 추가 가능한 여러 도시 시계. 매초 텍스트만 갱신하고
+    // (홈 화면 전체를 매초 다시 그리지 않도록) 셀 DOM 참조를 클로저에 보관해 재사용한다.
+    let clockCells = [];
+    function clockCard() {
+      const zones = window.getClockZones();
+      clockCells = [];
+      const card = el('div', { class: 'nm-card clock-card', style: 'margin-bottom:16px' }, [
+        el('div', { class: 'row row--between' }, [
+          el('h3', {}, '🕒 시계'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '시계 설정(최대 3개 지역)', onclick: openClockSettings }, '⚙️'),
+        ]),
+      ]);
+      const grid = el('div', { class: 'clock-grid', style: 'margin-top:8px' });
+      for (const z of zones) {
+        const { time, date } = window.formatZoneTime(z.id);
+        const timeEl = el('div', { style: 'font-size:22px; font-weight:800; font-variant-numeric:tabular-nums' }, time);
+        const dateEl = el('div', { class: 'text-muted', style: 'font-size:11px' }, date);
+        clockCells.push({ zone: z, timeEl, dateEl });
+        grid.append(
+          el('div', { class: 'clock-grid__cell' }, [
+            el('div', { class: 'text-muted', style: 'font-size:12px' }, z.label),
+            timeEl,
+            dateEl,
+          ])
+        );
+      }
+      card.append(grid);
+      return card;
+    }
+
+    function tickClocks() {
+      for (const { zone, timeEl, dateEl } of clockCells) {
+        const { time, date } = window.formatZoneTime(zone.id);
+        timeEl.textContent = time;
+        dateEl.textContent = date;
+      }
+    }
+
+    function openClockSettings() {
+      window.openModal({
+        title: '시계 설정',
+        contentBuilder(body, close) {
+          let zones = window.getClockZones();
+          const wrap = el('div', { class: 'stack' });
+          function renderList() {
+            wrap.innerHTML = '';
+            const list = el('div', { class: 'item-list' });
+            zones.forEach((z, idx) => {
+              list.append(
+                el('div', { class: 'item-row' }, [
+                  el('div', { class: 'item-row__main' }, [el('div', { class: 'item-row__title' }, z.label)]),
+                  idx === 0
+                    ? el('span', { class: 'nm-badge' }, '기본')
+                    : el('button', {
+                        class: 'nm-btn nm-btn--icon nm-btn--danger',
+                        title: '삭제',
+                        onclick: () => { zones = window.setClockZones(zones.filter((x) => x.id !== z.id)); renderList(); draw(); },
+                      }, '🗑'),
+                ])
+              );
+            });
+            wrap.append(list);
+            const remaining = window.CLOCK_ZONE_PRESETS.filter((p) => !zones.some((z) => z.id === p.id));
+            if (zones.length - 1 < window.CLOCK_MAX_EXTRA_ZONES && remaining.length) {
+              const select = el('select', { class: 'nm-select' }, remaining.map((p) => el('option', { value: p.id }, p.label)));
+              wrap.append(
+                el('div', { class: 'row', style: 'gap:8px; margin-top:8px' }, [
+                  select,
+                  el('button', {
+                    class: 'nm-btn nm-btn--primary',
+                    onclick: () => {
+                      const picked = remaining.find((p) => p.id === select.value);
+                      if (!picked) return;
+                      zones = window.setClockZones([...zones, picked]);
+                      renderList();
+                      draw();
+                    },
+                  }, '+ 추가'),
+                ])
+              );
+            } else if (zones.length - 1 >= window.CLOCK_MAX_EXTRA_ZONES) {
+              wrap.append(el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, `기본(대한민국) 포함 최대 3개까지 등록할 수 있습니다.`));
+            }
+          }
+          renderList();
+          body.append(wrap);
+        },
+      });
+    }
 
     async function loadWeather() {
       const cities = window.getWeatherCities();
@@ -23,7 +127,17 @@
     function integrationStatusBar() {
       const STATUS_LABEL = { connected: '✅ 문화생활 API 연결됨', error: '⚠️ 문화생활 API 연결 오류', unset: '⚪ 문화생활 API 미설정' };
       const status = window.getTmdbStatus ? window.getTmdbStatus() : 'unset';
+      const CONFIG = window.CONFIG;
+      const dbLabel = CONFIG.mode === 'supabase'
+        ? (!supabaseStatus.checked ? '🟡 Supabase 확인 중…' : supabaseStatus.ok ? '✅ Supabase 연결됨' : '⚠️ Supabase 연결 오류')
+        : '⚪ 로컬 모드(이 브라우저에만 저장)';
       return el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:16px' }, [
+        el('button', {
+          class: `nm-badge ${CONFIG.mode === 'supabase' && supabaseStatus.checked && !supabaseStatus.ok ? 'nm-badge--warning' : ''}`,
+          style: 'border:none; cursor:pointer',
+          title: '설정 화면에서 데이터 모드를 확인할 수 있습니다.',
+          onclick: () => navigate('/settings'),
+        }, dbLabel),
         el('button', {
           class: `nm-badge ${status === 'error' ? 'nm-badge--warning' : ''}`,
           style: 'border:none; cursor:pointer',
@@ -51,6 +165,7 @@
       );
 
       container.append(integrationStatusBar());
+      container.append(clockCard());
 
       container.append(
         el('div', { class: 'kpi-grid' }, [
@@ -188,8 +303,13 @@
 
     draw();
     loadWeather();
+    checkSupabaseConnection();
+    clockTimer = setInterval(tickClocks, 1000);
     appState.addEventListener('change', draw);
-    return () => appState.removeEventListener('change', draw);
+    return () => {
+      appState.removeEventListener('change', draw);
+      if (clockTimer) clearInterval(clockTimer);
+    };
   }
 
   function kpi(value, label, onClick) {

@@ -130,9 +130,23 @@
     const expandBtn = el('button', { class: 'nm-btn nm-btn--icon sidebar-toggle', title: '사이드바 펼치기', onclick: toggleSidebar }, '»');
     expandBtn.style.display = collapsed ? '' : 'none';
 
-    const main = el('main', { class: 'main' }, [el('div', { id: 'view-root' })]);
+    const topbar = el('div', { class: 'topbar' }, [
+      el('div', {}),
+      el('div', { class: 'topbar__right' }, [
+        el('span', { class: 'topbar__user' }, appState.user?.name || appState.user?.email || ''),
+        el('button', { class: 'nm-btn nm-btn--danger', title: '로그아웃', onclick: logout }, '🚪 로그아웃'),
+      ]),
+    ]);
+    const main = el('main', { class: 'main' }, [topbar, el('div', { id: 'view-root' })]);
     shell.append(sidebar, main);
     app.append(expandBtn, shell);
+
+    async function logout() {
+      if (!window.confirmDialog('로그아웃 하시겠습니까?')) return;
+      await window.getStore().signOut();
+      location.hash = '';
+      location.reload();
+    }
 
     function toggleSidebar() {
       const nowCollapsed = !shell.classList.contains('app-shell--collapsed');

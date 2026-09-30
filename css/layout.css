@@ -92,6 +92,15 @@
   margin: 0 auto;
 }
 
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.topbar__right { display: flex; align-items: center; gap: 10px; }
+.topbar__user { font-size: 13px; color: var(--text-muted); }
+
 .page-header {
   display: flex;
   align-items: center;

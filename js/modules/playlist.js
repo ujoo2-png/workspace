@@ -133,8 +133,12 @@
                 class: 'nm-btn nm-btn--icon',
                 title: '내 목록에 추가',
                 onclick: async () => {
-                  await appState.addPlaylistItem({ content_type: 'movie', title: m.title, poster_url: m.poster_url, review: m.overview || null, status: 'to_watch' });
-                  toast('내 목록에 추가했습니다.', 'success');
+                  try {
+                    await appState.addPlaylistItem({ content_type: 'movie', title: m.title, poster_url: m.poster_url, review: m.overview || null, status: 'to_watch' });
+                    toast('내 목록에 추가했습니다.', 'success');
+                  } catch (err) {
+                    toast(`추가에 실패했습니다: ${err.message || err}`, 'error');
+                  }
                 },
               }, '+ 추가'),
             ])
@@ -180,7 +184,12 @@
             field('별점(1-5, 선택)', el('input', { class: 'nm-input', type: 'number', min: '1', max: '5', name: 'rating', value: existing?.rating || '' })),
             field('한줄평(선택)', el('textarea', { class: 'nm-textarea', name: 'review' }, existing?.review || ''))
           );
-          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          form.append(submitBtn);
+          // 등록(신규) 시에도 파일을 바로 첨부할 수 있도록, 저장 직후 폼 자리에 첨부 패널을 보여준다
+          // (기존에는 저장→모달 닫힘 이후 다시 열어야만 📎 버튼으로 첨부할 수 있었다).
+          const attachHost = el('div', {});
+          body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
@@ -196,12 +205,34 @@
               rating: fd.get('rating') ? Number(fd.get('rating')) : null,
               review: fd.get('review') || null,
             };
-            if (existing) await appState.updatePlaylistItem(existing.id, data);
-            else await appState.addPlaylistItem(data);
-            toast('저장했습니다.', 'success');
-            close();
+            try {
+              if (existing) {
+                await appState.updatePlaylistItem(existing.id, data);
+                toast('저장했습니다.', 'success');
+                close();
+              } else {
+                const row = await appState.addPlaylistItem(data);
+                toast('등록했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+                // 폼 입력을 잠그고 첨부 패널 + 닫기 버튼으로 전환한다(중복 등록 방지).
+                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+                submitBtn.style.display = 'none';
+                attachHost.append(
+                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                  el('div', { id: 'new-item-attach-box' }),
+                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+                );
+                window.renderAttachmentsPanel(attachHost.querySelector('#new-item-attach-box'), 'playlist_items', row.id);
+              }
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
-          body.append(form);
+          if (existing) {
+            attachHost.append(el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'));
+            const attachBox = el('div', {});
+            attachHost.append(attachBox);
+            window.renderAttachmentsPanel(attachBox, 'playlist_items', existing.id);
+          }
         },
       });
     }

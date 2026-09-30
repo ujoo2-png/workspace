@@ -132,14 +132,16 @@
       for (const s of rows) {
         // 소스 관제: 사용자 제어(활성/비활성)와 시스템 판단(정상/불안정/오류/미실행)을 분리해서 보여준다.
         const status = !s.last_run_at ? { label: '미실행', cls: '' } : s.last_result === 'success' ? { label: '정상', cls: 'nm-badge--success' } : s.last_result === 'empty' ? { label: '불안정(0건)', cls: 'nm-badge--warning' } : { label: '오류', cls: 'nm-badge--critical' };
+        const endpointPreview = s.type === 'markdown' ? `마크다운 텍스트 (${(s.endpoint || '').length.toLocaleString()}자)` : (s.endpoint || '');
         list.append(
           el('div', { class: 'item-row' }, [
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'row wrap', style: 'gap:6px; align-items:center' }, [
                 el('div', { class: 'item-row__title' }, `${escapeHtml(s.name)} ${s.enabled === false ? '(비활성)' : ''}`),
+                el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS'),
                 el('span', { class: `nm-badge ${status.cls}` }, status.label),
               ]),
-              el('div', { class: 'item-row__meta' }, `${escapeHtml(s.endpoint || '')}${s.last_run_at ? ' · 마지막 수집 ' + s.last_run_at.slice(0, 16).replace('T', ' ') : ''}`),
+              el('div', { class: 'item-row__meta' }, `${escapeHtml(endpointPreview)}${s.last_run_at ? ' · 마지막 수집 ' + s.last_run_at.slice(0, 16).replace('T', ' ') : ''}`),
             ]),
             el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openSourceForm(s) }, '✎'),
             el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeSource(s) }, '🗑'),
@@ -221,9 +223,26 @@
         title: existing ? '피드 소스 수정' : '피드 소스 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
+          const isMarkdown = existing?.type === 'markdown';
+          const typeSelect = el('select', { class: 'nm-select', name: 'type' }, [
+            el('option', { value: 'rss', selected: !isMarkdown || undefined }, 'RSS 피드(주소)'),
+            el('option', { value: 'markdown', selected: isMarkdown || undefined }, '마크다운 붙여넣기'),
+          ]);
+          const rssField = field('RSS 주소', el('input', { class: 'nm-input', type: 'url', name: 'endpoint_rss', placeholder: 'https://example.com/rss', value: !isMarkdown ? existing?.endpoint || '' : '' }));
+          const mdField = field(
+            '마크다운 본문(붙여넣기 — 예: "- [기사 제목](https://example.com/article) 설명…" 형식의 링크가 포함된 텍스트에서, 관심주제와 맞는 링크만 자동으로 브리핑에 추가합니다)',
+            el('textarea', { class: 'nm-textarea', name: 'endpoint_md', rows: 8, placeholder: '- [기사 제목](https://example.com/article) 한줄 설명' }, isMarkdown ? existing?.endpoint || '' : '')
+          );
+          function syncVisibility() {
+            rssField.style.display = typeSelect.value === 'markdown' ? 'none' : '';
+            mdField.style.display = typeSelect.value === 'markdown' ? '' : 'none';
+          }
+          typeSelect.addEventListener('change', syncVisibility);
           form.append(
             field('이름', el('input', { class: 'nm-input', name: 'name', required: true, placeholder: '예: OO 블로그', value: existing?.name || '' })),
-            field('RSS 주소', el('input', { class: 'nm-input', type: 'url', name: 'endpoint', required: true, placeholder: 'https://example.com/rss', value: existing?.endpoint || '' })),
+            field('소스 종류', typeSelect),
+            rssField,
+            mdField,
             field(
               '활성 상태',
               (() => {
@@ -234,15 +253,26 @@
               })()
             )
           );
+          syncVisibility();
           form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            const data = { name: fd.get('name'), type: 'rss', endpoint: fd.get('endpoint'), enabled: fd.get('enabled') === 'true' };
-            if (existing) await appState.updateFeedSource(existing.id, data);
-            else await appState.addFeedSource(data);
-            toast('저장했습니다.', 'success');
-            close();
+            const type = fd.get('type');
+            const endpoint = type === 'markdown' ? fd.get('endpoint_md') : fd.get('endpoint_rss');
+            if (!endpoint || !String(endpoint).trim()) {
+              toast(type === 'markdown' ? '마크다운 본문을 입력해주세요.' : 'RSS 주소를 입력해주세요.', 'error');
+              return;
+            }
+            const data = { name: fd.get('name'), type, endpoint, enabled: fd.get('enabled') === 'true' };
+            try {
+              if (existing) await appState.updateFeedSource(existing.id, data);
+              else await appState.addFeedSource(data);
+              toast('저장했습니다. "지금 가져오기"를 누르면 이 소스에서도 항목을 찾습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },

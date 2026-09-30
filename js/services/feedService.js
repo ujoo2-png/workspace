@@ -39,6 +39,31 @@
     return String(h >>> 0);
   }
 
+  // 마크다운 텍스트(붙여넣기/업로드)에서 링크가 있는 항목만 추출한다. RSS가 없는 사이트의 글
+  // 목록을 마크다운으로 정리해두고 그 안에서 관심주제와 맞는 링크만 브리핑으로 가져오고 싶을 때 쓴다.
+  // fetchFeedItems()와 동일한 { title, link, publishedAt, summary } 형태를 반환해
+  // collectBriefingItems()의 주제 매칭/중복 제거 로직을 그대로 재사용할 수 있게 한다.
+  function parseMarkdownLinks(markdownText) {
+    const items = [];
+    const lines = (markdownText || '').split(/\r?\n/);
+    for (const line of lines) {
+      // 매 줄마다 새 정규식 인스턴스를 만든다. 하나의 전역(global) 정규식 객체를 exec()과
+      // replace() 양쪽에서 같이 쓰면 lastIndex 상태가 서로 꼬여 무한 루프에 빠질 수 있다
+      // (실제로 발생했던 버그 — replace() 호출이 exec()의 lastIndex를 되돌려 같은 매치를 반복 탐지).
+      const scanRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+      const matches = [...line.matchAll(scanRe)];
+      if (!matches.length) continue;
+      const strippedLine = line.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '').replace(/[#*_`>-]/g, '').trim();
+      for (const m of matches) {
+        const title = m[1].trim();
+        const link = m[2].trim();
+        if (!title || !link) continue;
+        items.push({ title, link, publishedAt: null, summary: strippedLine.slice(0, 300) || null });
+      }
+    }
+    return items;
+  }
+
   function parseKeywords(text) {
     return (text || '')
       .split(',')
@@ -50,4 +75,5 @@
   window.itemMatchesTopic = itemMatchesTopic;
   window.simpleHash = simpleHash;
   window.parseKeywords = parseKeywords;
+  window.parseMarkdownLinks = parseMarkdownLinks;
 })();

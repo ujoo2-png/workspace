@@ -6,17 +6,17 @@
 // file:// 로 index.html을 그냥 더블클릭해서 열어도 동작하도록 하기 위한 구조.
 // globalThis를 쓰면 브라우저(window)와 Node(단위 테스트) 양쪽에서 동일하게 동작한다.
 globalThis.CONFIG = {
-  mode: 'supabase',
+  mode: 'local',
 
   // 앱 버전. 로그인 화면·사이드바·설정 화면이 모두 이 값을 참조하므로,
   // 배포 패키지(zip) 버전을 바꿀 때는 여기 한 곳만 수정하면 된다.
-  version: 'v7.0.0',
+  version: 'v7.1.0',
 
   // Supabase 프로젝트 설정 (mode: 'supabase'일 때만 사용)
   // anon/publishable key는 RLS로 보호되는 값이라 클라이언트에 두어도 안전합니다.
   // service_role key, DB 비밀번호, 외부 API 키는 절대 여기 넣지 마세요.
-  supabaseUrl: 'https://fuimlgxgpflciiflvahr.supabase.co',
-  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1aW1sZ3hncGZsY2lpZmx2YWhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MjAyNjQsImV4cCI6MjEwNjI5NjI2NH0.xo-JYej8bEMmfvXdjSH-O2BsRa-RPp7154fDT3lGY8M',
+  supabaseUrl: '',
+  supabaseAnonKey: '',
 
   // 세션 만료(자동 로그아웃) 정책 — 개인정보(Health/차량/일정 등)를 다루므로
   // 일정 시간 조작이 없으면 자동 로그아웃한다. 0이면 비활성화.

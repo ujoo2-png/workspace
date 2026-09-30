@@ -30,9 +30,18 @@
   border: 1px solid var(--border);
 }
 
+.clock-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.clock-grid__cell {
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
 @media (max-width: 860px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .density-row { flex-wrap: wrap; }
   .density-cell { min-width: 40px; }
   .weather-grid { grid-template-columns: repeat(2, 1fr); }
+  .clock-grid { grid-template-columns: repeat(2, 1fr); }
 }

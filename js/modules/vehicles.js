@@ -103,6 +103,19 @@
     });
   }
 
+  // 유지비 총합(정비+주유) — "마이클" 등 일반적인 차량관리 앱들이 공통으로 제공하는
+  // "이 차에 올해 얼마나 썼나" 요약을 재사용 가능한 함수로 분리했다.
+  function costSummary(maints, fuels) {
+    const thisYear = todayISO().slice(0, 4);
+    const sum = (rows, dateKey, costKey) =>
+      rows.filter((r) => (r[dateKey] || '').startsWith(thisYear)).reduce((s, r) => s + (Number(r[costKey]) || 0), 0);
+    const maintCost = sum(maints, 'service_date', 'cost');
+    const fuelCost = sum(fuels, 'logged_at', 'cost');
+    const total = maintCost + fuelCost;
+    if (!total) return null;
+    return { maintCost, fuelCost, total, year: thisYear };
+  }
+
   function renderVehicles(root) {
     const container = el('div', {});
     root.append(container);
@@ -170,6 +183,22 @@
                 ])
               : el('div', { class: 'text-muted', style: 'margin-top:10px; font-size:12px' }, '예정된 정비 없음(정비 기록에 다음 예정일/주행거리를 입력하면 예측됩니다)'),
             efficiency ? el('div', { class: 'text-muted', style: 'margin-top:6px; font-size:12px' }, `최근 평균 연비: ${efficiency} km/L(또는 kWh)`) : null,
+            (() => {
+              const cs = costSummary(maints, fuels);
+              if (!cs) return null;
+              return el('div', { class: 'text-muted', style: 'margin-top:4px; font-size:12px' },
+                `${cs.year}년 누적 유지비: 정비 ${cs.maintCost.toLocaleString()}원 + 주유/충전 ${cs.fuelCost.toLocaleString()}원 = 총 ${cs.total.toLocaleString()}원`);
+            })(),
+            (insuranceDDay !== null && insuranceDDay <= 30) || (registrationDDay !== null && registrationDDay <= 30)
+              ? el('div', { class: 'row', style: 'margin-top:6px; gap:6px' }, [
+                  insuranceDDay !== null && insuranceDDay <= 30
+                    ? el('button', { class: 'nm-btn nm-btn--icon', title: '보험 갱신일 일정 추가', onclick: () => addExpiryToSchedule(v, '보험 갱신', v.insurance_expiry) }, '🛡️ 보험 D-알림')
+                    : null,
+                  registrationDDay !== null && registrationDDay <= 30
+                    ? el('button', { class: 'nm-btn nm-btn--icon', title: '검사/등록 갱신일 일정 추가', onclick: () => addExpiryToSchedule(v, '자동차검사/등록 갱신', v.registration_expiry) }, '📋 등록 D-알림')
+                    : null,
+                ])
+              : null,
 
             el('div', { class: 'ai-suggest-box' }, [
               el('div', { class: 'row row--between', style: 'align-items:center' }, [
@@ -245,9 +274,13 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            await appState.addOdometerLog(v.id, { logged_at: fd.get('logged_at'), odometer: Number(fd.get('odometer')) });
-            toast('주행거리를 기록했습니다.', 'success');
-            close();
+            try {
+              await appState.addOdometerLog(v.id, { logged_at: fd.get('logged_at'), odometer: Number(fd.get('odometer')) });
+              toast('주행거리를 기록했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },
@@ -261,6 +294,15 @@
         memo: '차량관리에서 자동 제안된 일정입니다.',
       });
       toast('일정에 추가했습니다.', 'success');
+    }
+
+    async function addExpiryToSchedule(v, label, dateIso) {
+      try {
+        await appState.addSchedule({ title: `${v.name} ${label}`, date: dateIso, memo: '차량관리에서 자동 제안된 일정입니다.' });
+        toast('일정에 추가했습니다.', 'success');
+      } catch (err) {
+        toast(`일정 추가에 실패했습니다: ${err.message || err}`, 'error');
+      }
     }
 
     async function remove(v) {
@@ -342,10 +384,14 @@
               insurance_expiry: fd.get('insurance_expiry') || null,
               registration_expiry: fd.get('registration_expiry') || null,
             };
-            if (existing) await appState.updateVehicle(existing.id, data);
-            else await appState.addVehicle(data);
-            toast('저장했습니다.', 'success');
-            close();
+            try {
+              if (existing) await appState.updateVehicle(existing.id, data);
+              else await appState.addVehicle(data);
+              toast('저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },
@@ -370,17 +416,21 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            await appState.addMaintenance(v.id, {
-              item: fd.get('item'),
-              service_date: fd.get('service_date'),
-              odometer: fd.get('odometer') ? Number(fd.get('odometer')) : null,
-              cost: fd.get('cost') ? Number(fd.get('cost')) : null,
-              next_due_date: fd.get('next_due_date') || null,
-              next_due_odometer: fd.get('next_due_odometer') ? Number(fd.get('next_due_odometer')) : null,
-              memo: fd.get('memo') || null,
-            });
-            toast('정비 기록을 저장했습니다.', 'success');
-            close();
+            try {
+              await appState.addMaintenance(v.id, {
+                item: fd.get('item'),
+                service_date: fd.get('service_date'),
+                odometer: fd.get('odometer') ? Number(fd.get('odometer')) : null,
+                cost: fd.get('cost') ? Number(fd.get('cost')) : null,
+                next_due_date: fd.get('next_due_date') || null,
+                next_due_odometer: fd.get('next_due_odometer') ? Number(fd.get('next_due_odometer')) : null,
+                memo: fd.get('memo') || null,
+              });
+              toast('정비 기록을 저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },
@@ -402,14 +452,18 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            await appState.addFuelLog(v.id, {
-              logged_at: fd.get('logged_at'),
-              amount: fd.get('amount') ? Number(fd.get('amount')) : null,
-              cost: fd.get('cost') ? Number(fd.get('cost')) : null,
-              odometer: fd.get('odometer') ? Number(fd.get('odometer')) : null,
-            });
-            toast('주유 기록을 저장했습니다.', 'success');
-            close();
+            try {
+              await appState.addFuelLog(v.id, {
+                logged_at: fd.get('logged_at'),
+                amount: fd.get('amount') ? Number(fd.get('amount')) : null,
+                cost: fd.get('cost') ? Number(fd.get('cost')) : null,
+                odometer: fd.get('odometer') ? Number(fd.get('odometer')) : null,
+              });
+              toast('주유 기록을 저장했습니다.', 'success');
+              close();
+            } catch (err) {
+              toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },

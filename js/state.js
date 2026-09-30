@@ -325,8 +325,10 @@
 
     // ---- 문화생활(PlayList) ----
     async addPlaylistItem(data) {
-      await this.store.create('playlist_items', { ...data, user_id: this.user.id, status: data.status || 'to_watch' });
-      return this.refreshAll();
+      // 등록 즉시 첨부파일을 붙일 수 있도록(등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('playlist_items', { ...data, user_id: this.user.id, status: data.status || 'to_watch' });
+      await this.refreshAll();
+      return row;
     }
     async updatePlaylistItem(id, patch) {
       await this.store.update('playlist_items', id, patch);
@@ -386,7 +388,9 @@
     // 활성화된 피드 소스를 전부 가져와 활성 주제와 매칭한 뒤, 새 항목만 저장한다.
     // (user_id, item_hash) 유니크 제약과 동일한 효과를 로컬에서는 Set으로 낸다.
     async collectBriefingItems() {
-      const { fetchFeedItems, itemMatchesTopic, simpleHash } = window;
+      const { fetchFeedItems, itemMatchesTopic, simpleHash, parseMarkdownLinks } = window;
+      // 'markdown' 타입은 RSS 엔드포인트가 아니라 사용자가 붙여넣은 본문(endpoint 컬럼에 그대로 저장)
+      // 이므로 fetchFeedItems() 대신 parseMarkdownLinks()로 링크만 추출한다(아래 루프에서 분기).
       const sources = this.feedSources.filter((s) => s.enabled !== false && s.type !== 'crawl' && s.type !== 'api');
       const activeTopics = this.briefingTopics.filter((t) => t.active !== false);
       const existingHashes = new Set(this.briefingItems.map((i) => i.item_hash));
@@ -398,7 +402,7 @@
       for (const source of sources) {
         let items = [];
         try {
-          items = await fetchFeedItems(source.endpoint);
+          items = source.type === 'markdown' ? (parseMarkdownLinks(source.endpoint) || []) : await fetchFeedItems(source.endpoint);
         } catch (e) {
           errors.push(`${source.name}: ${e.message}`);
           // 소스 관제(개발계획서 9.3): 시스템이 판단하는 상태(정상/오류/미실행)를 사용자 on/off와 분리해 기록한다.

@@ -29,6 +29,14 @@
     },
   };
 
+  // deleted_at(소프트 삭제) 컬럼이 있는 테이블만 명시한다. 이 목록에 없는 테이블에 대해
+  // list()가 .is('deleted_at', null) 필터를 걸면 Postgres가 42703(컬럼 없음) 에러를 던지고,
+  // 이 에러가 state.js의 refreshAll()에서 조용히 삼켜지면서(.catch(() => []))
+  // "등록했는데 목록에 안 보임" 버그로 이어진다(챌린저/차량 정비·주유 기록 등).
+  const TABLES_WITH_SOFT_DELETE = new Set([
+    'projects', 'schedules', 'programs', 'vehicles', 'playlist_items', 'knowledge_docs', 'devlogs',
+  ]);
+
   class SupabaseStore {
     constructor({ url, anonKey }) {
       if (!url || !anonKey) {
@@ -167,7 +175,8 @@
     // ---- 데이터 CRUD (RLS가 user_id를 강제하므로 여기서는 그대로 전달) ----
     async list(table, { where, orderBy, ascending = true } = {}) {
       const client = await this._ensureClient();
-      let q = client.from(table).select('*').is('deleted_at', null);
+      let q = client.from(table).select('*');
+      if (TABLES_WITH_SOFT_DELETE.has(table)) q = q.is('deleted_at', null);
       if (where) for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
       if (orderBy) q = q.order(orderBy, { ascending });
       const { data, error } = await q;
@@ -197,6 +206,9 @@
     }
 
     async softDelete(table, id) {
+      // deleted_at 컬럼이 없는 테이블(챌린저·차량 정비 기록 등)은 소프트 삭제 대신
+      // 실제로 행을 삭제한다. 그렇지 않으면 update()가 없는 컬럼을 참조해 에러가 난다.
+      if (!TABLES_WITH_SOFT_DELETE.has(table)) return this.remove(table, id);
       return this.update(table, id, { deleted_at: new Date().toISOString() });
     }
 
