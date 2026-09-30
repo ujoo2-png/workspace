@@ -32,7 +32,12 @@
       container.append(
         el('div', { class: 'page-header' }, [
           el('h1', {}, '문화생활'),
-          el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openItemForm() }, '+ 등록'),
+          el('div', { class: 'row', style: 'gap:8px' }, [
+            window.getPublicDataEnabled && window.getPublicDataEnabled().cultureEvents
+              ? el('button', { class: 'nm-btn', onclick: () => openCultureSearch() }, '🎭 공연·전시 검색')
+              : null,
+            el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openItemForm() }, '+ 등록'),
+          ]),
         ])
       );
 
@@ -165,6 +170,88 @@
       if (!confirmDialog(`"${p.title}"을(를) 삭제할까요?`)) return;
       await appState.deletePlaylistItem(p.id);
       toast('삭제했습니다.', 'success');
+    }
+
+    // KOPIS 장르명을 이 화면의 고정 종류(content_type)로 대략 매핑한다(KOPIS는 공연예술 전문이라
+    // "전시"는 다루지 않고, 연극/뮤지컬/음악(서양·국악·대중)/무용/복합 위주다).
+    function mapGenreToContentType(genre) {
+      if (!genre) return 'etc';
+      if (genre.includes('뮤지컬')) return 'musical';
+      if (genre.includes('연극')) return 'theater';
+      if (genre.includes('음악') || genre.includes('국악')) return 'concert';
+      return 'etc';
+    }
+
+    // KOPIS(공연예술통합전산망) 공연 검색 — 키워드/기간으로 찾아 결과에서 바로 "+ 추가"할 수 있다.
+    function openCultureSearch() {
+      openModal({
+        title: '🎭 공연·전시 검색(KOPIS)',
+        contentBuilder(body) {
+          const today = todayISO();
+          const in30 = window.addDays ? window.addDays(today, 30) : today;
+          const keywordInput = el('input', { class: 'nm-input', placeholder: '공연명 키워드(선택)', style: 'flex:1' });
+          const stdateInput = el('input', { class: 'nm-input', type: 'date', value: today, style: 'width:150px' });
+          const eddateInput = el('input', { class: 'nm-input', type: 'date', value: in30, style: 'width:150px' });
+          const searchBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'button' }, '검색');
+          const resultBox = el('div', { style: 'margin-top:12px' });
+
+          const form = el('div', { class: 'stack' }, [
+            el('div', { class: 'row wrap', style: 'gap:8px' }, [keywordInput, stdateInput, eddateInput, searchBtn]),
+            resultBox,
+          ]);
+          body.append(form);
+
+          searchBtn.addEventListener('click', async () => {
+            resultBox.innerHTML = '';
+            resultBox.append(el('div', { class: 'text-muted' }, '검색 중…'));
+            try {
+              const stdate = stdateInput.value.replace(/-/g, '');
+              const eddate = eddateInput.value.replace(/-/g, '');
+              const items = await window.fetchCultureEvents({ keyword: keywordInput.value.trim() || undefined, stdate, eddate, rows: 20 });
+              resultBox.innerHTML = '';
+              if (!items.length) {
+                resultBox.append(el('div', { class: 'text-muted' }, '검색 결과가 없습니다.'));
+                return;
+              }
+              const list = el('div', { class: 'item-list' });
+              items.forEach((it) => {
+                list.append(
+                  el('div', { class: 'item-row' }, [
+                    it.poster ? el('img', { src: it.poster, alt: '', style: 'width:36px; height:48px; object-fit:cover; border-radius:4px' }) : null,
+                    el('div', { class: 'item-row__main' }, [
+                      el('div', { class: 'item-row__title' }, escapeHtml(it.title || '')),
+                      el('div', { class: 'text-muted', style: 'font-size:12px' }, `${escapeHtml(it.venue || '')} · ${it.startDate || ''}~${it.endDate || ''}`),
+                    ]),
+                    el('button', {
+                      class: 'nm-btn nm-btn--icon',
+                      title: '내 목록에 추가',
+                      onclick: async () => {
+                        try {
+                          await appState.addPlaylistItem({
+                            content_type: mapGenreToContentType(it.genre),
+                            title: it.title,
+                            venue_name: it.venue,
+                            event_date: it.startDate || null,
+                            poster_url: it.poster || null,
+                            status: 'to_watch',
+                          });
+                          toast('내 목록에 추가했습니다.', 'success');
+                        } catch (err) {
+                          toast(`추가에 실패했습니다: ${err.message || err}`, 'error');
+                        }
+                      },
+                    }, '+ 추가'),
+                  ])
+                );
+              });
+              resultBox.append(list);
+            } catch (e) {
+              resultBox.innerHTML = '';
+              resultBox.append(el('div', { class: 'text-muted', style: 'color:#ef4444' }, `검색에 실패했습니다: ${e.message}`));
+            }
+          });
+        },
+      });
     }
 
     function openItemForm(existing) {

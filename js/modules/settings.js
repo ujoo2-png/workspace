@@ -258,9 +258,40 @@
         },
       }, '저장 및 연결 테스트');
 
+      const kopisInput = el('input', { class: 'nm-input', type: 'password', name: 'kopis_key', placeholder: 'KOPIS 서비스 키', value: window.getKopisKey() });
+      const kopisToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'cultureEvents', checked: enabled.cultureEvents || undefined }),
+        el('span', { class: 'text-muted' }, 'KOPIS 공연전시정보 연동 사용 · 문화생활 화면에서 "공연·전시 검색"으로 찾아 바로 등록합니다'),
+      ]);
+      const saveKopisBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: async () => {
+          window.setKopisKey(kopisInput.value.trim());
+          window.setPublicDataEnabled({ ...window.getPublicDataEnabled(), cultureEvents: kopisToggle.querySelector('input').checked });
+          if (!kopisInput.value.trim()) {
+            toast('KOPIS 키를 삭제했습니다.', 'info');
+            return;
+          }
+          saveKopisBtn.disabled = true;
+          saveKopisBtn.textContent = '확인 중…';
+          try {
+            const today = new Date();
+            const stdate = today.toISOString().slice(0, 10).replace(/-/g, '');
+            const later = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+            await window.fetchCultureEvents({ stdate, eddate: later, rows: 1 });
+            toast('KOPIS 공연전시정보에 연결되었습니다.', 'success');
+          } catch (e) {
+            toast('연결에 실패했습니다: ' + e.message, 'error');
+          }
+          saveKopisBtn.disabled = false;
+          saveKopisBtn.textContent = '저장 및 연결 테스트';
+        },
+      }, '저장 및 연결 테스트');
+
       return el('div', { class: 'nm-card' }, [
         el('h3', {}, '공공데이터포털 연동'),
-        el('p', { class: 'text-muted', style: 'font-size:12px' }, '공공데이터포털·오피넷에서 무료로 발급받은 서비스 키를 등록하면 공휴일 자동 등록, 전국 평균 유가 비교 기능을 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.'),
+        el('p', { class: 'text-muted', style: 'font-size:12px' }, '공공데이터포털·오피넷·KOPIS에서 무료로 발급받은 서비스 키를 등록하면 공휴일 자동 등록, 전국 평균 유가 비교, 공연·전시 검색 기능을 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.'),
         el('div', { style: 'margin-top:12px' }, [
           el('div', { class: 'row row--between' }, [el('strong', { style: 'font-size:13px' }, '특일정보(공휴일)'), dataGoKrStatus]),
           el('p', { class: 'text-muted', style: 'font-size:11px' }, [
@@ -278,6 +309,15 @@
           ]),
           el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [opinetInput, saveFuelBtn]),
           fuelToggle,
+        ]),
+        el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
+          el('strong', { style: 'font-size:13px' }, 'KOPIS 공연전시정보'),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+            '활용신청: ',
+            el('a', { href: 'https://kopis.or.kr/por/cs/openapi/openApiInfo.do?menuId=MNU_00074', target: '_blank', rel: 'noopener' }, 'kopis.or.kr Open API'),
+          ]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kopisInput, saveKopisBtn]),
+          kopisToggle,
         ]),
       ]);
     }

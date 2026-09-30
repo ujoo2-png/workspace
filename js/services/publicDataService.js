@@ -5,20 +5,24 @@
 (function () {
   const KEY_STORAGE = 'workspace:publicData:dataGoKrKey';
   const OPINET_KEY_STORAGE = 'workspace:publicData:opinetKey';
-  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays:bool, fuelPrice:bool}
+  const KOPIS_KEY_STORAGE = 'workspace:publicData:kopisKey';
+  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays:bool, fuelPrice:bool, cultureEvents:bool}
   const STATUS_STORAGE = 'workspace:publicData:status'; // connected|error|unset (공휴일 API 기준)
   const CACHE_PREFIX = 'workspace:publicData:cache:';
+  const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true };
 
   function getPublicDataKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
   function setPublicDataKey(key) { localStorage.setItem(KEY_STORAGE, key || ''); }
   function getOpinetKey() { return localStorage.getItem(OPINET_KEY_STORAGE) || ''; }
   function setOpinetKey(key) { localStorage.setItem(OPINET_KEY_STORAGE, key || ''); }
+  function getKopisKey() { return localStorage.getItem(KOPIS_KEY_STORAGE) || ''; }
+  function setKopisKey(key) { localStorage.setItem(KOPIS_KEY_STORAGE, key || ''); }
 
   function getPublicDataEnabled() {
     try {
-      return { holidays: true, fuelPrice: true, ...JSON.parse(localStorage.getItem(ENABLED_STORAGE) || '{}') };
+      return { ...ENABLED_DEFAULTS, ...JSON.parse(localStorage.getItem(ENABLED_STORAGE) || '{}') };
     } catch {
-      return { holidays: true, fuelPrice: true };
+      return { ...ENABLED_DEFAULTS };
     }
   }
   function setPublicDataEnabled(next) {
@@ -133,6 +137,35 @@
     return holidays;
   }
 
+  // 여러 공공/공사 API가 브라우저 직접 호출 시 CORS로 막히는 공통 패턴을 하나로 묶은 헬퍼.
+  // 1) 같은 출처의 서버리스 프록시(/api/...)가 있으면 우선 사용하고, 2) 프록시가 없는 환경
+  // (로컬 데모 등)에서는 직접 호출을 시도한 뒤, 그마저 실패하면 CORS 가능성을 알리는 에러를 던진다.
+  async function fetchTextViaProxyOrDirect({ proxyUrl, directUrl, serviceName, proxyHint }) {
+    let proxyTried = false;
+    try {
+      const proxyRes = await fetch(proxyUrl);
+      proxyTried = true;
+      if (proxyRes.ok) return await proxyRes.text();
+      if (proxyRes.status !== 404) {
+        const text = await proxyRes.text().catch(() => '');
+        throw new Error(`${serviceName} 요청이 실패했습니다(HTTP ${proxyRes.status})${text ? ': ' + text.slice(0, 200) : ''}`);
+      }
+      // 404면 프록시 자체가 배포되어 있지 않은 것으로 보고 직접 호출로 폴백한다.
+    } catch (e) {
+      if (proxyTried && e instanceof Error && e.message.includes('요청이 실패했습니다')) throw e;
+      // 프록시가 없는 환경(네트워크 오류/404) — 직접 호출로 폴백
+    }
+
+    try {
+      const res = await fetch(directUrl);
+      if (!res.ok) throw new Error(`${serviceName} 요청이 실패했습니다(HTTP ${res.status}).`);
+      return await res.text();
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('요청이 실패했습니다')) throw e;
+      throw new Error(`${serviceName}에 연결하지 못했습니다. 브라우저가 CORS 정책으로 직접 호출을 막았을 가능성이 높습니다(개발자 도구 Console에 "CORS" 관련 오류가 보이면 확정입니다). ${proxyHint}`);
+    }
+  }
+
   // 오피넷(한국석유공사) 전국 평균 유가 — avgAllPrice API. 공공데이터포털과 별개로 오피넷에서
   // 자체 발급하는 키가 필요하다(https://www.opinet.co.kr/user/custapi/custApiInfo.do).
   // 반환: [{ productCode, productName, price, diff }]
@@ -146,40 +179,15 @@
     const key = getOpinetKey();
     if (!key) throw new Error('설정 화면에서 오피넷 API 키를 먼저 등록해 주세요.');
 
-    // 오피넷은 브라우저(fetch)에서 직접 호출하면 CORS로 막힌다(Access-Control-Allow-Origin 헤더를
-    // 내려주지 않음 — 서버 간 호출용으로만 열려 있는 API). 그래서 1) 같은 출처의 서버리스 프록시
-    // (Vercel이면 /api/opinet-fuel.js)가 있으면 그걸 우선 쓰고, 2) 프록시가 없는 환경(로컬 데모 등)
-    // 에서는 직접 호출을 시도해서 안 되면 그 사실을 명확한 에러로 알려준다.
     // 파라미터명은 code(인증키)이며, "certkey"가 아니다 — 오피넷 자체 문서 페이지의 표기와 달리
     // 실제 avgAllPrice.do 엔드포인트는 code로만 인증을 통과시킨다(실제 호출로 확인됨).
-    const directUrl = `https://www.opinet.co.kr/api/avgAllPrice.do?code=${encodeURIComponent(key)}&out=json`;
-    const proxyUrl = `/api/opinet-fuel?key=${encodeURIComponent(key)}`;
-
-    let json;
-    try {
-      const proxyRes = await fetch(proxyUrl);
-      if (proxyRes.ok) {
-        json = await proxyRes.json();
-      } else if (proxyRes.status !== 404) {
-        // 프록시는 있는데 오피넷 쪽에서 에러를 낸 경우 — 그대로 전달된 본문을 읽어본다.
-        const text = await proxyRes.text().catch(() => '');
-        throw new Error(`유가정보 요청이 실패했습니다(HTTP ${proxyRes.status})${text ? ': ' + text.slice(0, 200) : ''}`);
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('유가정보 요청이 실패했습니다')) throw e;
-      // 프록시 자체가 없는 환경(로컬 데모 등) — 직접 호출로 폴백
-    }
-
-    if (!json) {
-      let res;
-      try {
-        res = await fetch(directUrl);
-      } catch (e) {
-        throw new Error('오피넷에 연결하지 못했습니다. 브라우저가 CORS 정책으로 직접 호출을 막았을 가능성이 높습니다(개발자 도구 Console에 "CORS" 관련 오류가 보이면 확정입니다). 이 경우 Vercel 배포에 포함된 /api/opinet-fuel.js 서버리스 프록시를 통해야 하며, 이 zip에 이미 포함되어 있으니 재배포 후 다시 시도해 주세요.');
-      }
-      if (!res.ok) throw new Error(`유가정보 요청이 실패했습니다(HTTP ${res.status}).`);
-      json = await res.json();
-    }
+    const text = await fetchTextViaProxyOrDirect({
+      proxyUrl: `/api/opinet-fuel?key=${encodeURIComponent(key)}`,
+      directUrl: `https://www.opinet.co.kr/api/avgAllPrice.do?code=${encodeURIComponent(key)}&out=json`,
+      serviceName: '유가정보',
+      proxyHint: '이 경우 Vercel 배포에 포함된 /api/opinet-fuel.js 서버리스 프록시를 통해야 하며, 이 zip에 이미 포함되어 있으니 재배포 후 다시 시도해 주세요.',
+    });
+    const json = JSON.parse(text);
     const rows = json?.RESULT?.OIL || [];
     const result = rows.map((r) => ({
       productCode: r.PRODCD,
@@ -191,13 +199,67 @@
     return result;
   }
 
+  // 공연전시정보(KOPIS, 공연예술통합전산망) — 공연목록 조회(pblprfr) API.
+  // https://kopis.or.kr/por/cs/openapi/openApiInfo.do 에서 발급받은 서비스키를 사용한다.
+  // 이 API도 오피넷과 마찬가지로 브라우저 직접 호출 시 CORS로 막힐 가능성이 높아 프록시를 우선 쓴다.
+  // 반환: [{ id, title, startDate, endDate, venue, area, genre, poster, state }]
+  function toIso(yyyymmdd) {
+    return String(yyyymmdd || '').replace(/(\d{4})\.?(\d{2})\.?(\d{2})/, '$1-$2-$3');
+  }
+
+  async function fetchCultureEvents({ keyword, stdate, eddate, rows: rowLimit = 20 } = {}) {
+    const key = getKopisKey();
+    if (!key) throw new Error('설정 화면에서 KOPIS(공연전시정보) API 키를 먼저 등록해 주세요.');
+    if (!stdate || !eddate) throw new Error('조회 시작일/종료일을 입력해 주세요.');
+
+    const qs = new URLSearchParams({ service: key, stdate, eddate, cpage: '1', rows: String(rowLimit) });
+    if (keyword) qs.set('shprfnm', keyword);
+    const path = `openApi/restful/pblprfr?${qs.toString()}`;
+
+    const text = await fetchTextViaProxyOrDirect({
+      proxyUrl: `/api/kopis-culture?${qs.toString()}`,
+      directUrl: `https://www.kopis.or.kr/${path}`,
+      serviceName: '공연전시정보',
+      proxyHint: '이 경우 Vercel 배포에 포함된 /api/kopis-culture.js 서버리스 프록시를 통해야 하며, 이 zip에 이미 포함되어 있으니 재배포 후 다시 시도해 주세요.',
+    });
+
+    const codeMatch = text.match(/<returncode>([^<]*)<\/returncode>/);
+    if (codeMatch && codeMatch[1] && codeMatch[1] !== '00' && !/<db>/.test(text)) {
+      const msgMatch = text.match(/<errmsg>([^<]*)<\/errmsg>/);
+      throw new Error((msgMatch && msgMatch[1]) || 'KOPIS API 오류가 발생했습니다. 서비스 키를 확인해 주세요.');
+    }
+
+    const items = [];
+    const dbRe = /<db>([\s\S]*?)<\/db>/g;
+    let m;
+    while ((m = dbRe.exec(text))) {
+      const block = m[1];
+      const get = (tag) => (block.match(new RegExp(`<${tag}>([^<]*)</${tag}>`)) || [])[1];
+      items.push({
+        id: get('mt20id'),
+        title: get('prfnm'),
+        startDate: toIso(get('prfpdfrom')),
+        endDate: toIso(get('prfpdto')),
+        venue: get('fcltynm'),
+        area: get('area'),
+        genre: get('genrenm'),
+        poster: get('poster'),
+        state: get('prfstate'),
+      });
+    }
+    return items;
+  }
+
   window.getPublicDataKey = getPublicDataKey;
   window.setPublicDataKey = setPublicDataKey;
   window.getOpinetKey = getOpinetKey;
   window.setOpinetKey = setOpinetKey;
+  window.getKopisKey = getKopisKey;
+  window.setKopisKey = setKopisKey;
   window.getPublicDataEnabled = getPublicDataEnabled;
   window.setPublicDataEnabled = setPublicDataEnabled;
   window.getPublicDataStatus = getPublicDataStatus;
   window.fetchHolidays = fetchHolidays;
   window.fetchFuelPrice = fetchFuelPrice;
+  window.fetchCultureEvents = fetchCultureEvents;
 })();
