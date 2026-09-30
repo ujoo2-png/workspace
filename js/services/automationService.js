@@ -11,9 +11,9 @@
    * @param {object|null} enabledRules Automation 화면에서 저장한 사용자별 on/off·파라미터
    * @returns {object[]} 이번 실행에서 새로 생성된 알림들
    */
-  async function runAndPersistAutomation(store, userId, { projects, schedules, vehicles = [], challenges = [] }, enabledRules = null) {
+  async function runAndPersistAutomation(store, userId, { projects, schedules, vehicles = [], challenges = [], playlistItems = [] }, enabledRules = null) {
     const CONFIG = window.CONFIG;
-    const candidates = runAutomationRules({ projects, schedules, vehicles, challenges }, CONFIG.automation, todayISO(), enabledRules);
+    const candidates = runAutomationRules({ projects, schedules, vehicles, challenges, playlistItems }, CONFIG.automation, todayISO(), enabledRules);
     const existing = await store.list('notifications', { where: { user_id: userId } }).catch(() => []);
     const existingKeys = new Set(existing.map((n) => n.dedupe_key));
 

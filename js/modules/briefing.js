@@ -229,9 +229,19 @@
             el('option', { value: 'markdown', selected: isMarkdown || undefined }, '마크다운 붙여넣기'),
           ]);
           const rssField = field('RSS 주소', el('input', { class: 'nm-input', type: 'url', name: 'endpoint_rss', placeholder: 'https://example.com/rss', value: !isMarkdown ? existing?.endpoint || '' : '' }));
+          const mdTextarea = el('textarea', { class: 'nm-textarea', name: 'endpoint_md', rows: 8, placeholder: '- [기사 제목](https://example.com/article) 한줄 설명' }, isMarkdown ? existing?.endpoint || '' : '');
+          const mdFileInput = el('input', { class: 'nm-input', type: 'file', accept: '.md,.markdown,text/markdown,text/plain' });
+          mdFileInput.addEventListener('change', () => {
+            const file = mdFileInput.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => { mdTextarea.value = String(reader.result || ''); toast(`"${file.name}" 내용을 불러왔습니다.`, 'success'); };
+            reader.onerror = () => toast('파일을 읽는 중 오류가 발생했습니다.', 'error');
+            reader.readAsText(file);
+          });
           const mdField = field(
-            '마크다운 본문(붙여넣기 — 예: "- [기사 제목](https://example.com/article) 설명…" 형식의 링크가 포함된 텍스트에서, 관심주제와 맞는 링크만 자동으로 브리핑에 추가합니다)',
-            el('textarea', { class: 'nm-textarea', name: 'endpoint_md', rows: 8, placeholder: '- [기사 제목](https://example.com/article) 한줄 설명' }, isMarkdown ? existing?.endpoint || '' : '')
+            '마크다운 본문(붙여넣기 또는 .md 파일 업로드 — 예: "- [기사 제목](https://example.com/article) 설명…" 형식의 링크가 포함된 텍스트에서, 관심주제와 맞는 링크만 자동으로 브리핑에 추가합니다)',
+            el('div', { class: 'stack', style: 'gap:8px' }, [mdFileInput, mdTextarea])
           );
           function syncVisibility() {
             rssField.style.display = typeSelect.value === 'markdown' ? 'none' : '';

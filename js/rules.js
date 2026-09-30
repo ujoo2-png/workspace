@@ -21,6 +21,7 @@
     { type: 'vehicle_insurance_expiry', label: '차량 보험 만료 임박', defaultParams: { days: 30 } },
     { type: 'vehicle_registration_expiry', label: '차량 등록 만료 임박', defaultParams: { days: 30 } },
     { type: 'challenge_at_risk', label: '챌린지 연속기록 끊길 위험', defaultParams: { minStreak: 3 } },
+    { type: 'playlist_reminder', label: '문화생활 관람 예정 D-1 알림', defaultParams: { days: 1 } },
   ];
 
   function ruleConfig(enabledRules, type) {
@@ -43,7 +44,7 @@
    * @param {object|null} enabledRules { [ruleType]: { enabled, params } } — Automation 화면에서 저장한 사용자 설정
    * @returns {{dedupeKey:string, type:string, severity:'info'|'warning'|'critical', title:string, message:string, relatedTable:string, relatedId:string}[]}
    */
-  function runAutomationRules({ projects = [], schedules = [], vehicles = [], challenges = [] }, config = {}, todayIso = todayISO(), enabledRules = null) {
+  function runAutomationRules({ projects = [], schedules = [], vehicles = [], challenges = [], playlistItems = [] }, config = {}, todayIso = todayISO(), enabledRules = null) {
     const out = [];
 
     // 1) 프로젝트 마감 D-n 경고 / 마감 초과 (진행 중 상태만, 완료/보류 제외)
@@ -188,6 +189,26 @@
             message: `"${c.title}" 챌린지를 ${streak}일 연속 체크인했는데, 오늘은 아직입니다.`,
             relatedTable: 'challenges',
             relatedId: c.id,
+          });
+        }
+      }
+    }
+
+    // 7) 문화생활 관람 예정 D-1 알림 (예정 상태 + 관람예정일이 임박한 항목)
+    const playlistCfg = ruleConfig(enabledRules, 'playlist_reminder');
+    if (playlistCfg.enabled) {
+      for (const p of playlistItems) {
+        if (p.deleted_at || p.status !== 'to_watch' || !p.event_date) continue;
+        const d = diffDays(todayIso, p.event_date);
+        if (d >= 0 && d <= (playlistCfg.params.days ?? 1)) {
+          out.push({
+            dedupeKey: `playlist_reminder:${p.id}:${p.event_date}`,
+            type: 'playlist_reminder',
+            severity: d === 0 ? 'warning' : 'info',
+            title: `관람 예정 D-${d}: ${p.title}`,
+            message: `"${p.title}" 관람/관람예정일이 ${d === 0 ? '오늘' : '내일'}입니다${p.venue_name ? ' (' + p.venue_name + ')' : ''}.`,
+            relatedTable: 'playlist_items',
+            relatedId: p.id,
           });
         }
       }

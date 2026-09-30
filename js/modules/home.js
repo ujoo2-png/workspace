@@ -4,7 +4,35 @@
   const { appState, el, escapeHtml, todayISO, diffDays, weekdayLabel, predictScheduleDensity, predictProjectCompletion, navigate } = window;
 
   // 알림의 related_table(js/rules.js가 채움)을 눌렀을 때 이동할 메뉴로 매핑한다.
-  const NOTI_TARGET = { projects: '/projects', schedules: '/schedule', vehicles: '/vehicles', challenges: '/challenges' };
+  const NOTI_TARGET = { projects: '/projects', schedules: '/schedule', vehicles: '/vehicles', challenges: '/challenges', playlist_items: '/playlist' };
+
+  // 홈 화면 위젯을 드래그로 순서를 바꿀 수 있게 한다. 순서는 localStorage에 저장해두고
+  // 다음 방문 때도 유지한다. 새 버전에서 위젯이 추가되면 저장된 순서 뒤에 이어 붙인다.
+  const WIDGET_ORDER_KEY = 'workspace:homeWidgetOrder';
+  const WIDGET_LABELS = {
+    clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', summary: '📅 이번 주 활동 요약',
+    density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림',
+  };
+  const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
+
+  function getHomeWidgetOrder() {
+    try {
+      const raw = localStorage.getItem(WIDGET_ORDER_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) {
+          const known = parsed.filter((k) => WIDGET_KEYS.includes(k));
+          const missing = WIDGET_KEYS.filter((k) => !known.includes(k));
+          return [...known, ...missing];
+        }
+      }
+    } catch { /* 손상된 값이면 기본 순서로 복구 */ }
+    return WIDGET_KEYS.slice();
+  }
+
+  function setHomeWidgetOrder(order) {
+    localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
+  }
 
   function renderHome(root) {
     const container = el('div', {});
@@ -165,16 +193,16 @@
       );
 
       container.append(integrationStatusBar());
-      container.append(clockCard());
 
-      container.append(
-        el('div', { class: 'kpi-grid' }, [
-          kpi(todaySchedules.length, '오늘 일정', () => navigate('/schedule')),
-          kpi(dueProjects.length, 'D-7 이내 마감', () => navigate('/projects')),
-          kpi(unread.length, '안 읽은 알림', () => document.getElementById('home-noti-card')?.scrollIntoView({ behavior: 'smooth' })),
-          kpi(appState.projects.filter((p) => p.status === 'in_progress').length, '진행 중 프로젝트', () => navigate('/projects')),
-        ])
-      );
+      const widgets = {};
+      widgets.clock = clockCard();
+
+      widgets.kpi = el('div', { class: 'kpi-grid' }, [
+        kpi(todaySchedules.length, '오늘 일정', () => navigate('/schedule')),
+        kpi(dueProjects.length, 'D-7 이내 마감', () => navigate('/projects')),
+        kpi(unread.length, '안 읽은 알림', () => document.getElementById('home-noti-card')?.scrollIntoView({ behavior: 'smooth' })),
+        kpi(appState.projects.filter((p) => p.status === 'in_progress').length, '진행 중 프로젝트', () => navigate('/projects')),
+      ]);
 
       // 오늘의 날씨 (등록된 지역, 기본 3 / 최대 5 — 관리는 설정 화면에서)
       const weatherCard = el('div', { class: 'nm-card weather-card', style: 'margin-bottom:16px' }, [
@@ -210,7 +238,7 @@
         });
         weatherCard.append(grid);
       }
-      container.append(weatherCard);
+      widgets.weather = weatherCard;
 
       // 이번 주 활동 요약 (프로젝트/일정/챌린저/Health 통합) — 각 지표를 누르면 해당 메뉴로 이동
       const weekly = appState.getWeeklyActivitySummary();
@@ -223,7 +251,7 @@
           kpi(weekly.weightDelta !== null ? `${weekly.weightDelta > 0 ? '+' : ''}${weekly.weightDelta}kg` : '-', '체중 변화', () => navigate('/health')),
         ]),
       ]);
-      container.append(summaryCard);
+      widgets.summary = summaryCard;
 
       // 다음 7일 일정 밀집도 예측 (칸을 누르면 해당 날짜의 일정 화면으로 이동)
       const density = predictScheduleDensity(appState.schedules, today, 4);
@@ -242,7 +270,7 @@
         );
       }
       densityCard.append(row);
-      container.append(densityCard);
+      widgets.density = densityCard;
 
       // 마감 임박 + 완료 예측 (행을 누르면 프로젝트 화면으로 이동)
       const urgentCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [el('h3', {}, '마감 임박 프로젝트')]);
@@ -269,7 +297,7 @@
         }
         urgentCard.append(list);
       }
-      container.append(urgentCard);
+      widgets.urgent = urgentCard;
 
       // 자동 알림 (제목을 누르면 관련 화면으로 이동하도록 related_table을 매핑)
       const notiCard = el('div', { class: 'nm-card', id: 'home-noti-card' }, [el('h3', {}, '자동 알림')]);
@@ -298,7 +326,46 @@
         }
         notiCard.append(list);
       }
-      container.append(notiCard);
+      widgets.noti = notiCard;
+
+      const order = getHomeWidgetOrder();
+      for (const key of order) {
+        if (widgets[key]) container.append(makeDraggableWidget(key, widgets[key]));
+      }
+    }
+
+    // 위젯을 드래그로 순서를 바꿀 수 있게 감싼다. 순서는 즉시 저장되고 다시 그려진다.
+    function makeDraggableWidget(key, node) {
+      const wrapper = el('div', { class: 'home-widget', draggable: 'true' }, [
+        el('span', { class: 'home-widget__handle', title: '드래그해서 위젯 순서 바꾸기' }, '⠿'),
+        node,
+      ]);
+      wrapper.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', key);
+        e.dataTransfer.effectAllowed = 'move';
+        wrapper.classList.add('home-widget--dragging');
+      });
+      wrapper.addEventListener('dragend', () => wrapper.classList.remove('home-widget--dragging'));
+      wrapper.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        wrapper.classList.add('home-widget--dragover');
+      });
+      wrapper.addEventListener('dragleave', () => wrapper.classList.remove('home-widget--dragover'));
+      wrapper.addEventListener('drop', (e) => {
+        e.preventDefault();
+        wrapper.classList.remove('home-widget--dragover');
+        const draggedKey = e.dataTransfer.getData('text/plain');
+        if (!draggedKey || draggedKey === key) return;
+        const order = getHomeWidgetOrder();
+        const from = order.indexOf(draggedKey);
+        const to = order.indexOf(key);
+        if (from === -1 || to === -1) return;
+        order.splice(from, 1);
+        order.splice(to, 0, draggedKey);
+        setHomeWidgetOrder(order);
+        draw();
+      });
+      return wrapper;
     }
 
     draw();

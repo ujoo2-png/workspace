@@ -21,6 +21,49 @@
     return { emoji: '😐', label: '오늘 아직 체크인 전', kind: 'neutral' };
   }
 
+  // 최근 N주(오늘 기준 7일 단위로 거슬러 올라간 구간) 동안 며칠 체크인했는지를 "달성률(%)"로 환산한다.
+  // 챌린지마다 단위(회/km/페이지 등)가 달라 절대량 비교가 어려우므로, 일수 기준 출석률로 통일했다.
+  function weeklyAchievementSeries(checkins, todayIso, weeks = 8) {
+    const dates = new Set(checkins.map((c) => c.checkin_date));
+    const labels = [];
+    const values = [];
+    for (let w = weeks - 1; w >= 0; w--) {
+      const end = window.addDays(todayIso, -7 * w);
+      const start = window.addDays(end, -6);
+      let count = 0;
+      for (let d = start; diffDays(d, end) >= 0; d = window.addDays(d, 1)) {
+        if (dates.has(d)) count++;
+      }
+      labels.push(`${start.slice(5)}~${end.slice(5)}`);
+      values.push(Math.round((count / 7) * 100));
+    }
+    return { labels, values };
+  }
+
+  // 최근 N개월의 월별 출석률(%). 이번 달은 오늘까지의 경과일 기준으로 계산한다.
+  function monthlyAchievementSeries(checkins, todayIso, months = 6) {
+    const dates = new Set(checkins.map((c) => c.checkin_date));
+    const labels = [];
+    const values = [];
+    const [ty, tm, td] = todayIso.split('-').map(Number);
+    for (let m = months - 1; m >= 0; m--) {
+      const base = new Date(ty, tm - 1 - m, 1);
+      const year = base.getFullYear();
+      const month = base.getMonth(); // 0-based
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const isCurrentMonth = m === 0;
+      const countedDays = isCurrentMonth ? td : daysInMonth;
+      let count = 0;
+      for (let day = 1; day <= countedDays; day++) {
+        const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (dates.has(iso)) count++;
+      }
+      labels.push(`${month + 1}월`);
+      values.push(Math.round((count / countedDays) * 100));
+    }
+    return { labels, values };
+  }
+
   function renderChallenges(root) {
     const container = el('div', {});
     root.append(container);
@@ -95,6 +138,7 @@
                 checkedToday ? '오늘 기록 수정' : '오늘 체크인'
               ),
               el('button', { class: 'nm-btn', onclick: () => openHistory(c) }, '기록 보기'),
+              el('button', { class: 'nm-btn', onclick: () => openReport(c) }, '📊 리포트'),
             ]),
           ])
         );
@@ -157,6 +201,44 @@
             );
           }
           body.append(list);
+        },
+      });
+    }
+
+    // 주간/월간 달성률 추이 리포트. 단일 축·단일 색상 막대 차트로(이중축 없이) 보여준다.
+    function openReport(c) {
+      openModal({
+        title: `${c.title} — 달성률 리포트`,
+        contentBuilder(body) {
+          const checkins = appState.checkinsByChallenge[c.id] || [];
+          let range = 'weekly';
+          const chartHost = el('div', {});
+          const tabs = el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:12px' }, [
+            tabBtnLocal('weekly', '주간(최근 8주)'),
+            tabBtnLocal('monthly', '월간(최근 6개월)'),
+          ]);
+          function tabBtnLocal(key, label) {
+            return el('button', { class: `nm-btn ${range === key ? 'nm-btn--primary' : ''}`, onclick: () => { range = key; renderChart(); rebuildTabs(); } }, label);
+          }
+          function rebuildTabs() {
+            tabs.innerHTML = '';
+            tabs.append(tabBtnLocal('weekly', '주간(최근 8주)'), tabBtnLocal('monthly', '월간(최근 6개월)'));
+          }
+          function renderChart() {
+            chartHost.innerHTML = '';
+            const today = todayISO();
+            const { labels, values } = range === 'weekly' ? weeklyAchievementSeries(checkins, today, 8) : monthlyAchievementSeries(checkins, today, 6);
+            if (!values.some((v) => v > 0)) {
+              chartHost.append(el('div', { class: 'empty-state' }, '표시할 체크인 기록이 없습니다.'));
+              return;
+            }
+            chartHost.append(
+              el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:6px' }, range === 'weekly' ? '한 주(7일) 중 체크인한 날의 비율(%)' : '한 달 중 체크인한 날의 비율(%, 이번 달은 오늘까지 기준)'),
+              window.simpleBarChart(labels, values, '#8b5cf6')
+            );
+          }
+          renderChart();
+          body.append(tabs, chartHost);
         },
       });
     }

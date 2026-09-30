@@ -30,6 +30,24 @@
   border: 1px solid var(--border);
 }
 
+.home-widget { position: relative; }
+.home-widget__handle {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 3;
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  user-select: none;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+.home-widget:hover .home-widget__handle { opacity: 1; }
+.home-widget--dragging { opacity: 0.4; }
+.home-widget--dragover { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+
 .clock-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .clock-grid__cell {
   padding: 10px;

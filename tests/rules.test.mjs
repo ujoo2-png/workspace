@@ -100,6 +100,20 @@ test('enabledRules에서 규칙을 꺼두면 알림이 생기지 않는다', () 
   assert.equal(notices.filter((n) => n.type === 'deadline').length, 0);
 });
 
+test('문화생활 관람 예정일이 내일이면 D-1 알림을 만든다', () => {
+  const playlistItems = [{ id: 'pl1', title: '테스트 영화', status: 'to_watch', event_date: '2026-09-09' }];
+  const notices = runAutomationRules({ projects: [], schedules: [], playlistItems }, CFG, '2026-09-08');
+  const hit = notices.find((n) => n.type === 'playlist_reminder');
+  assert.ok(hit, 'D-1 알림이 있어야 한다');
+  assert.match(hit.title, /D-1/);
+});
+
+test('완료(watched) 상태의 문화생활 항목은 알림을 만들지 않는다', () => {
+  const playlistItems = [{ id: 'pl2', title: '본 영화', status: 'watched', event_date: '2026-09-09' }];
+  const notices = runAutomationRules({ projects: [], schedules: [], playlistItems }, CFG, '2026-09-08');
+  assert.equal(notices.filter((n) => n.type === 'playlist_reminder').length, 0);
+});
+
 test('enabledRules의 params로 임계값을 바꿀 수 있다', () => {
   const vehicles = [{ id: 'v3', name: '테스트카', insurance_expiry: '2026-10-01' }]; // D-23
   const withDefault = runAutomationRules({ projects: [], schedules: [], vehicles }, CFG, '2026-09-08');

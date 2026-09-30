@@ -12,6 +12,19 @@
 
   // 계획일(planned) 대비 실제 완료일(actual)의 차이를 사람이 읽기 쉬운 배지 텍스트로 바꾼다.
   // 음수(실제가 계획보다 이름) = 조기 완료, 양수 = 지연.
+  // 완료된 단계들의 실제 소요기간(시작일→실제 완료일, 없으면 목표일) 평균을 계산한다.
+  // 다음 프로젝트의 단계를 등록할 때 "보통 이만큼 걸린다"를 참고할 수 있게 하기 위함이다.
+  function computeAvgStageDuration() {
+    const allStages = Object.values(appState.projectStagesByProject).flat();
+    const durations = allStages
+      .filter((s) => s.start_date && (s.actual_completion_date || (s.status === 'done' && s.target_date)))
+      .map((s) => diffDays(s.start_date, s.actual_completion_date || s.target_date))
+      .filter((d) => d > 0);
+    if (!durations.length) return null;
+    const avg = Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10;
+    return { avg, count: durations.length };
+  }
+
   function varianceBadge(plannedIso, actualIso) {
     if (!plannedIso || !actualIso) return null;
     const delta = diffDays(plannedIso, actualIso); // actual - planned (일수)
@@ -153,9 +166,13 @@
     }
 
     function ganttCard(p, stages) {
+      const avgStat = computeAvgStageDuration();
       const card = el('div', { class: 'nm-card' }, [
-        el('div', { class: 'row row--between', style: 'margin-bottom:12px' }, [
+        el('div', { class: 'row row--between wrap', style: 'margin-bottom:12px' }, [
           el('h3', { style: 'margin:0' }, '단계별 간트차트'),
+          avgStat
+            ? el('span', { class: 'nm-badge', title: '완료된 단계들의 시작일~실제완료일(또는 목표일) 평균' }, `📊 평균 단계 소요기간 ${avgStat.avg}일 (완료 ${avgStat.count}건 기준)`)
+            : null,
           el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openStageForm(p) }, '+ 단계 추가'),
         ]),
       ]);
@@ -277,19 +294,34 @@
     }
 
     function openStageForm(p, existing) {
+      const avgStat = computeAvgStageDuration();
       openModal({
         title: existing ? '단계 수정' : `${p.name} — 단계 추가`,
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
+          const startInput = el('input', { class: 'nm-input', type: 'date', name: 'start_date', value: existing?.start_date || todayISO() });
+          const targetInput = el('input', { class: 'nm-input', type: 'date', name: 'target_date', required: true, value: existing?.target_date || '' });
           form.append(
             field('중분류(선택, 예: 1학기-1과)', el('input', { class: 'nm-input', name: 'group_name', value: existing?.group_name || '', placeholder: '예: 1학기-1과:노인복지론' })),
             field('단계 이름(소분류, 예: 1강)', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
-            field('계획 시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'start_date', value: existing?.start_date || todayISO() })),
-            field('계획 목표일(target, 진도 관리에 필요)', el('input', { class: 'nm-input', type: 'date', name: 'target_date', required: true, value: existing?.target_date || '' })),
+            field('계획 시작일(선택)', startInput),
+            field(
+              avgStat ? `계획 목표일(target, 진도 관리에 필요) — 평균 단계 소요기간 ${avgStat.avg}일(완료 ${avgStat.count}건 기준)로 자동 제안됩니다` : '계획 목표일(target, 진도 관리에 필요)',
+              targetInput
+            ),
             field('실제 시작일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'actual_start_date', value: existing?.actual_start_date || '' })),
             field('실제 완료일(선택, 완료 시 입력하면 계획대비 실적이 표시됩니다)', el('input', { class: 'nm-input', type: 'date', name: 'actual_completion_date', value: existing?.actual_completion_date || '' })),
             field('상태', stageStatusSelect(existing?.status))
           );
+          // 신규 단계 등록 시, 시작일을 입력/변경하면 평균 소요기간만큼 뒤로 목표일을 자동 제안한다
+          // (사용자가 이미 목표일을 직접 입력했다면 덮어쓰지 않는다).
+          if (!existing && avgStat) {
+            let targetTouched = false;
+            targetInput.addEventListener('input', () => { targetTouched = true; });
+            startInput.addEventListener('change', () => {
+              if (!targetTouched && startInput.value) targetInput.value = addDays(startInput.value, Math.round(avgStat.avg));
+            });
+          }
           form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
           form.addEventListener('submit', async (e) => {
             e.preventDefault();

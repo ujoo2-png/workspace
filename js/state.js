@@ -478,7 +478,7 @@
       const newAlerts = await window.runAndPersistAutomation(
         this.store,
         this.user.id,
-        { projects: this.projects, schedules: this.schedules, vehicles: this.vehicles, challenges: challengesWithCheckins },
+        { projects: this.projects, schedules: this.schedules, vehicles: this.vehicles, challenges: challengesWithCheckins, playlistItems: this.playlistItems },
         this.buildEnabledRulesMap()
       );
       await this.refreshAll();

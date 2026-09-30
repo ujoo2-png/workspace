@@ -217,10 +217,11 @@
               ),
             ]),
 
-            odometerSeries.length >= 2
+            odometerSeries.length >= 2 || fuels.length >= 2
               ? el('div', { class: 'row wrap', style: 'margin-top:12px; gap:16px' }, [
-                  chartBlock('주행거리 추이(km)', window.simpleLineChart(odometerSeries.map((p) => p.date.slice(5)), odometerSeries.map((p) => p.odometer))),
+                  odometerSeries.length >= 2 ? chartBlock('주행거리 추이(km)', window.simpleLineChart(odometerSeries.map((p) => p.date.slice(5)), odometerSeries.map((p) => p.odometer))) : null,
                   fuelEfficiencyChart(fuels),
+                  unitPriceChart(fuels),
                 ].filter(Boolean))
               : null,
 
@@ -259,6 +260,19 @@
       }
       if (!values.length) return null;
       return chartBlock('구간별 연비(km/L·kWh)', window.simpleBarChart(labels, values, '#22c55e'));
+    }
+
+    // 리터(또는 kWh)당 단가 추이 — 유가 변동을 간접적으로 보여준다(실시간 유가 API 대신
+    // 본인이 실제로 지불한 단가 기록을 기준으로 한다).
+    function unitPriceChart(fuels) {
+      const clean = (fuels || [])
+        .filter((f) => typeof f.amount === 'number' && f.amount > 0 && typeof f.cost === 'number' && f.cost > 0)
+        .slice()
+        .sort((a, b) => (a.logged_at < b.logged_at ? -1 : 1));
+      if (clean.length < 2) return null;
+      const labels = clean.map((f) => (f.logged_at || '').slice(5));
+      const values = clean.map((f) => Math.round(f.cost / f.amount));
+      return chartBlock('리터(kWh)당 단가 추이(원)', window.simpleLineChart(labels, values, '#f59e0b'));
     }
 
     function openOdometerForm(v) {
@@ -316,16 +330,36 @@
         title: `${v.name} — 기록`,
         width: '520px',
         contentBuilder(body) {
-          body.append(el('h3', { style: 'margin-bottom:8px' }, '정비 이력'));
-          if (!maints.length) {
-            body.append(el('div', { class: 'empty-state' }, '정비 기록이 없습니다.'));
-          } else {
+          let shopFilter = 'all';
+          const header = el('div', { class: 'row row--between wrap', style: 'margin-bottom:8px' }, [el('h3', { style: 'margin:0' }, '정비 이력')]);
+          const shops = Array.from(new Set(maints.map((m) => m.shop_name).filter(Boolean)));
+          if (shops.length) {
+            const sel = el('select', { class: 'nm-select' }, [
+              el('option', { value: 'all' }, '전체 정비소'),
+              ...shops.map((s) => el('option', { value: s }, s)),
+            ]);
+            sel.addEventListener('change', () => { shopFilter = sel.value; renderMaintList(); });
+            header.append(sel);
+          }
+          body.append(header);
+          const maintListHost = el('div', {});
+          body.append(maintListHost);
+          function renderMaintList() {
+            maintListHost.innerHTML = '';
+            const rows = shopFilter === 'all' ? maints : maints.filter((m) => m.shop_name === shopFilter);
+            if (!rows.length) {
+              maintListHost.append(el('div', { class: 'empty-state' }, '정비 기록이 없습니다.'));
+              return;
+            }
             const list = el('div', { class: 'item-list' });
-            for (const m of maints) {
+            for (const m of rows) {
               list.append(
                 el('div', { class: 'item-row' }, [
                   el('div', { class: 'item-row__main' }, [
-                    el('div', { class: 'item-row__title' }, escapeHtml(m.item)),
+                    el('div', { class: 'row wrap', style: 'gap:6px; align-items:center' }, [
+                      el('div', { class: 'item-row__title' }, escapeHtml(m.item)),
+                      m.shop_name ? el('span', { class: 'nm-badge' }, escapeHtml(m.shop_name)) : null,
+                    ]),
                     el('div', { class: 'item-row__meta' }, `${m.service_date}${m.odometer ? ' · ' + m.odometer + 'km' : ''}${m.cost ? ' · ' + Number(m.cost).toLocaleString() + '원' : ''}${m.next_due_date ? ' · 다음 ' + m.next_due_date : ''}`),
                   ]),
                   el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('vehicle_maintenance', m.id, m.item) }, '📎'),
@@ -333,8 +367,9 @@
                 ])
               );
             }
-            body.append(list);
+            maintListHost.append(list);
           }
+          renderMaintList();
           body.append(el('h3', { style: 'margin:16px 0 8px' }, '주유/충전 이력'));
           if (!fuels.length) {
             body.append(el('div', { class: 'empty-state' }, '주유 기록이 없습니다.'));
@@ -405,6 +440,8 @@
           const form = el('form', { class: 'stack' });
           form.append(
             field('정비 항목', el('input', { class: 'nm-input', name: 'item', required: true, placeholder: '예: 엔진오일 교체', value: '' })),
+            field('정비소(선택, 예: OO카센터)', el('input', { class: 'nm-input', name: 'shop_name', list: 'shop-name-presets', placeholder: '정비소 이름' })),
+            el('datalist', { id: 'shop-name-presets' }, Array.from(new Set((appState.maintenanceByVehicle[v.id] || []).map((m) => m.shop_name).filter(Boolean))).map((s) => el('option', { value: s }))),
             field('정비일', el('input', { class: 'nm-input', type: 'date', name: 'service_date', required: true, value: todayISO() })),
             field('주행거리(km, 선택)', el('input', { class: 'nm-input', type: 'number', name: 'odometer' })),
             field('비용(원, 선택)', el('input', { class: 'nm-input', type: 'number', name: 'cost' })),
@@ -419,6 +456,7 @@
             try {
               await appState.addMaintenance(v.id, {
                 item: fd.get('item'),
+                shop_name: fd.get('shop_name') || null,
                 service_date: fd.get('service_date'),
                 odometer: fd.get('odometer') ? Number(fd.get('odometer')) : null,
                 cost: fd.get('cost') ? Number(fd.get('cost')) : null,
