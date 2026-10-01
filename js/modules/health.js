@@ -147,6 +147,15 @@
     let recordFilter = 'all';
     let recordPage = 1;
     const PAGE_SIZE = 10;
+    let selectedAppointments = new Set();
+
+    // 상단에 항상 보이는 4개 지표(체중/걸음수/수축기·이완기 혈압) 작은 트렌드 차트 정의.
+    const DASHBOARD_METRICS = [
+      { key: 'weight', label: '체중', hue: '#3b82f6' },
+      { key: 'steps', label: '걸음수', hue: '#22c55e' },
+      { key: 'bp_systolic', label: '수축기 혈압', hue: '#ef4444' },
+      { key: 'bp_diastolic', label: '이완기 혈압', hue: '#f59e0b' },
+    ];
 
     function latestByType() {
       const result = {};
@@ -168,6 +177,10 @@
           ]),
         ])
       );
+
+      // 4대 지표 항상 보이는 미니 대시보드(체중/걸음수/혈압 2종) — 아래 "트렌드 그래프"(지표 선택형)와
+      // 별개로, 가장 자주 확인하는 지표 4개를 한 화면에서 바로 비교할 수 있게 둔다.
+      container.append(dashboardSection());
 
       const latest = latestByType();
 
@@ -269,14 +282,48 @@
 
       // 다가오는 일정
       const upcoming = appState.healthAppointments.filter((a) => a.appointment_date >= today).sort((a, b) => a.appointment_date.localeCompare(b.appointment_date));
+      selectedAppointments = new Set([...selectedAppointments].filter((id) => upcoming.some((a) => a.id === id)));
       const apptCard = el('div', { class: 'nm-card', style: 'margin: 16px 0' }, [el('h3', {}, '다가오는 병원/검진 일정')]);
       if (!upcoming.length) {
         apptCard.append(el('div', { class: 'empty-state' }, '예정된 일정이 없습니다.'));
       } else {
+        const selCount = selectedAppointments.size;
+        apptCard.append(
+          el('div', { class: 'row row--between', style: 'margin:8px 0; align-items:center' }, [
+            el('label', { class: 'row', style: 'gap:6px; align-items:center; cursor:pointer; font-size:13px' }, [
+              el('input', {
+                type: 'checkbox',
+                checked: upcoming.length > 0 && selCount === upcoming.length ? true : undefined,
+                onchange: (e) => {
+                  if (e.target.checked) upcoming.forEach((a) => selectedAppointments.add(a.id));
+                  else selectedAppointments.clear();
+                  draw();
+                },
+              }),
+              el('span', { class: 'text-muted' }, '전체선택'),
+            ]),
+            el('button', {
+              class: 'nm-btn nm-btn--danger',
+              disabled: selCount === 0 || undefined,
+              onclick: async () => {
+                if (!confirmDialog(`선택한 ${selCount}건을 삭제할까요? 연동된 일정도 함께 삭제됩니다.`)) return;
+                const ids = [...selectedAppointments];
+                selectedAppointments.clear();
+                await appState.deleteHealthAppointments(ids);
+                toast(`${ids.length}건 삭제했습니다.`, 'success');
+              },
+            }, `선택 삭제${selCount ? ` (${selCount})` : ''}`),
+          ])
+        );
         const list = el('div', { class: 'item-list' });
         for (const a of upcoming) {
           list.append(
             el('div', { class: 'item-row' }, [
+              el('input', {
+                type: 'checkbox',
+                checked: selectedAppointments.has(a.id) || undefined,
+                onchange: (e) => { if (e.target.checked) selectedAppointments.add(a.id); else selectedAppointments.delete(a.id); draw(); },
+              }),
               el('div', { class: 'item-row__main' }, [
                 el('div', { class: 'item-row__title' }, escapeHtml(a.title)),
                 el('div', { class: 'item-row__meta' }, `${a.appointment_date}${a.appointment_time ? ' ' + a.appointment_time : ''}${a.location ? ' · ' + escapeHtml(a.location) : ''}`),
@@ -292,6 +339,33 @@
 
       // 최근 기록(종류 필터 + 페이지네이션)
       container.append(recordListCard());
+    }
+
+    // ---- 상단 미니 대시보드(4지표 항상 표시) ----
+    function dashboardSection() {
+      const grid = el('div', { class: 'health-dashboard-grid' });
+      for (const def of DASHBOARD_METRICS) {
+        const rows = appState.healthMetrics.filter((m) => m.metric_type === def.key);
+        const trend = aggregateMetricTrend(rows, 'week', 8, todayISO());
+        const hasAny = trend.values.some((v) => v !== null);
+        const last = rows.slice().sort((a, b) => (b.recorded_at || '').localeCompare(a.recorded_at || ''))[0];
+        const card = el('div', { class: 'nm-card health-dashboard-card' }, [
+          el('div', { class: 'row row--between', style: 'align-items:baseline' }, [
+            el('strong', { style: 'font-size:13px' }, def.label),
+            el('span', { class: 'text-muted', style: 'font-size:12px' }, last ? `${last.value}${last.unit || ''}` : '-'),
+          ]),
+        ]);
+        if (hasAny) {
+          card.append(el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(trend.labels, trend.values.map((v) => v ?? 0), def.hue)]));
+        } else {
+          card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:14px 0; text-align:center' }, '기록 없음'));
+        }
+        grid.append(card);
+      }
+      return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+        el('h3', { style: 'margin-bottom:10px' }, '📊 핵심 지표 대시보드'),
+        grid,
+      ]);
     }
 
     // ---- 트렌드 차트 ----

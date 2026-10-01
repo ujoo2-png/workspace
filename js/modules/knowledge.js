@@ -1,5 +1,7 @@
 // Knowledge 화면. 스크랩한 링크/문서와 메모를 태그로 분류해 모아두는 개인 지식 저장소.
 // doc_type으로 "링크/문서"와 "메모"를 구분해서 보여주고, 파일 첨부(📎)도 지원한다.
+// 현재는 다른 메뉴와 자동으로 연동되지 않는 "독립된 개인 저장소"다(등록한 자료가 다른 화면에
+// 자동으로 노출되지는 않는다) — 목록/검색/태그/열람으로 다시 찾아보는 용도.
 // 일반 <script>로 로드된다.
 (function () {
   const { appState, el, escapeHtml, toast, confirmDialog, openModal, todayISO } = window;
@@ -12,6 +14,7 @@
     let query = '';
     let tagFilter = 'all';
     let typeFilter = 'all'; // all | link | memo
+    let selected = new Set();
 
     function draw() {
       container.innerHTML = '';
@@ -22,6 +25,12 @@
             el('button', { class: 'nm-btn', onclick: () => openDocForm(null, 'memo') }, '+ 메모'),
             el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openDocForm(null, 'link') }, '+ 링크/문서 등록'),
           ]),
+        ])
+      );
+
+      container.append(
+        el('div', { class: 'nm-card', style: 'margin-bottom:14px; font-size:12px' }, [
+          el('span', { class: 'text-muted' }, 'ℹ️ Knowledge는 현재 독립된 개인 지식 저장소입니다. 등록한 자료는 다른 메뉴에 자동으로 연동되지 않으며, 이 화면의 검색/태그/열람 기능으로 다시 찾아볼 수 있습니다.'),
         ])
       );
 
@@ -36,15 +45,29 @@
         ])
       );
 
+      const searchInput = el('input', {
+        class: 'nm-input knowledge-search-input',
+        style: 'max-width:240px',
+        placeholder: '검색(제목/메모)',
+        value: query,
+        oninput: (e) => {
+          const pos = e.target.selectionStart;
+          query = e.target.value;
+          draw();
+          // draw()가 container.innerHTML = ''로 전체를 다시 그리며 입력창도 새로 생기기 때문에,
+          // 포커스/커서 위치를 잃어 "한 글자만 입력되는 것처럼" 보이는 문제가 있었다.
+          // 새로 만들어진 입력창을 다시 찾아 포커스와 커서 위치를 복원한다.
+          const next = container.querySelector('.knowledge-search-input');
+          if (next) {
+            next.focus();
+            try { next.setSelectionRange(pos, pos); } catch (e2) { /* 일부 input type은 지원 안 함 — 무시 */ }
+          }
+        },
+      });
+
       container.append(
         el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:14px' }, [
-          el('input', {
-            class: 'nm-input',
-            style: 'max-width:240px',
-            placeholder: '검색(제목/메모)',
-            value: query,
-            oninput: (e) => { query = e.target.value; draw(); },
-          }),
+          searchInput,
           tagBtn('all', '전체 태그'),
           ...allTags.map((t) => tagBtn(t, `#${t}`)),
         ])
@@ -64,32 +87,94 @@
         return;
       }
 
-      const grid = el('div', { class: 'grid-3' });
-      for (const d of rows) {
-        const attachCount = appState.getAttachments('knowledge_docs', d.id).length;
-        grid.append(
-          el('div', { class: 'nm-card' }, [
-            el('div', { class: 'row row--between', style: 'align-items:flex-start' }, [
-              el('div', { style: 'font-weight:700; margin-bottom:2px' }, escapeHtml(d.title)),
-              el('span', { class: 'nm-badge' }, TYPE_LABEL[d.doc_type || 'link']),
+      selected = new Set([...selected].filter((id) => rows.some((r) => r.id === id)));
+      const selCount = selected.size;
+      container.append(
+        el('div', { class: 'row row--between', style: 'margin-bottom:8px; align-items:center' }, [
+          el('label', { class: 'row', style: 'gap:6px; align-items:center; cursor:pointer; font-size:13px' }, [
+            el('input', {
+              type: 'checkbox',
+              checked: rows.length > 0 && selCount === rows.length ? true : undefined,
+              onchange: (e) => {
+                if (e.target.checked) rows.forEach((r) => selected.add(r.id));
+                else selected.clear();
+                draw();
+              },
+            }),
+            el('span', { class: 'text-muted' }, '전체선택'),
+          ]),
+          el('button', {
+            class: 'nm-btn nm-btn--danger',
+            disabled: selCount === 0 || undefined,
+            onclick: async () => {
+              if (!confirmDialog(`선택한 ${selCount}건을 삭제할까요?`)) return;
+              const ids = [...selected];
+              selected.clear();
+              await appState.deleteKnowledgeDocsBulk(ids);
+              toast(`${ids.length}건 삭제했습니다.`, 'success');
+            },
+          }, `선택 삭제${selCount ? ` (${selCount})` : ''}`),
+        ])
+      );
+
+      const tableWrap = el('div', { class: 'data-table-wrap' });
+      const table = el('table', { class: 'data-table' });
+      table.append(
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', { style: 'width:34px' }, [
+              el('input', {
+                type: 'checkbox',
+                checked: rows.length > 0 && selCount === rows.length ? true : undefined,
+                onchange: (e) => {
+                  if (e.target.checked) rows.forEach((r) => selected.add(r.id));
+                  else selected.clear();
+                  draw();
+                },
+              }),
             ]),
-            d.url ? el('a', { href: d.url, target: '_blank', rel: 'noopener', class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, d.url) : null,
-            d.memo ? el('div', { class: 'text-muted', style: 'font-size:13px; margin-top:6px; white-space:pre-wrap' }, escapeHtml(d.memo)) : null,
-            (d.tags || []).length
-              ? el('div', { class: 'row wrap', style: 'gap:4px; margin-top:8px' }, d.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`)))
-              : null,
-            el('div', { class: 'row', style: 'margin-top:10px; gap:6px; justify-content:flex-end' }, [
-              el('button', {
-                class: 'nm-btn nm-btn--icon', title: '첨부파일' + (attachCount ? ` (${attachCount})` : ''),
-                onclick: () => window.openAttachmentsModal('knowledge_docs', d.id, d.title),
-              }, attachCount ? `📎${attachCount}` : '📎'),
-              el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openDocForm(d) }, '✎'),
-              el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(d) }, '🗑'),
+            el('th', { style: 'width:40px' }, 'No'),
+            el('th', {}, '제목'),
+            el('th', { style: 'width:90px' }, '종류'),
+            el('th', {}, '태그'),
+            el('th', { style: 'width:60px' }, '첨부'),
+            el('th', { style: 'width:150px' }, '작업'),
+          ]),
+        ])
+      );
+      const tbody = el('tbody', {});
+      rows.forEach((d, idx) => {
+        const attachCount = appState.getAttachments('knowledge_docs', d.id).length;
+        tbody.append(
+          el('tr', {}, [
+            el('td', {}, [
+              el('input', {
+                type: 'checkbox',
+                checked: selected.has(d.id) || undefined,
+                onchange: (e) => { if (e.target.checked) selected.add(d.id); else selected.delete(d.id); draw(); },
+              }),
+            ]),
+            el('td', {}, String(idx + 1)),
+            el('td', { style: 'cursor:pointer', onclick: () => openViewModal(d) }, [
+              el('strong', {}, escapeHtml(d.title)),
+              d.memo ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap' }, escapeHtml(d.memo)) : null,
+            ]),
+            el('td', {}, el('span', { class: 'nm-badge' }, TYPE_LABEL[d.doc_type || 'link'])),
+            el('td', {}, (d.tags || []).length ? el('div', { class: 'row wrap', style: 'gap:4px' }, d.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))) : '-'),
+            el('td', {}, attachCount ? `📎${attachCount}` : '-'),
+            el('td', {}, [
+              el('div', { class: 'icon-row' }, [
+                el('button', { class: 'nm-btn nm-btn--icon', title: '열람', onclick: () => openViewModal(d) }, '👁'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openDocForm(d) }, '✎'),
+                el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(d) }, '🗑'),
+              ]),
             ]),
           ])
         );
-      }
-      container.append(grid);
+      });
+      table.append(tbody);
+      tableWrap.append(table);
+      container.append(tableWrap);
     }
 
     function typeTabBtn(key, label) {
@@ -106,6 +191,29 @@
       if (!confirmDialog(`"${d.title}"을(를) 삭제할까요?`)) return;
       await appState.deleteKnowledgeDoc(d.id);
       toast('삭제했습니다.', 'success');
+    }
+
+    // 열람(읽기 전용) 모달 — 지금까지는 링크는 URL만 눌러서 열 수 있었고, 메모는 수정 모달을
+    // 열어야만 내용을 볼 수 있었다. 제목/내용/URL/태그/첨부파일을 한 화면에서 바로 볼 수 있게 한다.
+    function openViewModal(d) {
+      openModal({
+        title: `${TYPE_LABEL[d.doc_type || 'link']} 열람`,
+        contentBuilder(body) {
+          body.append(el('h2', { style: 'margin:0 0 6px; font-size:18px' }, escapeHtml(d.title)));
+          if (d.url) {
+            body.append(el('a', { href: d.url, target: '_blank', rel: 'noopener', style: 'word-break:break-all; font-size:13px' }, d.url));
+          }
+          if (d.memo) {
+            body.append(el('div', { class: 'text-muted', style: 'white-space:pre-wrap; margin-top:12px; font-size:14px; line-height:1.6' }, escapeHtml(d.memo)));
+          }
+          if ((d.tags || []).length) {
+            body.append(el('div', { class: 'row wrap', style: 'gap:4px; margin-top:12px' }, d.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))));
+          }
+          const attachBox = el('div', { style: 'margin-top:16px' });
+          body.append(el('h3', { style: 'margin:0 0 6px; font-size:14px' }, '첨부파일'), attachBox);
+          window.renderAttachmentsPanel(attachBox, 'knowledge_docs', d.id);
+        },
+      });
     }
 
     function openDocForm(existing, defaultType) {

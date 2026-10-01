@@ -14,3 +14,9 @@
 .health-tips-list li { color: var(--text); }
 
 .health-pagenav button:disabled { opacity: 0.35; cursor: default; }
+
+.health-dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 900px) {
+  .health-dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.health-dashboard-card { padding: 10px 12px; }

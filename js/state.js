@@ -159,6 +159,9 @@
       );
 
       this.emit('change', { schedules, projects: this.projects, programs, notifications });
+      // Supabase 모드에서 데이터를 성공적으로 불러왔다는 것은 Supabase에 실제 요청이 성공했다는
+      // 뜻이므로, "Supabase 7일 유지" 기능(설정 화면)의 마지막 활동 시각을 함께 갱신한다.
+      if (window.CONFIG?.mode === 'supabase' && window.markSupabaseActive) window.markSupabaseActive();
       return this;
     }
 
@@ -239,6 +242,11 @@
       await this.store.remove('programs', id);
       return this.refreshAll();
     }
+    // 여러 프로그램을 한 번에 삭제(목록 화면의 선택삭제). refreshAll은 마지막에 한 번만 호출한다.
+    async deleteProgramsBulk(ids) {
+      for (const id of ids) await this.store.remove('programs', id);
+      return this.refreshAll();
+    }
     async runProgram(id) {
       const p = this.programs.find((x) => x.id === id);
       if (!p) return;
@@ -247,7 +255,33 @@
         last_run: new Date().toISOString(),
       });
       window.open(p.url, '_blank', 'noopener');
+      this._trackRecentlyViewed('program', p.id, `${p.icon || '🔗'} ${p.name}`);
       return this.refreshAll();
+    }
+
+    // ---- "최근 본 항목"(홈 화면 벤치마킹 기능) ----
+    // Raindrop.io/Notion류 앱의 "최근 항목" 위젯을 벤치마킹: 프로그램을 열거나 즐겨찾기를
+    // 열 때마다 최근 사용 목록(localStorage, 최대 8개, 이 브라우저 전용)에 기록해 홈 화면에서
+    // 바로 다시 열 수 있게 한다.
+    _trackRecentlyViewed(type, id, label) {
+      try {
+        const KEY = 'workspace:recentlyViewed';
+        const raw = localStorage.getItem(KEY);
+        let list = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(list)) list = [];
+        list = list.filter((item) => !(item.type === type && item.id === id));
+        list.unshift({ type, id, label, at: new Date().toISOString() });
+        localStorage.setItem(KEY, JSON.stringify(list.slice(0, 8)));
+      } catch { /* localStorage 접근 불가(프라이빗 모드 등)여도 앱 동작엔 영향 없음 */ }
+    }
+    getRecentlyViewed() {
+      try {
+        const raw = localStorage.getItem('workspace:recentlyViewed');
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) ? list : [];
+      } catch {
+        return [];
+      }
     }
 
     // ---- 즐겨찾기 URL(바로가기) ----
@@ -264,10 +298,15 @@
       await this.store.remove('bookmarks', id);
       return this.refreshAll();
     }
+    async deleteBookmarksBulk(ids) {
+      for (const id of ids) await this.store.remove('bookmarks', id);
+      return this.refreshAll();
+    }
     async openBookmark(id) {
       const b = this.bookmarks.find((x) => x.id === id);
       if (!b) return;
       window.open(b.url, '_blank', 'noopener');
+      this._trackRecentlyViewed('bookmark', b.id, `${b.icon || '⭐'} ${b.title}`);
       // 클릭 횟수는 세지 않지만 최근 사용 시각만 가볍게 남겨 홈 화면 "자주 쓰는 링크"에 활용할 수 있게 한다.
       await this.store.update('bookmarks', id, { updated_at: new Date().toISOString() }).catch(() => {});
     }
@@ -395,6 +434,18 @@
         await this.store.remove('schedules', current.schedule_id).catch(() => {});
       }
       await this.store.remove('health_appointments', id);
+      return this.refreshAll();
+    }
+    // 병원/검진 일정 여러 건을 한 번에 삭제(선택삭제). deleteHealthAppointment와 동일하게
+    // 연동된 일정도 각각 함께 삭제되지만, refreshAll은 마지막에 한 번만 호출한다.
+    async deleteHealthAppointments(ids) {
+      for (const id of ids) {
+        const current = (this.healthAppointments || []).find((a) => a.id === id);
+        if (current?.schedule_id) {
+          await this.store.remove('schedules', current.schedule_id).catch(() => {});
+        }
+        await this.store.remove('health_appointments', id);
+      }
       return this.refreshAll();
     }
 
@@ -535,6 +586,10 @@
     }
     async deleteKnowledgeDoc(id) {
       await this.store.softDelete('knowledge_docs', id);
+      return this.refreshAll();
+    }
+    async deleteKnowledgeDocsBulk(ids) {
+      for (const id of ids) await this.store.softDelete('knowledge_docs', id);
       return this.refreshAll();
     }
 

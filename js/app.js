@@ -185,5 +185,18 @@
     window.registerRoute('/settings', window.renderSettings);
   }
 
+  // 벤치마킹 기능: Gmail/GitHub/Notion류 앱처럼 "/" 키로 현재 화면의 검색창에 바로 포커스한다.
+  // 입력 중인 다른 필드에서는 동작하지 않도록(텍스트에 "/"를 치고 싶을 때) 막는다.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+    const searchInput = document.querySelector('#view-root input[placeholder*="검색"]');
+    if (searchInput) {
+      e.preventDefault();
+      searchInput.focus();
+    }
+  });
+
   boot();
 })();

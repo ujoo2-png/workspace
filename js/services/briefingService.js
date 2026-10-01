@@ -94,6 +94,32 @@
     }
   }
 
+  // 특정 도시의 "현재 날씨"만 즉시 다시 가져온다(홈 화면 날씨 카드를 클릭했을 때 실시간 동기화용).
+  async function refreshWeatherForCity(city) {
+    return fetchWeatherSafe(city);
+  }
+
+  // Open-Meteo는 current(실시간)와 daily(주간예보)를 한 번의 요청으로 함께 받을 수 있다.
+  // 7일 최고/최저기온 + 날씨코드를 가져와 홈 화면의 날씨 카드 클릭 시 주간예보로 보여준다.
+  async function fetchWeeklyForecast(city) {
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=7`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const daily = data?.daily;
+      if (!daily?.time) return null;
+      return daily.time.map((date, i) => ({
+        date,
+        max: daily.temperature_2m_max?.[i] ?? null,
+        min: daily.temperature_2m_min?.[i] ?? null,
+        code: daily.weather_code?.[i] ?? null,
+      }));
+    } catch {
+      return null; // 네트워크 차단 환경에서도 조용히 실패
+    }
+  }
+
   function weatherCodeToLabel(code) {
     if (code === null || code === undefined) return '정보 없음';
     if (code === 0) return '맑음';
@@ -111,4 +137,6 @@
   window.getWeatherCities = getWeatherCities;
   window.setWeatherCities = setWeatherCities;
   window.weatherCodeToLabel = weatherCodeToLabel;
+  window.refreshWeatherForCity = refreshWeatherForCity;
+  window.fetchWeeklyForecast = fetchWeeklyForecast;
 })();

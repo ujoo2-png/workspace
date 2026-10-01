@@ -1,5 +1,7 @@
 // 프로그램(나만의 프로그램 관리) + 즐겨찾기 URL(바로가기) 화면.
-// 프로그램은 "개발툴 → 게시(GitHub) → 배포(Vercel) → 저장(Supabase)" 과정을 가로 플로우로 보여준다.
+// 프로그램은 "개발툴 → 게시(GitHub) → 배포(Vercel) → 저장(Supabase)" 과정을 관리하며,
+// 목록은 한눈에 많이 볼 수 있도록 컴팩트한 리스트(테이블) 형태로 보여준다. 상세 파이프라인과
+// 관리자 계정은 "상세" 버튼을 눌러 모달에서 확인한다.
 // 일반 <script>로 로드된다.
 (function () {
   const { appState, el, escapeHtml, toast, confirmDialog, openModal, todayISO } = window;
@@ -18,6 +20,8 @@
     root.append(container);
     let tab = 'programs'; // 'programs' | 'bookmarks'
     const revealedPasswords = new Set();
+    let selectedPrograms = new Set();
+    let selectedBookmarks = new Set();
 
     function draw() {
       container.innerHTML = '';
@@ -48,83 +52,138 @@
       return el('button', { class: `quick-tab ${active ? 'quick-tab--active' : ''}`, onclick: () => { tab = key; draw(); } }, label);
     }
 
-    // ================= 프로그램 =================
+    // ================= 프로그램(리스트 뷰) =================
     function programsSection() {
       const rows = appState.programs.slice().sort((a, b) => (b.run_count || 0) - (a.run_count || 0));
       if (!rows.length) {
         return el('div', { class: 'empty-state' }, '직접 만든 웹앱/모바일앱/위젯을 등록하고 개발~배포 과정을 관리해보세요.');
       }
-      const stack = el('div', { class: 'stack' });
-      for (const p of rows) stack.append(programCard(p));
-      return stack;
+      // 더 이상 존재하지 않는 항목이 선택 상태에 남지 않도록 정리
+      selectedPrograms = new Set([...selectedPrograms].filter((id) => rows.some((r) => r.id === id)));
+
+      const wrap = el('div', {});
+      wrap.append(bulkBar(rows, selectedPrograms, async (ids) => {
+        await appState.deleteProgramsBulk(ids);
+        toast(`${ids.length}건 삭제했습니다.`, 'success');
+      }));
+
+      const tableWrap = el('div', { class: 'data-table-wrap' });
+      const table = el('table', { class: 'data-table' });
+      table.append(
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', { style: 'width:34px' }, [selectAllCheckbox(rows, selectedPrograms)]),
+            el('th', { style: 'width:40px' }, 'No'),
+            el('th', {}, '이름'),
+            el('th', {}, 'URL'),
+            el('th', {}, '개발툴'),
+            el('th', { style: 'width:120px' }, '진행현황'),
+            el('th', { style: 'width:190px' }, '작업'),
+          ]),
+        ])
+      );
+      const tbody = el('tbody', {});
+      rows.forEach((p, idx) => {
+        const pipeline = p.pipeline || {};
+        const devTool = pipeline.dev?.tool || '-';
+        const project = p.project_id ? appState.projects.find((pr) => pr.id === p.project_id) : null;
+        tbody.append(
+          el('tr', {}, [
+            el('td', {}, [rowCheckbox(selectedPrograms, p.id, draw)]),
+            el('td', {}, String(idx + 1)),
+            el('td', {}, [
+              el('div', { style: 'font-weight:700; display:flex; align-items:center; gap:6px' }, [
+                el('span', {}, p.icon || '🔗'),
+                escapeHtml(p.name),
+                el('span', { class: 'nm-badge' }, TYPE_LABEL[p.program_type] || p.program_type || '웹앱'),
+              ]),
+              project ? el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:2px' }, `📁 ${escapeHtml(project.name)}`) : null,
+            ]),
+            el('td', { style: 'max-width:220px; overflow:hidden; text-overflow:ellipsis' }, [
+              el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, p.url),
+            ]),
+            el('td', {}, escapeHtml(devTool)),
+            el('td', {}, pipelineBadges(pipeline)),
+            el('td', {}, [
+              el('div', { class: 'icon-row' }, [
+                el('span', { class: 'text-muted', style: 'font-size:11px' }, `실행 ${p.run_count || 0}회`),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '열기', onclick: () => appState.runProgram(p.id) }, '🔗'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '상세', onclick: () => openDetailModal(p) }, '🔍'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openProgramForm(p) }, '✎'),
+                el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeProgram(p) }, '🗑'),
+              ]),
+            ]),
+          ])
+        );
+      });
+      table.append(tbody);
+      tableWrap.append(table);
+      wrap.append(tableWrap);
+      return wrap;
     }
 
-    function programCard(p) {
-      const project = p.project_id ? appState.projects.find((pr) => pr.id === p.project_id) : null;
-      const pipeline = p.pipeline || {};
-
-      const header = el('div', { class: 'row row--between wrap', style: 'gap:10px' }, [
-        el('div', { class: 'row', style: 'gap:10px; align-items:center' }, [
-          el('span', { style: 'font-size:24px' }, p.icon || '🔗'),
-          el('div', {}, [
-            el('div', { style: 'font-weight:700; font-size:15px' }, [
-              escapeHtml(p.name),
-              el('span', { class: 'nm-badge', style: 'margin-left:8px' }, TYPE_LABEL[p.program_type] || p.program_type || '웹앱'),
-            ]),
-            el('div', { class: 'row', style: 'gap:8px; margin-top:2px' }, [
-              el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, p.url),
-              project ? el('span', { class: 'nm-badge nm-badge--info', title: '연결된 프로젝트' }, `📁 ${escapeHtml(project.name)}`) : null,
-            ]),
-          ]),
-        ]),
-        el('div', { class: 'row', style: 'gap:6px' }, [
-          el('span', { class: 'text-muted', style: 'font-size:11px; align-self:center' }, `실행 ${p.run_count || 0}회`),
-          el('button', { class: 'nm-btn nm-btn--primary', onclick: () => appState.runProgram(p.id) }, '열기'),
-          el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일', onclick: () => window.openAttachmentsModal('programs', p.id, p.name) }, '📎'),
-          el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openProgramForm(p) }, '✎'),
-          el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeProgram(p) }, '🗑'),
-        ]),
-      ]);
-
-      const flow = el('div', { class: 'program-flow' });
-      PIPELINE_STAGES.forEach((stage, idx) => {
+    // 파이프라인 4단계를 채워졌는지 여부로 작은 배지 묶음으로 보여준다(상세 버튼에서 전체 확인).
+    function pipelineBadges(pipeline) {
+      return el('div', { class: 'row', style: 'gap:3px' }, PIPELINE_STAGES.map((stage) => {
         const data = pipeline[stage.key] || {};
-        const filled = data.id || data.date;
-        flow.append(
-          el('div', { class: `program-flow__stage ${filled ? '' : 'program-flow__stage--empty'}` }, [
-            el('div', { class: 'program-flow__icon' }, stage.icon),
-            el('div', { class: 'program-flow__label' }, stage.label),
-            stage.hasTool && data.tool ? el('div', { class: 'program-flow__detail' }, escapeHtml(data.tool)) : null,
-            data.id ? el('div', { class: 'program-flow__detail' }, `ID: ${escapeHtml(data.id)}`) : null,
-            data.date ? el('div', { class: 'program-flow__detail text-muted' }, data.date) : null,
-            !filled ? el('div', { class: 'program-flow__detail text-muted' }, '미입력') : null,
-          ])
-        );
-        if (idx < PIPELINE_STAGES.length - 1) flow.append(el('div', { class: 'program-flow__arrow' }, '→'));
+        const filled = !!(data.id || data.date);
+        return el('span', {
+          title: `${stage.label}: ${filled ? '입력됨' : '미입력'}`,
+          class: `nm-badge ${filled ? 'nm-badge--success' : ''}`,
+          style: 'padding:2px 5px; font-size:11px',
+        }, stage.icon);
+      }));
+    }
+
+    // "상세" — 전체 파이프라인 + 관리자 계정 + 첨부파일을 모달로 보여준다(테이블을 넓히지 않기 위함).
+    function openDetailModal(p) {
+      openModal({
+        title: `${p.icon || '🔗'} ${p.name} — 상세`,
+        contentBuilder(body) {
+          const pipeline = p.pipeline || {};
+          const flow = el('div', { class: 'program-flow' });
+          PIPELINE_STAGES.forEach((stage, idx) => {
+            const data = pipeline[stage.key] || {};
+            const filled = data.id || data.date;
+            flow.append(
+              el('div', { class: `program-flow__stage ${filled ? '' : 'program-flow__stage--empty'}` }, [
+                el('div', { class: 'program-flow__icon' }, stage.icon),
+                el('div', { class: 'program-flow__label' }, stage.label),
+                stage.hasTool && data.tool ? el('div', { class: 'program-flow__detail' }, escapeHtml(data.tool)) : null,
+                data.id ? el('div', { class: 'program-flow__detail' }, `ID: ${escapeHtml(data.id)}`) : null,
+                data.date ? el('div', { class: 'program-flow__detail text-muted' }, data.date) : null,
+                !filled ? el('div', { class: 'program-flow__detail text-muted' }, '미입력') : null,
+              ])
+            );
+            if (idx < PIPELINE_STAGES.length - 1) flow.append(el('div', { class: 'program-flow__arrow' }, '→'));
+          });
+          body.append(el('div', { class: 'program-flow-wrap' }, [flow]));
+
+          if (p.description) body.append(el('p', { class: 'text-muted', style: 'margin-top:10px' }, escapeHtml(p.description)));
+
+          if (p.admin_id || p.admin_password) {
+            const revealed = revealedPasswords.has(p.id);
+            const box = el('div', { class: 'program-admin-box' }, [
+              el('span', { class: 'text-muted', style: 'font-size:12px' }, '관리자 계정'),
+              el('span', { style: 'font-size:13px; font-weight:600' }, p.admin_id || '-'),
+              p.admin_password
+                ? el('span', { class: 'row', style: 'gap:4px; align-items:center' }, [
+                    el('span', { style: 'font-size:13px; font-family:monospace' }, revealed ? p.admin_password : '•'.repeat(Math.min(10, p.admin_password.length || 8))),
+                    el('button', {
+                      class: 'nm-btn nm-btn--icon', title: revealed ? '숨기기' : '보기',
+                      onclick: () => { revealed ? revealedPasswords.delete(p.id) : revealedPasswords.add(p.id); openDetailModal(p); },
+                    }, revealed ? '🙈' : '👁️'),
+                  ])
+                : null,
+            ]);
+            body.append(box);
+          }
+
+          const attachBox = el('div', { style: 'margin-top:12px' });
+          body.append(el('h3', { style: 'margin:12px 0 6px; font-size:14px' }, '첨부파일'), attachBox);
+          window.renderAttachmentsPanel(attachBox, 'programs', p.id);
+        },
       });
-
-      const card = el('div', { class: 'nm-card' }, [header, el('div', { class: 'program-flow-wrap' }, [flow])]);
-
-      if (p.admin_id || p.admin_password) {
-        const revealed = revealedPasswords.has(p.id);
-        card.append(
-          el('div', { class: 'program-admin-box' }, [
-            el('span', { class: 'text-muted', style: 'font-size:12px' }, '관리자 계정'),
-            el('span', { style: 'font-size:13px; font-weight:600' }, p.admin_id || '-'),
-            p.admin_password
-              ? el('span', { class: 'row', style: 'gap:4px; align-items:center' }, [
-                  el('span', { style: 'font-size:13px; font-family:monospace' }, revealed ? p.admin_password : '•'.repeat(Math.min(10, p.admin_password.length || 8))),
-                  el('button', {
-                    class: 'nm-btn nm-btn--icon', title: revealed ? '숨기기' : '보기',
-                    onclick: () => { revealed ? revealedPasswords.delete(p.id) : revealedPasswords.add(p.id); draw(); },
-                  }, revealed ? '🙈' : '👁️'),
-                ])
-              : null,
-          ])
-        );
-      }
-
-      return card;
     }
 
     async function removeProgram(p) {
@@ -236,45 +295,120 @@
       });
     }
 
-    // ================= 즐겨찾기 URL =================
+    // ================= 즐겨찾기 URL(리스트 뷰) =================
     function bookmarksSection() {
       const rows = appState.bookmarks.slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       if (!rows.length) {
         return el('div', { class: 'empty-state' }, '자주 방문하는 사이트를 즐겨찾기로 등록해보세요. 클릭하면 바로 이동합니다.');
       }
-      const grid = el('div', { class: 'grid-3' });
+      selectedBookmarks = new Set([...selectedBookmarks].filter((id) => rows.some((r) => r.id === id)));
+
+      const wrap = el('div', {});
+      wrap.append(bulkBar(rows, selectedBookmarks, async (ids) => {
+        await appState.deleteBookmarksBulk(ids);
+        toast(`${ids.length}건 삭제했습니다.`, 'success');
+      }));
+
+      const tableWrap = el('div', { class: 'data-table-wrap' });
+      const table = el('table', { class: 'data-table' });
+      table.append(
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', { style: 'width:34px' }, [selectAllCheckbox(rows, selectedBookmarks)]),
+            el('th', { style: 'width:40px' }, 'No'),
+            el('th', {}, '제목'),
+            el('th', {}, 'URL'),
+            el('th', {}, '분류'),
+            el('th', { style: 'width:170px' }, '작업'),
+          ]),
+        ])
+      );
+      const tbody = el('tbody', {});
       rows.forEach((b, idx) => {
         let hostname = '';
         try { hostname = new URL(b.url).hostname; } catch (e) { /* ignore */ }
-        const favicon = hostname ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=64` : null;
-        grid.append(
-          el('div', { class: 'nm-card bookmark-card', onclick: () => appState.openBookmark(b.id) }, [
-            el('div', { class: 'row', style: 'justify-content:center; margin-bottom:8px; position:relative; height:28px' }, [
-              // 파비콘을 우선 시도하고, 못 불러오면(네트워크 차단 등) 뒤에 깔린 기본 별 아이콘이 그대로 보인다.
-              el('span', { style: 'font-size:28px; position:absolute' }, b.icon || '⭐'),
-              !b.icon && favicon
-                ? el('img', { src: favicon, alt: '', style: 'width:28px; height:28px; position:relative; background:var(--surface)', onerror: 'this.remove()' })
-                : null,
+        tbody.append(
+          el('tr', {}, [
+            el('td', {}, [rowCheckbox(selectedBookmarks, b.id, draw)]),
+            el('td', {}, String(idx + 1)),
+            el('td', { style: 'cursor:pointer', onclick: () => appState.openBookmark(b.id) }, [
+              el('span', { style: 'margin-right:6px' }, b.icon || '⭐'),
+              el('strong', {}, escapeHtml(b.title)),
             ]),
-            el('div', { style: 'font-weight:700; text-align:center; margin-bottom:2px' }, escapeHtml(b.title)),
-            el('div', { class: 'text-muted', style: 'font-size:11px; text-align:center; word-break:break-all' }, hostname || b.url),
-            b.category ? el('div', { style: 'text-align:center; margin-top:6px' }, [el('span', { class: 'nm-badge' }, escapeHtml(b.category))]) : null,
-            el('div', { class: 'row', style: 'justify-content:center; gap:8px; margin-top:10px' }, [
-              el('button', {
-                class: 'nm-btn nm-btn--icon', title: '위로', disabled: idx === 0 || undefined,
-                onclick: (e) => { e.stopPropagation(); moveBookmark(rows, idx, -1); },
-              }, '↑'),
-              el('button', {
-                class: 'nm-btn nm-btn--icon', title: '아래로', disabled: idx === rows.length - 1 || undefined,
-                onclick: (e) => { e.stopPropagation(); moveBookmark(rows, idx, 1); },
-              }, '↓'),
-              el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: (e) => { e.stopPropagation(); openBookmarkForm(b); } }, '✎'),
-              el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: (e) => { e.stopPropagation(); removeBookmark(b); } }, '🗑'),
+            el('td', { style: 'max-width:220px; overflow:hidden; text-overflow:ellipsis' }, [
+              el('span', { class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, hostname || b.url),
+            ]),
+            el('td', {}, b.category ? el('span', { class: 'nm-badge' }, escapeHtml(b.category)) : '-'),
+            el('td', {}, [
+              el('div', { class: 'icon-row' }, [
+                el('button', { class: 'nm-btn nm-btn--icon', title: '위로', disabled: idx === 0 || undefined, onclick: () => moveBookmark(rows, idx, -1) }, '↑'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '아래로', disabled: idx === rows.length - 1 || undefined, onclick: () => moveBookmark(rows, idx, 1) }, '↓'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openBookmarkForm(b) }, '✎'),
+                el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeBookmark(b) }, '🗑'),
+              ]),
             ]),
           ])
         );
       });
-      return grid;
+      table.append(tbody);
+      tableWrap.append(table);
+      wrap.append(tableWrap);
+      return wrap;
+    }
+
+    // 전체선택 체크박스 + 선택삭제 버튼 바. 선택된 게 없으면 버튼은 비활성화된다.
+    function bulkBar(rows, selectedSet, onBulkDelete) {
+      const count = selectedSet.size;
+      return el('div', { class: 'row row--between', style: 'margin-bottom:8px; align-items:center' }, [
+        el('label', { class: 'row', style: 'gap:6px; align-items:center; cursor:pointer; font-size:13px' }, [
+          el('input', {
+            type: 'checkbox',
+            checked: rows.length > 0 && count === rows.length ? true : undefined,
+            onchange: (e) => {
+              if (e.target.checked) rows.forEach((r) => selectedSet.add(r.id));
+              else selectedSet.clear();
+              draw();
+            },
+          }),
+          el('span', { class: 'text-muted' }, '전체선택'),
+        ]),
+        el('button', {
+          class: 'nm-btn nm-btn--danger',
+          disabled: count === 0 || undefined,
+          onclick: async () => {
+            if (!confirmDialog(`선택한 ${count}건을 삭제할까요?`)) return;
+            const ids = [...selectedSet];
+            selectedSet.clear();
+            await onBulkDelete(ids);
+          },
+        }, `선택 삭제${count ? ` (${count})` : ''}`),
+      ]);
+    }
+
+    function selectAllCheckbox(rows, selectedSet) {
+      const allSelected = rows.length > 0 && selectedSet.size === rows.length;
+      return el('input', {
+        type: 'checkbox',
+        title: '전체선택',
+        checked: allSelected || undefined,
+        onchange: (e) => {
+          if (e.target.checked) rows.forEach((r) => selectedSet.add(r.id));
+          else selectedSet.clear();
+          draw();
+        },
+      });
+    }
+
+    function rowCheckbox(selectedSet, id, onChange) {
+      return el('input', {
+        type: 'checkbox',
+        checked: selectedSet.has(id) || undefined,
+        onchange: (e) => {
+          if (e.target.checked) selectedSet.add(id);
+          else selectedSet.delete(id);
+          onChange();
+        },
+      });
     }
 
     async function moveBookmark(rows, idx, dir) {

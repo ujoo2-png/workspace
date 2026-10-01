@@ -12,6 +12,7 @@
   const WIDGET_LABELS = {
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
+    recent: '🕘 최근 본 항목',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
 
@@ -63,6 +64,7 @@
       try {
         await window.getStore().getSession();
         supabaseStatus = { checked: true, ok: true };
+        if (window.markSupabaseActive) window.markSupabaseActive();
       } catch {
         supabaseStatus = { checked: true, ok: false };
       }
@@ -166,6 +168,49 @@
       draw();
     }
 
+    // 날씨 카드를 클릭하면 (1) 그 지역만 즉시 다시 가져와 실시간 동기화하고,
+    // (2) 7일 주간예보를 모달로 보여준다(Open-Meteo의 daily 옵션 사용).
+    async function openWeatherDetail(city, idx) {
+      window.refreshWeatherForCity(city).then((fresh) => {
+        if (!fresh) return;
+        if (!weatherState.data) weatherState.data = [];
+        weatherState.data[idx] = fresh;
+        draw();
+      });
+      window.openModal({
+        title: `☀️ ${city.name} 주간예보`,
+        contentBuilder(body) {
+          body.append(el('div', { class: 'text-muted' }, '불러오는 중…'));
+          window.fetchWeeklyForecast(city).then((days) => {
+            body.innerHTML = '';
+            if (!days || !days.length) {
+              body.append(el('div', { class: 'text-muted' }, '예보를 가져오지 못했습니다.'));
+              return;
+            }
+            const labels = days.map((d) => d.date.slice(5));
+            body.append(
+              el('div', {}, [el('strong', { style: 'font-size:13px' }, '최고/최저기온(℃)')]),
+              el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(labels, days.map((d) => d.max ?? 0), '#ef4444')]),
+              el('div', { style: 'margin-top:4px' }, [window.simpleLineChart(labels, days.map((d) => d.min ?? 0), '#3b82f6')])
+            );
+            const list = el('div', { class: 'item-list', style: 'margin-top:14px' });
+            for (const d of days) {
+              list.append(
+                el('div', { class: 'item-row' }, [
+                  el('div', { class: 'item-row__main' }, [
+                    el('div', { class: 'item-row__title' }, d.date),
+                    el('div', { class: 'item-row__meta' }, window.weatherCodeToLabel(d.code)),
+                  ]),
+                  el('span', { style: 'font-weight:700' }, `${d.min ?? '-'}° / ${d.max ?? '-'}°`),
+                ])
+              );
+            }
+            body.append(list);
+          });
+        },
+      });
+    }
+
     // 대시보드 상단 연동 상태 배지. 현재는 문화생활(TMDB) API 연결 상태를 보여주며,
     // 향후 다른 외부 연동이 추가되면 여기에 함께 나열한다.
     function integrationStatusBar() {
@@ -238,7 +283,12 @@
         cities.forEach((city, i) => {
           const w = weatherState.data?.[i];
           grid.append(
-            el('div', { class: 'weather-grid__cell' }, [
+            el('div', {
+              class: 'weather-grid__cell',
+              style: 'cursor:pointer',
+              title: '클릭하면 실시간으로 다시 가져오고 주간예보를 볼 수 있습니다.',
+              onclick: () => openWeatherDetail(city, i),
+            }, [
               el('div', { class: 'text-muted', style: 'font-size:12px' }, city.name),
               w
                 ? el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-top:2px' }, [
@@ -396,6 +446,26 @@
         );
       }
       widgets.shortcuts = shortcutsCard;
+
+      // 최근 본 항목(벤치마킹 기능) — 최근 연 프로그램/즐겨찾기를 한 번에 다시 열 수 있게 한다.
+      const recentItems = appState.getRecentlyViewed();
+      if (recentItems.length) {
+        const recentCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [el('h3', {}, '🕘 최근 본 항목')]);
+        const list = el('div', { class: 'row wrap', style: 'gap:8px; margin-top:8px' });
+        for (const item of recentItems) {
+          list.append(
+            el('button', {
+              class: 'nm-btn',
+              onclick: () => {
+                if (item.type === 'program') appState.runProgram(item.id);
+                else if (item.type === 'bookmark') appState.openBookmark(item.id);
+              },
+            }, item.label)
+          );
+        }
+        recentCard.append(list);
+        widgets.recent = recentCard;
+      }
 
       const order = getHomeWidgetOrder();
       for (const key of order) {

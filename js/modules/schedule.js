@@ -68,11 +68,23 @@
       container.append(
         el('div', { class: 'filter-bar' }, [
           el('input', {
-            class: 'nm-input',
+            class: 'nm-input schedule-search-input',
             style: 'max-width:220px',
             placeholder: '검색(제목/메모)',
             value: query,
-            oninput: (e) => { query = e.target.value; draw(); },
+            oninput: (e) => {
+              const pos = e.target.selectionStart;
+              query = e.target.value;
+              draw();
+              // draw()가 화면 전체(검색창 포함)를 다시 그리면서 포커스/커서를 잃어버려
+              // 한 글자만 입력된 것처럼 보이는 문제를 막기 위해, 새로 만들어진 입력창에
+              // 포커스와 커서 위치를 복원한다.
+              const next = container.querySelector('.schedule-search-input');
+              if (next) {
+                next.focus();
+                try { next.setSelectionRange(pos, pos); } catch (e2) { /* 무시 */ }
+              }
+            },
           }),
           allTags.length
             ? el(

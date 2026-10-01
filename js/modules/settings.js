@@ -29,7 +29,40 @@
     knowledgeDocs: { label: 'Knowledge', sensitive: false, columns: [
       { key: 'title', label: '제목' }, { key: 'url', label: 'URL' }, { key: 'tags', label: '태그' },
     ] },
+    programs: { label: '프로그램', sensitive: false, columns: [
+      { key: 'name', label: '이름' }, { key: 'program_type', label: '유형' }, { key: 'url', label: 'URL' }, { key: 'run_count', label: '실행횟수' },
+    ] },
+    bookmarks: { label: '즐겨찾기', sensitive: false, columns: [
+      { key: 'title', label: '제목' }, { key: 'url', label: 'URL' }, { key: 'category', label: '분류' },
+    ] },
   };
+
+  // ---- Supabase 7일 유지 기능 ----
+  // Supabase 무료(Free) 티어는 7일간 아무 요청이 없으면 프로젝트가 일시 중지(pause)된다.
+  // 이 앱은 순수 클라이언트 전용(서버 cron 없음)이라 "브라우저가 꺼져 있어도" 깨우는 건
+  // 원천적으로 불가능하다 — 그래서 정직하게 (1) 마지막으로 Supabase 요청이 성공한 시각을
+  // 기록해 보여주고, (2) 5일이 지나면 경고 배지로 알리고 수동으로 "지금 확인"할 수 있게 하고,
+  // (3) 브라우저 탭이 열려 있는 동안만 24시간마다 best-effort로 자동 핑을 보낸다.
+  const SUPABASE_ACTIVE_KEY = 'workspace:supabase:lastActive';
+  function markSupabaseActive() {
+    try { localStorage.setItem(SUPABASE_ACTIVE_KEY, new Date().toISOString()); } catch { /* 무시 */ }
+  }
+  function getSupabaseLastActive() {
+    try { return localStorage.getItem(SUPABASE_ACTIVE_KEY); } catch { return null; }
+  }
+  window.markSupabaseActive = markSupabaseActive;
+  window.getSupabaseLastActive = getSupabaseLastActive;
+  let supabaseKeepAliveTimer = null;
+  function startSupabaseKeepAliveTimer() {
+    if (supabaseKeepAliveTimer || window.CONFIG.mode !== 'supabase') return;
+    supabaseKeepAliveTimer = setInterval(async () => {
+      try {
+        await window.getStore().list('bookmarks', { where: { user_id: appState.user?.id } });
+        markSupabaseActive();
+      } catch { /* 네트워크 오류 등은 조용히 무시 — 다음 주기에 다시 시도 */ }
+    }, 24 * 60 * 60 * 1000); // 24시간마다 — 탭이 열려 있는 동안만 동작한다.
+  }
+  if (window.CONFIG && window.CONFIG.mode === 'supabase') startSupabaseKeepAliveTimer();
 
   function renderSettings(root) {
     const container = el('div', {});
@@ -57,6 +90,7 @@
         weatherCard(),
         tmdbCard(),
         publicDataCard(),
+        ...(CONFIG.mode === 'supabase' ? [supabaseKeepAliveCard()] : []),
         customApiCard(),
         ...(appState.user?.role === 'admin' ? [userManagementCard()] : []),
         el('div', { class: 'nm-card' }, [
@@ -221,6 +255,48 @@
         card.append(el('p', { class: 'text-muted', style: 'font-size:12px' }, `최대 ${CONFIG.weather.maxCities}개까지 등록할 수 있습니다.`));
       }
       return card;
+    }
+
+    // Supabase 무료 티어는 7일간 요청이 없으면 프로젝트가 일시중지된다 — 완전한 서버리스
+    // keep-alive는 불가능하므로, 마지막 활동 확인 시각 + 수동 확인 버튼으로 정직하게 돕는다.
+    function supabaseKeepAliveCard() {
+      const last = getSupabaseLastActive();
+      const lastDate = last ? new Date(last) : null;
+      const daysSince = lastDate ? (Date.now() - lastDate.getTime()) / 86400000 : null;
+      const warn = daysSince !== null && daysSince >= 5;
+      const statusLine = lastDate
+        ? `${lastDate.toLocaleString('ko-KR')} (${daysSince.toFixed(1)}일 전)`
+        : '아직 확인된 기록이 없습니다.';
+      const checkBtn = el('button', {
+        class: 'nm-btn nm-btn--primary',
+        onclick: async () => {
+          checkBtn.disabled = true;
+          checkBtn.textContent = '확인 중…';
+          try {
+            await window.getStore().list('bookmarks', { where: { user_id: appState.user?.id } });
+            markSupabaseActive();
+            toast('Supabase 활동을 확인했습니다.', 'success');
+          } catch (e) {
+            toast('확인에 실패했습니다: ' + (e.message || e), 'error');
+          }
+          renderSettings(rerenderTarget());
+        },
+      }, '지금 확인');
+      return el('div', { class: 'nm-card' }, [
+        el('div', { class: 'row row--between' }, [
+          el('h3', {}, 'Supabase 7일 유지'),
+          warn ? el('span', { class: 'nm-badge nm-badge--warning' }, '⚠️ 5일 이상 경과') : el('span', { class: 'nm-badge nm-badge--success' }, '정상'),
+        ]),
+        el('p', { class: 'text-muted', style: 'font-size:12px' },
+          'Supabase 무료(Free) 티어 프로젝트는 7일간 아무 요청이 없으면 자동으로 일시중지됩니다. ' +
+          '이 앱은 순수 클라이언트 전용(서버 cron 없음)이라 브라우저가 꺼져 있을 때 깨우는 것은 ' +
+          '기술적으로 불가능합니다 — 아래는 "마지막으로 Supabase 요청이 성공한 시각"을 기록해 미리 알려주는 보조 기능입니다.'),
+        el('p', { style: 'margin-top:8px' }, [el('strong', {}, '마지막 확인 활동: '), statusLine]),
+        el('div', { class: 'row', style: 'gap:8px; margin-top:8px' }, [checkBtn]),
+        el('p', { class: 'text-muted', style: 'font-size:11px; margin-top:8px' },
+          '※ 브라우저가 열려있는 동안만 작동하는 보조 기능으로, 24시간마다 자동으로 한 번씩 가볍게 핑을 보냅니다. ' +
+          '7일 이상 접속하지 않으면 여전히 프로젝트가 일시중지될 수 있으니, 장기간 쓰지 않을 때는 가끔 접속해 확인해 주세요.'),
+      ]);
     }
 
     // 문화생활 화면의 "이번 주 인기 영화" 연동에 쓸 TMDB API 키. 대시보드 상단 상태 배지가
