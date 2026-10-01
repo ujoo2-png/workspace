@@ -27,6 +27,7 @@
       automation_logs: [],
       attachments: [],
       vehicle_odometer_logs: [],
+      bookmarks: [],
     };
   }
 

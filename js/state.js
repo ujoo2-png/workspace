@@ -12,6 +12,9 @@
       this.notifications = [];
       this.progressByProject = {}; // projectId -> [{progress, recorded_at}]
 
+      // 즐겨찾기 URL(바로가기)
+      this.bookmarks = [];
+
       // 챌린저
       this.challenges = [];
       this.checkinsByChallenge = {}; // challengeId -> [{checkin_date, value, memo}]
@@ -89,6 +92,7 @@
         projectStages,
         attachments,
         profile,
+        bookmarks,
       ] = await Promise.all([
         this.store.list('schedules', { where: { user_id: uid }, orderBy: 'date' }).catch(() => []),
         this.store.list('projects', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
@@ -115,6 +119,7 @@
         this.store.list('project_stages', { where: { user_id: uid }, orderBy: 'seq' }).catch(() => []),
         this.store.list('attachments', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
         this.store.get('profiles', uid).catch(() => null),
+        this.store.list('bookmarks', { where: { user_id: uid }, orderBy: 'sort_order' }).catch(() => []),
       ]);
 
       this.schedules = schedules;
@@ -134,6 +139,7 @@
       this.healthMetrics = healthMetrics;
       this.healthAppointments = healthAppointments;
       this.profile = profile;
+      this.bookmarks = bookmarks;
 
       this.playlistItems = playlistItems;
 
@@ -241,6 +247,32 @@
         last_run: new Date().toISOString(),
       });
       window.open(p.url, '_blank', 'noopener');
+      return this.refreshAll();
+    }
+
+    // ---- 즐겨찾기 URL(바로가기) ----
+    async addBookmark(data) {
+      const maxOrder = this.bookmarks.reduce((m, b) => Math.max(m, b.sort_order || 0), 0);
+      await this.store.create('bookmarks', { ...data, user_id: this.user.id, sort_order: maxOrder + 1 });
+      return this.refreshAll();
+    }
+    async updateBookmark(id, patch) {
+      await this.store.update('bookmarks', id, patch);
+      return this.refreshAll();
+    }
+    async deleteBookmark(id) {
+      await this.store.remove('bookmarks', id);
+      return this.refreshAll();
+    }
+    async openBookmark(id) {
+      const b = this.bookmarks.find((x) => x.id === id);
+      if (!b) return;
+      window.open(b.url, '_blank', 'noopener');
+      // 클릭 횟수는 세지 않지만 최근 사용 시각만 가볍게 남겨 홈 화면 "자주 쓰는 링크"에 활용할 수 있게 한다.
+      await this.store.update('bookmarks', id, { updated_at: new Date().toISOString() }).catch(() => {});
+    }
+    async reorderBookmarks(orderedIds) {
+      await Promise.all(orderedIds.map((id, idx) => this.store.update('bookmarks', id, { sort_order: idx })));
       return this.refreshAll();
     }
 
@@ -492,8 +524,10 @@
 
     // ---- Knowledge ----
     async addKnowledgeDoc(data) {
-      await this.store.create('knowledge_docs', { ...data, user_id: this.user.id, status: data.status || 'active' });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(Knowledge 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('knowledge_docs', { ...data, user_id: this.user.id, status: data.status || 'active' });
+      await this.refreshAll();
+      return row;
     }
     async updateKnowledgeDoc(id, patch) {
       await this.store.update('knowledge_docs', id, patch);

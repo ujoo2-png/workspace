@@ -11,7 +11,7 @@
   padding: 4px 0;
 }
 .calendar-cell {
-  min-height: 88px;
+  min-height: 100px;
   padding: 4px;
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -34,8 +34,9 @@
   max-width: 70px;
 }
 .calendar-cell__item {
-  font-size: 11px;
-  padding: 1px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 5px;
   border-radius: 4px;
   background: var(--accent-soft, rgba(139, 92, 246, 0.15));
   color: var(--accent);
@@ -45,9 +46,9 @@
   cursor: pointer;
 }
 .calendar-cell__item--done { text-decoration: line-through; opacity: 0.6; }
-.calendar-cell__more { font-size: 10px; color: var(--text-muted); }
+.calendar-cell__more { font-size: 11px; color: var(--text-muted); }
 
 @media (max-width: 860px) {
-  .calendar-cell { min-height: 64px; }
-  .calendar-cell__item { font-size: 10px; }
+  .calendar-cell { min-height: 72px; }
+  .calendar-cell__item { font-size: 11px; }
 }

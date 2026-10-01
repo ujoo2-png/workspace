@@ -11,7 +11,7 @@
   const WIDGET_ORDER_KEY = 'workspace:homeWidgetOrder';
   const WIDGET_LABELS = {
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
-    density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림',
+    density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
 
@@ -371,6 +371,31 @@
         notiCard.append(list);
       }
       widgets.noti = notiCard;
+
+      // 프로그램 메뉴의 즐겨찾기 URL을 홈에서 바로 열 수 있게(메뉴 간 연동).
+      const topBookmarks = appState.bookmarks.slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).slice(0, 6);
+      const shortcutsCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+        el('div', { class: 'row row--between' }, [
+          el('h3', {}, '즐겨찾기 바로가기'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '프로그램 화면에서 관리', onclick: () => navigate('/programs') }, '⚙️'),
+        ]),
+      ]);
+      if (!topBookmarks.length) {
+        shortcutsCard.append(
+          el('div', { class: 'text-muted', style: 'font-size:13px; margin-top:6px' }, [
+            '아직 등록된 즐겨찾기가 없습니다. ',
+            el('a', { href: '#/programs', onclick: (e) => { e.preventDefault(); navigate('/programs'); } }, '프로그램 화면'),
+            '에서 자주 쓰는 링크를 등록해보세요.',
+          ])
+        );
+      } else {
+        shortcutsCard.append(
+          el('div', { class: 'row wrap', style: 'gap:8px; margin-top:8px' }, topBookmarks.map((b) => el('button', {
+            class: 'nm-btn', onclick: () => appState.openBookmark(b.id),
+          }, `${b.icon || '⭐'} ${escapeHtml(b.title)}`)))
+        );
+      }
+      widgets.shortcuts = shortcutsCard;
 
       const order = getHomeWidgetOrder();
       for (const key of order) {

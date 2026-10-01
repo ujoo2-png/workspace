@@ -1,0 +1,33 @@
+/* 프로그램 화면 — 가로 파이프라인 플로우 + 즐겨찾기 카드 */
+.program-flow-wrap { overflow-x: auto; margin-top: 14px; }
+.program-flow { display: flex; align-items: stretch; gap: 0; min-width: max-content; }
+.program-flow__stage {
+  min-width: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  text-align: center;
+}
+.program-flow__stage--empty { background: var(--bg); border-style: dashed; opacity: 0.75; }
+.program-flow__icon { font-size: 20px; }
+.program-flow__label { font-weight: 700; font-size: 12px; margin-top: 2px; }
+.program-flow__detail { font-size: 11px; margin-top: 3px; word-break: break-all; }
+.program-flow__arrow { display: flex; align-items: center; justify-content: center; padding: 0 10px; color: var(--text-muted); font-size: 18px; }
+
+.program-admin-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.program-stage-field { padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
+
+.bookmark-card { cursor: pointer; transition: box-shadow 0.15s ease, transform 0.1s ease; }
+.bookmark-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }

@@ -64,6 +64,10 @@
       const grid = el('div', { class: 'grid-3' });
       for (const p of rows) {
         const mapUrl = p.venue_name ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.venue_name)}` : null;
+        // poster_url이 비어 있으면, 첨부파일로 올려둔 이미지가 있는지 확인해서 그걸 포스터로 대신 보여준다
+        // (예: URL 대신 파일로 포스터 이미지를 첨부해둔 경우에도 카드에 바로 보이도록).
+        const attachedImage = appState.getAttachments('playlist_items', p.id).find((a) => (a.mime_type || '').startsWith('image/'));
+        const posterSrc = p.poster_url || attachedImage?.data || null;
         grid.append(
           el('div', { class: 'nm-card playlist-card' }, [
             // 항목(종류)을 카드 맨 위 헤더에 크게 표기 — 상태 배지는 오른쪽에 나란히.
@@ -73,8 +77,8 @@
             ]),
             // 포스터 영역은 항상 카드 안에 존재한다 — 실제 포스터가 없으면 종류 아이콘을 큼직하게 보여주는 플레이스홀더.
             el('div', { class: 'playlist-card__poster' }, [
-              p.poster_url
-                ? el('img', { src: p.poster_url, alt: '', class: 'playlist-card__poster-img', onerror: "this.parentElement.classList.add('playlist-card__poster--empty'); this.remove();" })
+              posterSrc
+                ? el('img', { src: posterSrc, alt: '', class: 'playlist-card__poster-img', onerror: "this.parentElement.classList.add('playlist-card__poster--empty'); this.remove();" })
                 : el('span', { class: 'playlist-card__poster-icon' }, TYPE_ICON[p.content_type] || '🎫'),
             ]),
             el('div', { style: 'font-weight:700; margin:8px 0 2px' }, escapeHtml(p.title)),
@@ -264,6 +268,39 @@
         title: existing ? '문화생활 수정' : '문화생활 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
+
+          // 포스터: URL 직접 입력 또는 이미지 파일 업로드 중 하나를 쓸 수 있다(업로드하면 URL 칸에
+          // data URL로 채워져 미리보기가 바로 바뀐다 — 별도 파일 저장소 없이도 카드에 바로 반영된다).
+          const posterInput = el('input', { class: 'nm-input', type: 'url', name: 'poster_url', placeholder: 'https://...', value: existing?.poster_url || '' });
+          const posterPreview = el('img', {
+            src: existing?.poster_url || '', alt: '', style: `width:60px; height:84px; object-fit:cover; border-radius:6px; ${existing?.poster_url ? '' : 'display:none'}`,
+          });
+          posterInput.addEventListener('input', () => {
+            posterPreview.src = posterInput.value;
+            posterPreview.style.display = posterInput.value ? '' : 'none';
+          });
+          const posterFileInput = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
+          posterFileInput.addEventListener('change', async () => {
+            const file = posterFileInput.files?.[0];
+            if (!file) return;
+            if (file.size > 4 * 1024 * 1024) { toast('이미지 파일이 너무 큽니다(최대 4MB).', 'error'); return; }
+            const dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = () => reject(new Error('파일을 읽는 중 오류가 발생했습니다.'));
+              reader.readAsDataURL(file);
+            });
+            posterInput.value = dataUrl;
+            posterPreview.src = dataUrl;
+            posterPreview.style.display = '';
+          });
+          const posterField = field('포스터(선택)', el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [
+            el('div', { style: 'flex:1' }, [posterInput]),
+            el('button', { type: 'button', class: 'nm-btn', onclick: () => posterFileInput.click() }, '📁 파일'),
+            posterFileInput,
+            posterPreview,
+          ]));
+
           form.append(
             field('종류', typeSelect(existing?.content_type)),
             field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' })),
@@ -272,7 +309,7 @@
             field('관람/관람예정일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'event_date', value: existing?.event_date || '' })),
             field('시간(선택)', el('input', { class: 'nm-input', type: 'time', name: 'event_time', value: existing?.event_time || '' })),
             field('장소(선택)', el('input', { class: 'nm-input', name: 'venue_name', value: existing?.venue_name || '' })),
-            field('포스터 이미지 URL(선택)', el('input', { class: 'nm-input', type: 'url', name: 'poster_url', placeholder: 'https://...', value: existing?.poster_url || '' })),
+            posterField,
             field('별점(1-5, 선택)', el('input', { class: 'nm-input', type: 'number', min: '1', max: '5', name: 'rating', value: existing?.rating || '' })),
             field('한줄평(선택)', el('textarea', { class: 'nm-textarea', name: 'review' }, existing?.review || ''))
           );
