@@ -240,6 +240,62 @@
     return miss;
   }
 
+  /**
+   * Health 기록(metrics)을 주간/월간/분기 단위로 묶어 평균값 추이를 계산한다.
+   * 그래프(막대/선) 그리기 전용 — 각 구간에 기록이 하나도 없으면 value는 null이다.
+   * @param {{value:number, recorded_at:string}[]} metrics 같은 metric_type으로 미리 걸러서 넘긴다
+   * @param {'week'|'month'|'quarter'} period
+   * @param {number} periods 보여줄 구간 수(최근 n개, 오늘이 포함된 구간이 마지막)
+   * @param {string} todayIso
+   * @returns {{labels:string[], values:(number|null)[], counts:number[]}}
+   */
+  function aggregateMetricTrend(metrics, period = 'week', periods = 8, todayIso = todayISO()) {
+    const buckets = [];
+    const base = new Date(todayIso + 'T00:00:00');
+
+    for (let i = periods - 1; i >= 0; i--) {
+      let start, end, label;
+      if (period === 'month') {
+        const y = base.getFullYear();
+        const m = base.getMonth() - i;
+        const d = new Date(y, m, 1);
+        start = todayISO(d);
+        end = todayISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+        label = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      } else if (period === 'quarter') {
+        const totalQuarter = base.getFullYear() * 4 + Math.floor(base.getMonth() / 3) - i;
+        const y = Math.floor(totalQuarter / 4);
+        const q = ((totalQuarter % 4) + 4) % 4;
+        const startMonth = q * 3;
+        const d = new Date(y, startMonth, 1);
+        start = todayISO(d);
+        end = todayISO(new Date(y, startMonth + 3, 0));
+        label = `${y} Q${q + 1}`;
+      } else {
+        // week: 오늘을 포함한 7일 단위로 과거로 거슬러 올라간다(ISO 주 경계가 아니라 "최근 n*7일"을 n구간으로 나눈 방식).
+        end = addDays(todayIso, -7 * i);
+        start = addDays(end, -6);
+        label = start.slice(5); // MM-DD
+      }
+      buckets.push({ start, end, label });
+    }
+
+    const labels = buckets.map((b) => b.label);
+    const values = buckets.map((b) => {
+      const rows = (metrics || []).filter((m) => {
+        const d = (m.recorded_at || '').slice(0, 10);
+        return d >= b.start && d <= b.end && typeof m.value === 'number';
+      });
+      if (!rows.length) return null;
+      const avg = rows.reduce((s, r) => s + r.value, 0) / rows.length;
+      return Number(avg.toFixed(1));
+    });
+    const counts = buckets.map(
+      (b) => (metrics || []).filter((m) => { const d = (m.recorded_at || '').slice(0, 10); return d >= b.start && d <= b.end; }).length
+    );
+    return { labels, values, counts };
+  }
+
   globalThis.predictProjectCompletion = predictProjectCompletion;
   globalThis.predictScheduleDensity = predictScheduleDensity;
   globalThis.predictNextMaintenance = predictNextMaintenance;
@@ -247,4 +303,5 @@
   globalThis.predictWeeklyExerciseGoal = predictWeeklyExerciseGoal;
   globalThis.computeChallengeStreak = computeChallengeStreak;
   globalThis.computeMissStreak = computeMissStreak;
+  globalThis.aggregateMetricTrend = aggregateMetricTrend;
 })();

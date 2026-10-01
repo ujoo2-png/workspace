@@ -26,6 +26,9 @@
       this.healthMetrics = [];
       this.healthAppointments = [];
 
+      // 내 정보(설정 화면에서 입력하는 나이/혈액형 등 — 나이대별 건강 제안에 사용)
+      this.profile = null;
+
       // 문화생활(PlayList)
       this.playlistItems = [];
 
@@ -85,6 +88,7 @@
         devlogs,
         projectStages,
         attachments,
+        profile,
       ] = await Promise.all([
         this.store.list('schedules', { where: { user_id: uid }, orderBy: 'date' }).catch(() => []),
         this.store.list('projects', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
@@ -110,6 +114,7 @@
         this.store.list('devlogs', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
         this.store.list('project_stages', { where: { user_id: uid }, orderBy: 'seq' }).catch(() => []),
         this.store.list('attachments', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
+        this.store.get('profiles', uid).catch(() => null),
       ]);
 
       this.schedules = schedules;
@@ -128,6 +133,7 @@
 
       this.healthMetrics = healthMetrics;
       this.healthAppointments = healthAppointments;
+      this.profile = profile;
 
       this.playlistItems = playlistItems;
 
@@ -306,20 +312,63 @@
       await this.store.create('health_metrics', { ...data, user_id: this.user.id, recorded_at: data.recorded_at || new Date().toISOString() });
       return this.refreshAll();
     }
+    // 혈압처럼 한 번의 기록 입력이 여러 metric_type 행으로 나뉘어 저장돼야 하는 경우
+    // (수축기/이완기) refreshAll을 한 번만 호출하도록 모아서 저장한다.
+    async addHealthMetrics(rows) {
+      for (const data of rows) {
+        await this.store.create('health_metrics', { ...data, user_id: this.user.id, recorded_at: data.recorded_at || new Date().toISOString() });
+      }
+      return this.refreshAll();
+    }
     async deleteHealthMetric(id) {
       await this.store.remove('health_metrics', id);
       return this.refreshAll();
     }
+    // 병원/검진 일정을 등록하면 "일정" 메뉴에도 자동으로 나타나도록, 같은 내용의 일정을
+    // 함께 만들고 그 id를 health_appointments.schedule_id에 저장해 묶어둔다(1.2처럼
+    // 참고용 오버레이가 아니라 실제 내 일정에 반영되는 것이 사용자 의도이므로 자동 추가한다).
     async addHealthAppointment(data) {
-      await this.store.create('health_appointments', { ...data, user_id: this.user.id });
+      const appt = await this.store.create('health_appointments', { ...data, user_id: this.user.id });
+      try {
+        const schedule = await this.store.create('schedules', {
+          user_id: this.user.id,
+          done: false,
+          title: `🏥 ${data.title}`,
+          date: data.appointment_date,
+          memo: `Health에서 자동 추가된 일정입니다.${data.location ? ' 장소: ' + data.location : ''}`,
+        });
+        await this.store.update('health_appointments', appt.id, { schedule_id: schedule.id });
+      } catch (e) {
+        // 일정 자동 추가에 실패해도 Health 쪽 등록 자체는 유지한다.
+      }
       return this.refreshAll();
     }
     async updateHealthAppointment(id, patch) {
+      const current = (this.healthAppointments || []).find((a) => a.id === id);
       await this.store.update('health_appointments', id, patch);
+      // 날짜/제목/장소가 바뀌면 연동된 일정도 같이 갱신한다.
+      if (current?.schedule_id && (patch.title !== undefined || patch.appointment_date !== undefined || patch.location !== undefined)) {
+        const next = { ...current, ...patch };
+        await this.store.update('schedules', current.schedule_id, {
+          title: `🏥 ${next.title}`,
+          date: next.appointment_date,
+          memo: `Health에서 자동 추가된 일정입니다.${next.location ? ' 장소: ' + next.location : ''}`,
+        }).catch(() => {});
+      }
       return this.refreshAll();
     }
     async deleteHealthAppointment(id) {
+      const current = (this.healthAppointments || []).find((a) => a.id === id);
+      if (current?.schedule_id) {
+        await this.store.remove('schedules', current.schedule_id).catch(() => {});
+      }
       await this.store.remove('health_appointments', id);
+      return this.refreshAll();
+    }
+
+    // ---- 내 정보(profiles) ----
+    async updateMyProfile(patch) {
+      await this.store.update('profiles', this.user.id, patch);
       return this.refreshAll();
     }
 

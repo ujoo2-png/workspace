@@ -20,6 +20,7 @@ const {
   calcFuelEfficiency,
   predictWeeklyExerciseGoal,
   computeChallengeStreak,
+  aggregateMetricTrend,
 } = globalThis;
 
 test('predictProjectCompletion: 기록이 부족하면 예측하지 않는다', () => {
@@ -173,4 +174,43 @@ test('computeChallengeStreak: 체크인이 아예 없으면 streak 0, 위험 아
   const r = computeChallengeStreak([], '2026-09-08');
   assert.equal(r.streak, 0);
   assert.equal(r.atRisk, false);
+});
+
+// ---- aggregateMetricTrend ----
+
+test('aggregateMetricTrend: 주간 — 같은 주 기록은 평균으로 묶이고, 기록 없는 주는 null', () => {
+  const metrics = [
+    { value: 70, recorded_at: '2026-09-08T09:00:00Z' },
+    { value: 72, recorded_at: '2026-09-09T09:00:00Z' },
+  ];
+  const r = aggregateMetricTrend(metrics, 'week', 2, '2026-09-10');
+  assert.equal(r.labels.length, 2);
+  assert.equal(r.values[1], 71); // (70+72)/2
+  assert.equal(r.counts[1], 2);
+  assert.equal(r.values[0], null); // 그 전 주는 기록 없음
+  assert.equal(r.counts[0], 0);
+});
+
+test('aggregateMetricTrend: 월간 — 월이 바뀌는 경계를 올바르게 나눈다', () => {
+  const metrics = [
+    { value: 100, recorded_at: '2026-08-15T00:00:00Z' },
+    { value: 200, recorded_at: '2026-09-05T00:00:00Z' },
+  ];
+  const r = aggregateMetricTrend(metrics, 'month', 2, '2026-09-10');
+  assert.deepEqual(r.labels, ['2026.08', '2026.09']);
+  assert.equal(r.values[0], 100);
+  assert.equal(r.values[1], 200);
+});
+
+test('aggregateMetricTrend: 분기 — 연도 경계를 넘어가도 올바르게 계산한다', () => {
+  const metrics = [{ value: 50, recorded_at: '2025-12-01T00:00:00Z' }];
+  const r = aggregateMetricTrend(metrics, 'quarter', 2, '2026-02-01');
+  assert.deepEqual(r.labels, ['2025 Q4', '2026 Q1']);
+  assert.equal(r.values[0], 50);
+  assert.equal(r.values[1], null);
+});
+
+test('aggregateMetricTrend: 기록이 아예 없으면 모든 구간이 null', () => {
+  const r = aggregateMetricTrend([], 'week', 4, '2026-09-10');
+  assert.equal(r.values.every((v) => v === null), true);
 });

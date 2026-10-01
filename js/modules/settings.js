@@ -53,6 +53,7 @@
             el('button', { class: 'nm-btn nm-btn--danger', onclick: signOut }, '로그아웃'),
           ]),
         ]),
+        myProfileCard(),
         weatherCard(),
         tmdbCard(),
         publicDataCard(),
@@ -84,6 +85,68 @@
         ]),
       ])
     );
+
+    // 내 정보(나이/성별/혈액형/키) — Health 화면의 "나이대별 건강 제안"에 사용된다.
+    // 모두 선택 입력이며, 민감한 진단/복약 정보가 아니라 사용자가 공개적으로 알려주는
+    // 기본 신상 정보 수준이다.
+    function myProfileCard() {
+      const p = appState.profile || {};
+      const GENDER_LABEL = { male: '남성', female: '여성', other: '기타' };
+      const card = el('div', { class: 'nm-card' }, [
+        el('h3', {}, '내 정보'),
+        el('p', { class: 'text-muted' }, '생년월일을 입력하면 Health 화면에서 나이대에 맞는 건강검진 제안을 받을 수 있습니다. 모두 선택 입력입니다.'),
+      ]);
+
+      const birthInput = el('input', { class: 'nm-input', type: 'date', value: p.birth_date || '' });
+      const genderSelect = el('select', { class: 'nm-select' }, [
+        el('option', { value: '' }, '선택 안 함'),
+        el('option', { value: 'male' }, '남성'),
+        el('option', { value: 'female' }, '여성'),
+        el('option', { value: 'other' }, '기타'),
+      ]);
+      genderSelect.value = p.gender || '';
+      const bloodSelect = el('select', { class: 'nm-select' }, [
+        el('option', { value: '' }, '선택 안 함'),
+        ...['A', 'B', 'O', 'AB'].map((v) => el('option', { value: v }, `${v}형`)),
+      ]);
+      bloodSelect.value = p.blood_type || '';
+      const heightInput = el('input', { class: 'nm-input', type: 'number', step: '0.1', min: '0', value: p.height_cm || '' });
+
+      const grid = el('div', { class: 'row wrap', style: 'gap:12px; margin-top:10px' }, [
+        el('div', { style: 'min-width:160px' }, [el('label', { class: 'text-muted', style: 'font-size:13px; font-weight:600' }, '생년월일'), birthInput]),
+        el('div', { style: 'min-width:140px' }, [el('label', { class: 'text-muted', style: 'font-size:13px; font-weight:600' }, '성별'), genderSelect]),
+        el('div', { style: 'min-width:120px' }, [el('label', { class: 'text-muted', style: 'font-size:13px; font-weight:600' }, '혈액형'), bloodSelect]),
+        el('div', { style: 'min-width:120px' }, [el('label', { class: 'text-muted', style: 'font-size:13px; font-weight:600' }, '키(cm)'), heightInput]),
+      ]);
+      card.append(grid);
+
+      card.append(
+        el('button', {
+          class: 'nm-btn nm-btn--primary', style: 'margin-top:12px',
+          onclick: async () => {
+            try {
+              await appState.updateMyProfile({
+                birth_date: birthInput.value || null,
+                gender: genderSelect.value || null,
+                blood_type: bloodSelect.value || null,
+                height_cm: heightInput.value ? Number(heightInput.value) : null,
+              });
+              toast('내 정보를 저장했습니다.', 'success');
+            } catch (e) {
+              toast('저장에 실패했습니다: ' + (e.message || e), 'error');
+            }
+          },
+        }, '저장')
+      );
+
+      if (p.birth_date) {
+        card.append(
+          el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:8px' },
+            `현재 등록된 정보: ${p.birth_date}생${p.gender ? ' · ' + GENDER_LABEL[p.gender] : ''}${p.blood_type ? ' · ' + p.blood_type + '형' : ''}${p.height_cm ? ' · ' + p.height_cm + 'cm' : ''}`)
+        );
+      }
+      return card;
+    }
 
     function weatherCard() {
       const card = el('div', { class: 'nm-card' }, [

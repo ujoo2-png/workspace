@@ -1,0 +1,16 @@
+/* Health 화면 — 확장된 KPI 그리드, 트렌드/가이드 박스, 나이대별 제안, 기록 페이지네이션 */
+.health-kpi-grid { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) {
+  .health-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.health-guide-box {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.health-tips-list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.health-tips-list li { color: var(--text); }
+
+.health-pagenav button:disabled { opacity: 0.35; cursor: default; }
