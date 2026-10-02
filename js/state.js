@@ -1,6 +1,20 @@
 // 아주 작은 중앙 상태 저장소. 프레임워크 없이 pub/sub만으로 화면 갱신을 구동한다.
 // 일반 <script>로 로드되며 js/store/index.js가 먼저 로드되어 window.getStore가 있어야 한다.
 (function () {
+  // 이력/경력 관리 7개 카테고리 — key(상태 필드명) -> 실제 테이블명.
+  // 7개 테이블 모두 user_id/sort_order/deleted_at 구조가 동일해(0020 마이그레이션),
+  // addCareerRecord 등 공통 메서드 하나로 CRUD를 처리할 수 있다.
+  const CAREER_TABLES = {
+    education: 'career_education',
+    certifications: 'career_certifications',
+    trainings: 'career_trainings',
+    memberships: 'career_memberships',
+    awards: 'career_awards',
+    experiences: 'career_experiences',
+    photos: 'career_photos',
+  };
+  window.CAREER_TABLES = CAREER_TABLES;
+
   class AppState extends EventTarget {
     constructor() {
       super();
@@ -58,6 +72,11 @@
 
       // 파일 첨부(모든 메뉴 공통): key = `${owner_table}:${owner_id}` -> [row]
       this.attachmentsByOwner = {};
+
+      // 이력/경력 관리 (7개 카테고리) — 테이블 구조가 모두 동일(사용자 소유 + sort_order +
+      // 소프트삭제)하므로 CAREER_TABLES 설정 하나로 상태 보관과 CRUD를 공통 처리한다.
+      this.career = {};
+      for (const key of Object.keys(CAREER_TABLES)) this.career[key] = [];
     }
 
     emit(name, detail) {
@@ -93,6 +112,7 @@
         attachments,
         profile,
         bookmarks,
+        careerLists,
       ] = await Promise.all([
         this.store.list('schedules', { where: { user_id: uid }, orderBy: 'date' }).catch(() => []),
         this.store.list('projects', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
@@ -120,6 +140,11 @@
         this.store.list('attachments', { where: { user_id: uid }, orderBy: 'created_at', ascending: false }).catch(() => []),
         this.store.get('profiles', uid).catch(() => null),
         this.store.list('bookmarks', { where: { user_id: uid }, orderBy: 'sort_order' }).catch(() => []),
+        Promise.all(
+          Object.values(CAREER_TABLES).map((table) =>
+            this.store.list(table, { where: { user_id: uid }, orderBy: 'sort_order' }).catch(() => [])
+          )
+        ),
       ]);
 
       this.schedules = schedules;
@@ -140,6 +165,8 @@
       this.healthAppointments = healthAppointments;
       this.profile = profile;
       this.bookmarks = bookmarks;
+
+      Object.keys(CAREER_TABLES).forEach((key, idx) => { this.career[key] = careerLists[idx]; });
 
       this.playlistItems = playlistItems;
 
@@ -194,8 +221,10 @@
 
     // ---- 편의 CRUD (호출부에서 매번 store를 신경쓰지 않게) ----
     async addSchedule(data) {
-      await this.store.create('schedules', { ...data, user_id: this.user.id, done: false });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(일정 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('schedules', { ...data, user_id: this.user.id, done: false });
+      await this.refreshAll();
+      return row;
     }
     async updateSchedule(id, patch) {
       await this.store.update('schedules', id, patch);
@@ -207,8 +236,10 @@
     }
 
     async addProject(data) {
-      await this.store.create('projects', { ...data, user_id: this.user.id, status: data.status || 'in_progress' });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(프로젝트 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('projects', { ...data, user_id: this.user.id, status: data.status || 'in_progress' });
+      await this.refreshAll();
+      return row;
     }
     async updateProject(id, patch) {
       await this.store.update('projects', id, patch);
@@ -231,8 +262,10 @@
     }
 
     async addProgram(data) {
-      await this.store.create('programs', { ...data, user_id: this.user.id, run_count: 0 });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(프로그램 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('programs', { ...data, user_id: this.user.id, run_count: 0 });
+      await this.refreshAll();
+      return row;
     }
     async updateProgram(id, patch) {
       await this.store.update('programs', id, patch);
@@ -322,8 +355,10 @@
 
     // ---- 챌린저 ----
     async addChallenge(data) {
-      await this.store.create('challenges', { ...data, user_id: this.user.id, status: data.status || 'active' });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(챌린지 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('challenges', { ...data, user_id: this.user.id, status: data.status || 'active' });
+      await this.refreshAll();
+      return row;
     }
     async updateChallenge(id, patch) {
       await this.store.update('challenges', id, patch);
@@ -350,8 +385,10 @@
 
     // ---- 차량관리 ----
     async addVehicle(data) {
-      await this.store.create('vehicles', { ...data, user_id: this.user.id });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(차량 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('vehicles', { ...data, user_id: this.user.id });
+      await this.refreshAll();
+      return row;
     }
     async updateVehicle(id, patch) {
       await this.store.update('vehicles', id, patch);
@@ -362,8 +399,10 @@
       return this.refreshAll();
     }
     async addMaintenance(vehicleId, data) {
-      await this.store.create('vehicle_maintenance', { ...data, vehicle_id: vehicleId });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일(영수증 등)을 붙일 수 있도록, 생성된 행을 반환한다.
+      const row = await this.store.create('vehicle_maintenance', { ...data, vehicle_id: vehicleId });
+      await this.refreshAll();
+      return row;
     }
     async deleteMaintenance(id) {
       await this.store.remove('vehicle_maintenance', id);
@@ -412,7 +451,9 @@
       } catch (e) {
         // 일정 자동 추가에 실패해도 Health 쪽 등록 자체는 유지한다.
       }
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일(진료의뢰서 등)을 붙일 수 있도록, 생성된 행을 반환한다.
+      await this.refreshAll();
+      return appt;
     }
     async updateHealthAppointment(id, patch) {
       const current = (this.healthAppointments || []).find((a) => a.id === id);
@@ -633,8 +674,10 @@
 
     // ---- Devlog (개발/개선 기록, 프로젝트 연계) ----
     async addDevlog(data) {
-      await this.store.create('devlogs', { ...data, user_id: this.user.id });
-      return this.refreshAll();
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(Devlog 등록 화면에서 바로 첨부), 생성된 행을 반환한다.
+      const row = await this.store.create('devlogs', { ...data, user_id: this.user.id });
+      await this.refreshAll();
+      return row;
     }
     async updateDevlog(id, patch) {
       await this.store.update('devlogs', id, patch);
@@ -694,6 +737,35 @@
     }
     async deleteAttachment(id) {
       await this.store.remove('attachments', id);
+      return this.refreshAll();
+    }
+
+    // ---- 이력/경력 관리 (7개 카테고리 공통 CRUD) ----
+    // key: CAREER_TABLES의 키(education/certifications/trainings/memberships/awards/experiences/photos)
+    async addCareerRecord(key, data) {
+      const table = CAREER_TABLES[key];
+      const existing = this.career[key] || [];
+      const maxOrder = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+      // 등록 직후 바로 첨부파일을 붙일 수 있도록(다른 메뉴와 동일한 패턴), 생성된 행을 반환한다.
+      const row = await this.store.create(table, { ...data, user_id: this.user.id, sort_order: maxOrder + 1 });
+      await this.refreshAll();
+      return row;
+    }
+    async updateCareerRecord(key, id, patch) {
+      await this.store.update(CAREER_TABLES[key], id, patch);
+      return this.refreshAll();
+    }
+    async deleteCareerRecord(key, id) {
+      await this.store.softDelete(CAREER_TABLES[key], id);
+      return this.refreshAll();
+    }
+    async deleteCareerRecordsBulk(key, ids) {
+      for (const id of ids) await this.store.softDelete(CAREER_TABLES[key], id);
+      return this.refreshAll();
+    }
+    async reorderCareerRecords(key, orderedIds) {
+      const table = CAREER_TABLES[key];
+      await Promise.all(orderedIds.map((id, idx) => this.store.update(table, id, { sort_order: idx })));
       return this.refreshAll();
     }
 

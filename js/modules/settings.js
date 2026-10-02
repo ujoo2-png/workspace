@@ -858,7 +858,14 @@
         exportedAt: new Date().toISOString(),
         schedules: appState.schedules,
         projects: appState.projects,
-        programs: appState.programs,
+        // admin_password는 암호화된 값(wsenc1:...)이면 그대로 포함하고(잠금 암호 없이는
+        // 어차피 읽을 수 없으므로 안전), 암호화 이전에 저장된 과거 평문 값은 백업 파일이
+        // 다운로드 폴더에 그대로 남는 것을 막기 위해 내보내기에서 제외한다.
+        programs: appState.programs.map((p) => (
+          p.admin_password && !window.secretCrypto.isEncryptedSecret(p.admin_password)
+            ? { ...p, admin_password: null }
+            : p
+        )),
         notifications: appState.notifications,
         challenges: appState.challenges,
         checkinsByChallenge: appState.checkinsByChallenge,

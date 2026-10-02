@@ -15,11 +15,60 @@
     { key: 'supabase', icon: '🗄️', label: '저장(Supabase)' },
   ];
 
+  // ---- 관리자 비밀번호 암호화(잠금 암호) 공통 헬퍼 ----
+  // 잠금 암호(passphrase)는 절대 저장/전송하지 않는다 — 이 변수는 "같은 세션 동안 매번
+  // 다시 입력하지 않게" 메모리에만 잠시 두는 편의용 캐시이며, 새로고침하면 사라진다.
+  let cachedPassphrase = null;
+
+  // 잠금 암호 입력 모달. X/ESC/바깥 클릭으로 닫으면 null(취소)로 resolve한다.
+  function askPassphrase(message) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (value) => { if (!settled) { settled = true; resolve(value); } };
+      openModal({
+        title: '🔒 잠금 암호 입력',
+        contentBuilder(body, closeModal) {
+          const form = el('form', { class: 'stack' });
+          const input = el('input', { class: 'nm-input', type: 'password', name: 'passphrase', autofocus: true });
+          form.append(
+            el('p', { class: 'text-muted', style: 'font-size:12px' }, message),
+            el('div', { class: 'nm-field' }, [el('label', {}, '잠금 암호'), input])
+          );
+          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '확인'));
+          form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            settle(input.value || null);
+            closeModal();
+          });
+          body.append(form);
+          setTimeout(() => input.focus(), 0);
+          const backdrop = body.closest('.nm-modal-backdrop');
+          const observer = new MutationObserver(() => {
+            if (backdrop && !document.body.contains(backdrop)) {
+              observer.disconnect();
+              settle(null);
+            }
+          });
+          observer.observe(document.body, { childList: true });
+        },
+      });
+    });
+  }
+
+  // 캐시된 암호가 있으면 다시 묻지 않고 재사용한다("세션당 한 번"). forceAsk=true면 캐시를
+  // 무시하고 항상 새로 묻는다(캐시된 암호가 틀린 것으로 판명된 경우 등).
+  async function getPassphrase(message, { forceAsk = false } = {}) {
+    if (!forceAsk && cachedPassphrase) return cachedPassphrase;
+    const pass = await askPassphrase(message);
+    if (pass) cachedPassphrase = pass;
+    return pass;
+  }
+
   function renderPrograms(root) {
     const container = el('div', {});
     root.append(container);
     let tab = 'programs'; // 'programs' | 'bookmarks'
-    const revealedPasswords = new Set();
+    const revealedValues = new Map(); // program.id -> 복호화(또는 과거 평문) 된 값
     let selectedPrograms = new Set();
     let selectedBookmarks = new Set();
     let programQuery = '';
@@ -209,8 +258,9 @@
     }
 
     // "상세" — 전체 파이프라인 + 관리자 계정 + 첨부파일을 모달로 보여준다(테이블을 넓히지 않기 위함).
-    function openDetailModal(p) {
-      openModal({
+    function openDetailModal(p, closePrev) {
+      if (closePrev) closePrev();
+      const closeThis = openModal({
         title: `${p.icon || '🔗'} ${p.name} — 상세`,
         contentBuilder(body) {
           const pipeline = p.pipeline || {};
@@ -235,18 +285,42 @@
           if (p.description) body.append(el('p', { class: 'text-muted', style: 'margin-top:10px' }, escapeHtml(p.description)));
 
           if (p.admin_id || p.admin_password) {
-            const revealed = revealedPasswords.has(p.id);
+            const encrypted = p.admin_password && window.secretCrypto.isEncryptedSecret(p.admin_password);
+            const revealedValue = revealedValues.get(p.id);
+            const revealed = revealedValue !== undefined;
             const box = el('div', { class: 'program-admin-box' }, [
               el('span', { class: 'text-muted', style: 'font-size:12px' }, '관리자 계정'),
               el('span', { style: 'font-size:13px; font-weight:600' }, p.admin_id || '-'),
               p.admin_password
                 ? el('span', { class: 'row', style: 'gap:4px; align-items:center' }, [
-                    el('span', { style: 'font-size:13px; font-family:monospace' }, revealed ? p.admin_password : '•'.repeat(Math.min(10, p.admin_password.length || 8))),
+                    el('span', { style: 'font-size:13px; font-family:monospace' },
+                      revealed ? revealedValue : '•'.repeat(Math.min(10, p.admin_password.length || 8))),
                     el('button', {
                       class: 'nm-btn nm-btn--icon', title: revealed ? '숨기기' : '보기',
-                      onclick: () => { revealed ? revealedPasswords.delete(p.id) : revealedPasswords.add(p.id); openDetailModal(p); },
+                      onclick: async () => {
+                        if (revealed) { revealedValues.delete(p.id); openDetailModal(p, closeThis); return; }
+                        if (!encrypted) {
+                          // 암호화 이전에 저장된 과거 평문 값 — 잠금 암호 없이 그대로 보여준다.
+                          revealedValues.set(p.id, p.admin_password);
+                          openDetailModal(p, closeThis);
+                          return;
+                        }
+                        let pass = await getPassphrase('이 비밀번호를 암호화할 때 사용한 잠금 암호를 입력하세요.');
+                        if (!pass) return;
+                        try {
+                          const plain = await window.secretCrypto.decryptSecret(p.admin_password, pass);
+                          revealedValues.set(p.id, plain);
+                          openDetailModal(p, closeThis);
+                        } catch (e) {
+                          cachedPassphrase = null;
+                          toast(e.message || '복호화에 실패했습니다.', 'error');
+                        }
+                      },
                     }, revealed ? '🙈' : '👁️'),
                   ])
+                : null,
+              p.admin_password && !encrypted
+                ? el('span', { class: 'nm-badge nm-badge--warning', title: '암호화 이전(과거)에 저장된 값입니다. 한 번 다시 저장하면 암호화됩니다.' }, '⚠️ 평문(미암호화)')
                 : null,
             ]);
             body.append(box);
@@ -257,6 +331,7 @@
           window.renderAttachmentsPanel(attachBox, 'programs', p.id);
         },
       });
+      return closeThis;
     }
 
     async function removeProgram(p) {
@@ -318,7 +393,13 @@
           }
 
           // ---- 관리자 계정 ----
-          const adminPwInput = el('input', { class: 'nm-input', type: 'password', name: 'admin_password', value: existing?.admin_password || '', autocomplete: 'new-password' });
+          // 보안 주의: 기존 저장 값(암호문 또는 과거 평문)은 이 입력창에 절대 채워 넣지 않는다 —
+          // 비워두면 "변경 없음(기존 값 유지)"로 처리하고, 값을 입력해야만 새로 암호화해 저장한다.
+          const hasExistingPw = !!existing?.admin_password;
+          const adminPwInput = el('input', {
+            class: 'nm-input', type: 'password', name: 'admin_password', autocomplete: 'new-password',
+            placeholder: hasExistingPw ? '변경하려면 입력 (비워두면 기존 값 유지)' : '',
+          });
           const togglePwBtn = el('button', {
             type: 'button', class: 'nm-btn nm-btn--icon',
             onclick: () => {
@@ -327,6 +408,9 @@
               togglePwBtn.textContent = show ? '🙈' : '👁️';
             },
           }, '👁️');
+          const clearPwCheckbox = hasExistingPw
+            ? el('input', { type: 'checkbox', name: 'clear_admin_password' })
+            : null;
           form.append(el('h3', { style: 'margin:10px 0 2px; font-size:14px' }, '관리자 계정(선택)'));
           form.append(
             el('div', { class: 'row wrap', style: 'gap:8px' }, [
@@ -334,9 +418,23 @@
               el('div', { style: 'flex:1; min-width:140px' }, [field('비밀번호', el('div', { class: 'row', style: 'gap:6px' }, [adminPwInput, togglePwBtn]))]),
             ])
           );
-          form.append(el('p', { class: 'text-muted', style: 'font-size:11px' }, '※ 암호화 없이 저장됩니다. 중요한 계정은 별도 비밀번호 관리자 사용을 권장합니다.'));
+          if (clearPwCheckbox) {
+            form.append(
+              el('label', { class: 'row', style: 'gap:6px; align-items:center; font-size:12px' }, [
+                clearPwCheckbox, el('span', { class: 'text-muted' }, '저장된 비밀번호 삭제'),
+              ])
+            );
+          }
+          form.append(el('p', { class: 'text-muted', style: 'font-size:11px' },
+            '🔒 입력하신 비밀번호는 저장 시 잠금 암호로 암호화되어 저장됩니다(AES-GCM). ' +
+            '잠금 암호는 서버에 저장되지 않으며, 잊으면 저장된 값을 복구할 수 없습니다.'));
 
-          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          form.append(submitBtn);
+          // 신규 등록 직후 바로 첨부할 수 있도록(기존엔 "상세" 모달에서만 가능했음), 저장되면
+          // 폼 자리에 첨부 패널을 보여준다.
+          const attachHost = el('div', {});
+          body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
@@ -347,6 +445,25 @@
               if (s.toolInput) entry.tool = s.toolInput.value || null;
               if (entry.id || entry.date || entry.tool) newPipeline[stage.key] = entry;
             }
+
+            // 비밀번호 처리: 비워두면 기존 값 유지, 체크박스로 삭제, 입력하면 새로 암호화.
+            let adminPassword = existing?.admin_password ?? null;
+            if (clearPwCheckbox && clearPwCheckbox.checked) {
+              adminPassword = null;
+            } else if (adminPwInput.value) {
+              const pass = await getPassphrase('이 비밀번호를 암호화할 잠금 암호를 입력하세요(이 암호는 저장되지 않습니다).');
+              if (!pass) {
+                toast('잠금 암호를 입력하지 않아 저장이 취소되었습니다.', 'error');
+                return;
+              }
+              try {
+                adminPassword = await window.secretCrypto.encryptSecret(adminPwInput.value, pass);
+              } catch (err) {
+                toast('비밀번호 암호화에 실패했습니다: ' + (err.message || err), 'error');
+                return;
+              }
+            }
+
             const data = {
               name: fd.get('name'),
               program_type: fd.get('program_type'),
@@ -356,14 +473,25 @@
               description: fd.get('description') || null,
               pipeline: newPipeline,
               admin_id: fd.get('admin_id') || null,
-              admin_password: adminPwInput.value || null,
+              admin_password: adminPassword,
             };
-            if (existing) await appState.updateProgram(existing.id, data);
-            else await appState.addProgram(data);
-            toast('저장했습니다.', 'success');
-            close();
+            if (existing) {
+              await appState.updateProgram(existing.id, data);
+              toast('저장했습니다.', 'success');
+              close();
+            } else {
+              const row = await appState.addProgram(data);
+              toast('저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+              submitBtn.style.display = 'none';
+              attachHost.append(
+                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                el('div', { id: 'new-program-attach-box' }),
+                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+              );
+              window.renderAttachmentsPanel(attachHost.querySelector('#new-program-attach-box'), 'programs', row.id);
+            }
           });
-          body.append(form);
         },
       });
     }

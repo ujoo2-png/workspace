@@ -410,6 +410,42 @@ a { color: var(--accent); }
 }
 .attach-item__name:hover { text-decoration: underline; }
 .attach-item__size { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.attach-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 10px;
+  margin-bottom: 8px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  transition: border-color 0.15s, background 0.15s;
+}
+.attach-dropzone--active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 이력/경력 관리(js/modules/career.js) — 증명사진 썸네일 */
+.career-photo-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  display: block;
+}
+.career-photo-thumb--empty {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.career-row--dragging { opacity: 0.4; }
+.career-row--dragover { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 /* AI 정비 제안(js/modules/vehicles.js) */
 .ai-suggest-box {

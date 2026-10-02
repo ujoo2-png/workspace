@@ -35,6 +35,8 @@
   // "등록했는데 목록에 안 보임" 버그로 이어진다(챌린저/차량 정비·주유 기록 등).
   const TABLES_WITH_SOFT_DELETE = new Set([
     'projects', 'schedules', 'programs', 'vehicles', 'playlist_items', 'knowledge_docs', 'devlogs',
+    'career_education', 'career_certifications', 'career_trainings', 'career_memberships',
+    'career_awards', 'career_experiences', 'career_photos',
   ]);
 
   class SupabaseStore {

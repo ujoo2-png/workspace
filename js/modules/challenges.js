@@ -257,7 +257,10 @@
             field('종료일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'end_date', value: existing?.end_date || '' })),
             field('상태', statusSelect(existing?.status))
           );
-          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          form.append(submitBtn);
+          const attachHost = el('div', {});
+          body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
@@ -271,15 +274,26 @@
               status: fd.get('status'),
             };
             try {
-              if (existing) await appState.updateChallenge(existing.id, data);
-              else await appState.addChallenge(data);
-              toast('저장했습니다.', 'success');
-              close();
+              if (existing) {
+                await appState.updateChallenge(existing.id, data);
+                toast('저장했습니다.', 'success');
+                close();
+              } else {
+                const row = await appState.addChallenge(data);
+                toast('저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+                submitBtn.style.display = 'none';
+                attachHost.append(
+                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                  el('div', { id: 'new-challenge-attach-box' }),
+                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+                );
+                window.renderAttachmentsPanel(attachHost.querySelector('#new-challenge-attach-box'), 'challenges', row.id);
+              }
             } catch (err) {
               toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
             }
           });
-          body.append(form);
         },
       });
     }

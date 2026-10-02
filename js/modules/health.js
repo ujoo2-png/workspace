@@ -647,21 +647,31 @@
             field('메모(선택)', el('textarea', { class: 'nm-textarea', name: 'memo' }))
           );
           form.append(el('p', { class: 'text-muted', style: 'font-size:12px' }, '저장하면 "일정" 메뉴에도 자동으로 함께 등록됩니다.'));
-          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          form.append(submitBtn);
+          // 신규 등록 직후 바로 첨부(진료의뢰서 등)할 수 있도록 저장되면 폼 자리에 첨부 패널을 보여준다.
+          const attachHost = el('div', {});
+          body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
-            await appState.addHealthAppointment({
+            const row = await appState.addHealthAppointment({
               title: fd.get('title'),
               appointment_date: fd.get('appointment_date'),
               appointment_time: fd.get('appointment_time') || null,
               location: fd.get('location') || null,
               memo: fd.get('memo') || null,
             });
-            toast('일정을 저장했습니다. (일정 메뉴에도 추가됨)', 'success');
-            close();
+            toast('일정을 저장했습니다. (일정 메뉴에도 추가됨) 이제 파일을 첨부할 수 있어요.', 'success');
+            Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+            submitBtn.style.display = 'none';
+            attachHost.append(
+              el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+              el('div', { id: 'new-appt-attach-box' }),
+              el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+            );
+            window.renderAttachmentsPanel(attachHost.querySelector('#new-appt-attach-box'), 'health_appointments', row.id);
           });
-          body.append(form);
         },
       });
     }

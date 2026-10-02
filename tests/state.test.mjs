@@ -87,6 +87,41 @@ test('deleteBookmarksBulk / deleteKnowledgeDocsBulk도 여러 건을 한 번에 
   assert.equal(appState.knowledgeDocs.length, 0);
 });
 
+test('Career(이력/경력) 공통 CRUD: 추가 시 sort_order가 자동 부여되고, 수정/삭제/선택삭제가 동작한다', async () => {
+  await setupUser();
+  const e1 = await appState.addCareerRecord('education', { school_name: 'A고등학교', status: '졸업' });
+  const e2 = await appState.addCareerRecord('education', { school_name: 'B대학교', status: '졸업' });
+  assert.equal(appState.career.education.length, 2);
+  assert.equal(e1.sort_order, 1);
+  assert.equal(e2.sort_order, 2);
+
+  await appState.updateCareerRecord('education', e1.id, { status: '휴학' });
+  assert.equal(appState.career.education.find((r) => r.id === e1.id).status, '휴학');
+
+  await appState.deleteCareerRecord('education', e1.id);
+  assert.equal(appState.career.education.length, 1);
+  assert.equal(appState.career.education[0].id, e2.id);
+
+  await appState.addCareerRecord('certifications', { cert_name: '정보처리기사' });
+  await appState.addCareerRecord('certifications', { cert_name: 'SQLD' });
+  assert.equal(appState.career.certifications.length, 2);
+  await appState.deleteCareerRecordsBulk('certifications', appState.career.certifications.map((r) => r.id));
+  assert.equal(appState.career.certifications.length, 0);
+});
+
+test('reorderCareerRecords는 전달한 순서대로 sort_order를 다시 매긴다(드래그/↑↓ 순서변경의 기반)', async () => {
+  await setupUser();
+  const a = await appState.addCareerRecord('awards', { award_name: '우수사원상' });
+  const b = await appState.addCareerRecord('awards', { award_name: '봉사상' });
+  const c = await appState.addCareerRecord('awards', { award_name: '공로상' });
+  assert.deepEqual(appState.career.awards.map((r) => r.award_name), ['우수사원상', '봉사상', '공로상']);
+
+  // c를 맨 앞으로 옮기는 상황을 흉내낸다.
+  await appState.reorderCareerRecords('awards', [c.id, a.id, b.id]);
+  const reordered = appState.career.awards.slice().sort((x, y) => x.sort_order - y.sort_order);
+  assert.deepEqual(reordered.map((r) => r.award_name), ['공로상', '우수사원상', '봉사상']);
+});
+
 test('_trackRecentlyViewed/getRecentlyViewed는 최근 항목을 중복없이 최신순으로 최대 8개 유지한다', () => {
   globalThis.localStorage.removeItem('workspace:recentlyViewed');
   appState._trackRecentlyViewed('program', 'p1', '프로그램1');

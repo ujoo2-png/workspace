@@ -389,7 +389,12 @@
             field('메모', el('textarea', { class: 'nm-textarea', name: 'memo' }, existing?.memo || '')),
             existing ? null : repeatField()
           );
-          form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
+          const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          form.append(submitBtn);
+          // 신규 등록(반복 없이 1건만 생성되는 경우) 직후 바로 첨부할 수 있도록, 저장되면
+          // 폼 자리에 첨부 패널을 보여준다(Knowledge/문화생활과 동일한 흐름).
+          const attachHost = el('div', {});
+          body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
@@ -406,24 +411,36 @@
             };
             if (existing) {
               await appState.updateSchedule(existing.id, data);
-            } else {
-              // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
-              // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
-              const repeat = fd.get('repeat') || 'none';
-              const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
-              const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : 0;
-              if (repeat === 'none' || stepDays === 0) {
-                await appState.addSchedule(data);
-              } else {
-                for (let i = 0; i < count; i++) {
-                  await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i) });
-                }
-              }
+              toast('일정을 저장했습니다.', 'success');
+              close();
+              return;
             }
-            toast('일정을 저장했습니다.', 'success');
-            close();
+            // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
+            // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
+            const repeat = fd.get('repeat') || 'none';
+            const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
+            const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : 0;
+            if (repeat === 'none' || stepDays === 0) {
+              const row = await appState.addSchedule(data);
+              toast('일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+              submitBtn.style.display = 'none';
+              attachHost.append(
+                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                el('div', { id: 'new-schedule-attach-box' }),
+                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+              );
+              window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
+            } else {
+              // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
+              // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
+              for (let i = 0; i < count; i++) {
+                await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i) });
+              }
+              toast('일정을 저장했습니다.', 'success');
+              close();
+            }
           });
-          body.append(form);
         },
       });
     }

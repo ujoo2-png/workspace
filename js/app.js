@@ -15,6 +15,7 @@
     { path: '/health', label: 'Health', icon: '💪' },
     { path: '/devlog', label: 'Devlog', icon: '🛠️' },
     { path: '/knowledge', label: 'Knowledge', icon: '📓' },
+    { path: '/career', label: '이력/경력', icon: '📋' },
     { path: '/automation', label: 'Automation', icon: '🤖' },
     { path: '/integrations', label: 'Integrations', icon: '🔗' },
     { path: '/analytics', label: 'Analytics', icon: '📊' },
@@ -178,6 +179,7 @@
     window.registerRoute('/health', window.renderHealth);
     window.registerRoute('/devlog', window.renderDevlog);
     window.registerRoute('/knowledge', window.renderKnowledge);
+    window.registerRoute('/career', window.renderCareer);
     window.registerRoute('/automation', window.renderAutomation);
     window.registerRoute('/integrations', window.renderIntegrations);
     window.registerRoute('/analytics', window.renderAnalytics);

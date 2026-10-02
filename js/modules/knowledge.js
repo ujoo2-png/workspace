@@ -272,7 +272,10 @@
                 previewBox.append(
                   el('div', {}, [
                     el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `📄 ${escapeHtml(a.name)}`),
-                    el('iframe', { src: a.data, style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
+                    // sandbox="": 업로드 시 브라우저가 보고한 mime_type을 그대로 신뢰하므로,
+                    // 확장자/타입을 속인 파일이 섞여 있어도 스크립트 실행 등을 막기 위해
+                    // 모든 권한을 제거한 채로만 미리보기를 렌더링한다(방어 심층화).
+                    el('iframe', { src: a.data, sandbox: '', style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
                   ])
                 );
               } else {
