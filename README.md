@@ -1,10 +1,21 @@
-# 나만의 Work Space (v7.12.0)
+# 나만의 Work Space (v7.13.0)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
 개발계획서 v3.2의 전체 메뉴(일정·프로젝트·프로그램·챌린저·관심주제 브리핑·문화생활·차량관리·Health·Devlog·
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
+
+v7.13.0 — **마이그레이션 재실행 오류(`policy "projects_own_rows" already exists`) 수정**:
+- 전환하신 Supabase 프로젝트에는 이미 과거에 스키마/정책(RLS policy)이 적용돼 있었고, 그 상태에서
+  `all_migrations_0001_to_0019.sql`을 다시 실행하면서 `create policy`가 "이미 존재한다"는
+  오류로 중간에 멈췄습니다. **이 오류 자체는 스키마가 이미 정상적으로 만들어져 있다는 뜻이라
+  문제가 아닙니다** — 다만 파일을 다시 실행할 때마다 똑같이 멈추는 건 불편하므로, 전체 29개
+  `create policy` 문 앞에 `drop policy if exists ...`를 자동으로 붙여 재실행해도 안전하도록
+  (idempotent) `supabase/combined/all_migrations_0001_to_0019.sql`을 다시 생성했습니다.
+  이제 이 파일은 몇 번을 다시 실행해도 오류 없이 끝까지 돕니다.
+- 이미 스키마가 적용돼 있으므로 **지금 바로 앱을 열어 로그인을 시도해보셔도 됩니다** — SQL을
+  다시 돌릴 필요는 없습니다. 로그인/회원가입이 안 되거나 다른 오류가 나면 메시지를 알려주세요.
 
 v7.12.0 — **Supabase 모드로 전환**:
 - `js/config.js`의 `CONFIG.mode`를 `'local'` → `'supabase'`로 변경하고, 사용자가 전달해주신

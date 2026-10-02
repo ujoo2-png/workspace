@@ -1,5 +1,9 @@
+-- ===== supabase/migrations/0001_extensions.sql =====
 -- 확장 기능. pgcrypto는 gen_random_uuid()를 위해 필요하다(Supabase는 기본 활성화되어 있는 경우가 많음).
 create extension if not exists pgcrypto;
+
+
+-- ===== supabase/migrations/0002_schema.sql =====
 -- MVP 범위 스키마: 인증(Auth는 Supabase 제공), 일정, 프로젝트, 프로그램, 알림, 자동화 로그.
 -- 전체 확장 스키마(PlayList, Briefing, 차량, Health 등)는 개발계획서 문서의 "DB 스키마 및 상세 설계" 탭 참고.
 
@@ -86,6 +90,9 @@ create table if not exists automation_logs (
   error_message text,
   created_at timestamptz not null default now()
 );
+
+
+-- ===== supabase/migrations/0003_indexes.sql =====
 create index if not exists idx_schedules_user_date on schedules (user_id, date) where deleted_at is null;
 create index if not exists idx_schedules_project on schedules (project_id) where project_id is not null;
 create index if not exists idx_projects_user_deadline on projects (user_id, deadline) where deleted_at is null and status = 'in_progress';
@@ -93,38 +100,51 @@ create index if not exists idx_project_progress_project on project_progress (pro
 create index if not exists idx_programs_user_runcount on programs (user_id, run_count desc) where deleted_at is null;
 create index if not exists idx_notifications_user_unread on notifications (user_id, is_read, created_at desc);
 create index if not exists idx_automation_logs_user on automation_logs (user_id, created_at desc);
+
+
+-- ===== supabase/migrations/0004_rls.sql =====
 -- 모든 테이블에 RLS를 켜고, user_id가 직접 있는 테이블은 단순 정책,
 -- 없는 테이블(project_progress)은 부모(projects) 소유권을 EXISTS로 검증한다.
 
 alter table profiles enable row level security;
+drop policy if exists profiles_own_rows on profiles;
 create policy profiles_own_rows on profiles for all to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
 alter table projects enable row level security;
+drop policy if exists projects_own_rows on projects;
 create policy projects_own_rows on projects for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table schedules enable row level security;
+drop policy if exists schedules_own_rows on schedules;
 create policy schedules_own_rows on schedules for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table programs enable row level security;
+drop policy if exists programs_own_rows on programs;
 create policy programs_own_rows on programs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table notifications enable row level security;
+drop policy if exists notifications_own_rows on notifications;
 create policy notifications_own_rows on notifications for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table automation_logs enable row level security;
+drop policy if exists automation_logs_own_rows on automation_logs;
 create policy automation_logs_own_rows on automation_logs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- project_progress: 직접 user_id가 없으므로 부모 프로젝트 소유권을 확인한다.
 alter table project_progress enable row level security;
+drop policy if exists project_progress_own_rows on project_progress;
 create policy project_progress_own_rows on project_progress for all to authenticated
   using (exists (select 1 from projects p where p.id = project_id and p.user_id = (select auth.uid())))
   with check (exists (select 1 from projects p where p.id = project_id and p.user_id = (select auth.uid())));
+
+
+-- ===== supabase/migrations/0005_functions.sql =====
 -- updated_at 자동 갱신
 create or replace function set_updated_at()
 returns trigger as $$
@@ -275,6 +295,9 @@ begin
   return inserted_count;
 end;
 $$;
+
+
+-- ===== supabase/migrations/0006_cron.sql =====
 -- pg_cron 스케줄링. Supabase 대시보드 Database > Extensions에서 pg_cron을 먼저 켠 뒤 실행하세요.
 -- (일반 마이그레이션 권한으로는 확장 설치가 막혀 있을 수 있습니다.)
 create extension if not exists pg_cron;
@@ -291,6 +314,9 @@ select cron.schedule(
 
 -- 참고: 날씨 동기화, 메일/RSS 수집처럼 외부 네트워크 호출이 필요한 자동화는
 -- 이 순수 SQL 방식이 아니라 Edge Function + pg_net으로 별도 구현한다(개발계획서 4.5장).
+
+
+-- ===== supabase/migrations/0007_challenges_vehicle_health_playlist.sql =====
 -- 챌린저 / 차량관리 / Health / 문화생활(PlayList)
 -- 개발계획서 DB 스키마 탭의 설계를 기반으로 하되, 이 앱에는 파일 업로드(Storage)와
 -- content_types lookup 테이블을 아직 쓰지 않으므로 그 부분만 단순화했다(문서상
@@ -327,10 +353,12 @@ create index idx_challenges_user on challenges(user_id, status);
 create index idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
 
 alter table challenges enable row level security;
+drop policy if exists challenges_own_rows on challenges;
 create policy challenges_own_rows on challenges for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table challenge_checkins enable row level security;
+drop policy if exists challenge_checkins_own_rows on challenge_checkins;
 create policy challenge_checkins_own_rows on challenge_checkins for all to authenticated
   using (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())))
   with check (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())));
@@ -378,15 +406,18 @@ create index idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) w
 create index idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
 
 alter table vehicles enable row level security;
+drop policy if exists vehicles_own_rows on vehicles;
 create policy vehicles_own_rows on vehicles for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table vehicle_maintenance enable row level security;
+drop policy if exists vehicle_maintenance_own_rows on vehicle_maintenance;
 create policy vehicle_maintenance_own_rows on vehicle_maintenance for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
 
 alter table vehicle_fuel_logs enable row level security;
+drop policy if exists vehicle_fuel_logs_own_rows on vehicle_fuel_logs;
 create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
@@ -420,10 +451,12 @@ create index idx_health_metrics_user_type on health_metrics(user_id, metric_type
 create index idx_health_appointments_user on health_appointments(user_id, appointment_date);
 
 alter table health_metrics enable row level security;
+drop policy if exists health_metrics_own_rows on health_metrics;
 create policy health_metrics_own_rows on health_metrics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table health_appointments enable row level security;
+drop policy if exists health_appointments_own_rows on health_appointments;
 create policy health_appointments_own_rows on health_appointments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -451,12 +484,16 @@ create index idx_playlist_user_status on playlist_items(user_id, status) where d
 create index idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
 
 alter table playlist_items enable row level security;
+drop policy if exists playlist_own_rows on playlist_items;
 create policy playlist_own_rows on playlist_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- 참고: 포스터·티켓 등 파일 첨부(playlist_attachments, Storage 버킷)는 이 MVP에
 -- 포함하지 않았다. 필요해지면 개발계획서 DB 스키마 탭의 playlist_attachments 설계와
 -- private Storage 버킷(signed URL 발급) 설계를 그대로 추가하면 된다.
+
+
+-- ===== supabase/migrations/0008_briefing.sql =====
 -- 관심주제 브리핑. 개발계획서 9장(Briefing) 설계를 기반으로 하되, 이 MVP는 서버
 -- 자동 수집(pg_cron + Edge Function) 대신 브라우저에서 "지금 가져오기" 버튼으로
 -- 직접 RSS를 수집하므로 feed_fetch_logs / item_feedback / track_token 클릭추적처럼
@@ -505,14 +542,17 @@ create index idx_briefing_topics_user on briefing_topics(user_id, active);
 create index idx_feed_sources_user on feed_sources(user_id, enabled);
 
 alter table briefing_topics enable row level security;
+drop policy if exists briefing_topics_own_rows on briefing_topics;
 create policy briefing_topics_own_rows on briefing_topics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table feed_sources enable row level security;
+drop policy if exists feed_sources_own_rows on feed_sources;
 create policy feed_sources_own_rows on feed_sources for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table briefing_items enable row level security;
+drop policy if exists briefing_items_own_rows on briefing_items;
 create policy briefing_items_own_rows on briefing_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -535,6 +575,9 @@ create trigger trg_briefing_topic_limit
 -- 고도화 시 추가할 것(개발계획서 9장 참고): feed_fetch_logs(소스 상태 모니터링),
 -- item_feedback(키워드 학습), track_token 기반 클릭 추적 Edge Function,
 -- pg_cron 기반 매일 자동 수집(현재는 브라우저에서 수동 트리거).
+
+
+-- ===== supabase/migrations/0009_knowledge_automation_integrations.sql =====
 -- v3.2 추가 메뉴: Knowledge / Automation(규칙 저장) / Integrations
 -- + 차량관리 예측·연동에 필요한 vehicles 보험/등록 만료일 컬럼
 -- automation_logs 테이블은 0002_schema.sql에서 이미 만들어졌다는 전제(로컬 스토어 초기 스키마와
@@ -566,6 +609,7 @@ create index if not exists idx_knowledge_docs_user on knowledge_docs(user_id) wh
 create index if not exists idx_knowledge_docs_tags on knowledge_docs using gin(tags);
 
 alter table knowledge_docs enable row level security;
+drop policy if exists knowledge_docs_own_rows on knowledge_docs;
 create policy knowledge_docs_own_rows on knowledge_docs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -584,6 +628,7 @@ create table if not exists automation_rules (
 );
 
 alter table automation_rules enable row level security;
+drop policy if exists automation_rules_own_rows on automation_rules;
 create policy automation_rules_own_rows on automation_rules for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -619,12 +664,16 @@ create table if not exists integrations (
 );
 
 alter table integrations enable row level security;
+drop policy if exists integrations_own_rows on integrations;
 create policy integrations_own_rows on integrations for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- 참고: 메일 계정별 수집(Gmail 등)은 사용자 요청에 따라 고도화 단계로 보류되었다.
 -- 실제 연동 시에는 integrations.provider='gmail' 행의 status를 'connected'로 바꾸고
 -- OAuth 토큰은 별도의 암호화된 저장소(예: Supabase Vault)에 두는 설계를 검토할 것.
+
+
+-- ===== supabase/migrations/0010_devlog_tags_weather_security.sql =====
 -- 개발계획서 재검토 반영: Devlog 메뉴 신설, 태그(N:M 정규화 대신 이 앱 컨벤션대로 text[] 사용 —
 -- knowledge_docs.tags와 동일한 단순화 패턴, playlist_items.content_type을 FK 대신 text로 둔 것과 같은 결)를
 -- Schedule/Project/Devlog에 추가하고, 브리핑 소스 관제 상태 컬럼을 추가한다.
@@ -651,6 +700,7 @@ create index if not exists idx_devlogs_project on devlogs(project_id) where proj
 create index if not exists idx_devlogs_tags on devlogs using gin(tags);
 
 alter table devlogs enable row level security;
+drop policy if exists devlogs_own_rows on devlogs;
 create policy devlogs_own_rows on devlogs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -675,6 +725,9 @@ alter table feed_sources add column if not exists last_run_at timestamptz;
 -- 참고: 날씨 다중 지역(기본 3/최대 5)은 이 MVP에서 profiles 테이블이 아니라 브라우저
 -- localStorage(workspace:weatherCities)에 저장한다(테마 설정과 동일한 단순화 패턴).
 -- 고도화 시 profiles.settings jsonb 컬럼으로 옮기면 기기 간 동기화가 가능해진다.
+
+
+-- ===== supabase/migrations/0011_auth_signup_approval.sql =====
 -- 아이디/비밀번호 회원가입 + 관리자 승인(QMS 스타일 로그인) 지원.
 -- Supabase Auth(이메일/비밀번호)는 그대로 쓰고, profiles에 역할·승인 상태만 추가한다.
 
@@ -697,24 +750,36 @@ as $$
 $$;
 
 drop policy if exists profiles_own_rows on profiles;
+drop policy if exists profiles_select on profiles;
 create policy profiles_select on profiles for select to authenticated
   using (id = (select auth.uid()) or is_admin());
+drop policy if exists profiles_insert on profiles;
 create policy profiles_insert on profiles for insert to authenticated
   with check (id = (select auth.uid()));
+drop policy if exists profiles_update on profiles;
 create policy profiles_update on profiles for update to authenticated
   using (id = (select auth.uid()) or is_admin())
   with check (id = (select auth.uid()) or is_admin());
 
 -- 참고: 회원가입 직후 클라이언트에서 profiles 행을 upsert하므로(js/store/supabaseStore.js signUp),
 -- insert 정책은 본인 id로만 허용한다. 승인/거절(update)은 본인 또는 admin만 가능하다.
+
+
+-- ===== supabase/migrations/0012_devlog_issue_url.sql =====
 -- Devlog: GitHub 이슈/PR 링크(가벼운 연동). 실제 GitHub API/OAuth 동기화는 하지 않고,
 -- 이슈/PR URL만 저장해두면 화면에서 "owner/repo#번호" 배지로 파싱해 보여주고 바로 이동할 수 있게 한다.
 alter table devlogs add column if not exists issue_url text;
+
+
+-- ===== supabase/migrations/0013_playlist_poster_url.sql =====
 -- 문화생활(PlayList) 포스터 표시. 실제 파일 업로드(Storage 버킷 + playlist_attachments 테이블)
 -- 대신, 이 라운드에서는 외부 이미지 URL을 하나 저장해 카드 상단에 썸네일로 보여주는 가벼운 버전으로
 -- 구현했다. 파일 업로드가 필요해지면 개발계획서 DB 스키마 탭의 playlist_attachments 설계를 참고해
 -- 별도 테이블 + Storage 버킷으로 확장할 수 있다.
 alter table playlist_items add column if not exists poster_url text;
+
+
+-- ===== supabase/migrations/0014_schedule_flag_priority_project_stages.sql =====
 -- 일정: 플래그(중요 표시)와 우선순위 추가 — 화면에서 정렬/필터에 사용한다.
 alter table schedules add column if not exists flagged boolean not null default false;
 alter table schedules add column if not exists priority text not null default 'medium' check (priority in ('high', 'medium', 'low'));
@@ -738,11 +803,15 @@ create table if not exists project_stages (
 create index if not exists idx_project_stages_project on project_stages(project_id, seq);
 
 alter table project_stages enable row level security;
+drop policy if exists project_stages_own_rows on project_stages;
 create policy project_stages_own_rows on project_stages for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- 챌린저: 오늘 체크인할 때 "무엇을 했는지" 기록하는 memo 컬럼은 challenge_checkins에
 -- 이미 있다(0007에서 생성). 여기서는 재차 언급만 해둔다.
+
+
+-- ===== supabase/migrations/0015_attachments_odometer_stage_group_vehicle_fuel.sql =====
 -- v7.0.0: 파일 첨부 공통 테이블, 차량 주행거리 간단 기록, 프로젝트 단계 중분류, 차량 연료 종류.
 create table if not exists attachments (
   id uuid primary key default gen_random_uuid(),
@@ -757,6 +826,7 @@ create table if not exists attachments (
 );
 create index if not exists idx_attachments_owner on attachments(owner_table, owner_id);
 alter table attachments enable row level security;
+drop policy if exists attachments_own_rows on attachments;
 create policy attachments_own_rows on attachments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -769,6 +839,7 @@ create table if not exists vehicle_odometer_logs (
 );
 create index if not exists idx_vehicle_odometer_logs_vehicle on vehicle_odometer_logs(vehicle_id, logged_at);
 alter table vehicle_odometer_logs enable row level security;
+drop policy if exists vehicle_odometer_logs_own_rows on vehicle_odometer_logs;
 create policy vehicle_odometer_logs_own_rows on vehicle_odometer_logs for all to authenticated
   using (vehicle_id in (select id from vehicles where user_id = (select auth.uid())))
   with check (vehicle_id in (select id from vehicles where user_id = (select auth.uid())));
@@ -776,6 +847,9 @@ create policy vehicle_odometer_logs_own_rows on vehicle_odometer_logs for all to
 alter table project_stages add column if not exists group_name text; -- 중분류(예: "1학기-1과:노인복지론")
 alter table vehicles add column if not exists fuel_type text not null default 'gasoline'
   check (fuel_type in ('gasoline', 'diesel', 'hybrid', 'ev', 'lpg'));
+
+
+-- ===== supabase/migrations/0016_plan_vs_actual_and_home_widgets.sql =====
 -- v7.1.0: 프로젝트/단계 계획대비 실적(실제 완료일) 관리를 위한 컬럼 추가.
 -- 홈 화면 시계/Supabase 연결상태 위젯은 서버 스키마 변경이 필요 없다(클라이언트 상태만 사용).
 alter table projects add column if not exists actual_completion_date date;
@@ -785,8 +859,14 @@ alter table project_stages add column if not exists actual_completion_date date;
 -- 관심주제: RSS 외에 마크다운 붙여넣기에서 링크를 추출해 수집하는 소스 타입을 허용한다.
 alter table feed_sources drop constraint if exists feed_sources_type_check;
 alter table feed_sources add constraint feed_sources_type_check check (type in ('api', 'rss', 'crawl', 'markdown'));
+
+
+-- ===== supabase/migrations/0017_maintenance_shop_tag.sql =====
 -- v7.2.0: 차량관리 정비소 태그(이력 구분/필터용).
 alter table vehicle_maintenance add column if not exists shop_name text;
+
+
+-- ===== supabase/migrations/0018_health_extended_metrics_profile.sql =====
 -- Health 기능 확장: 혈압·맥박·혈당·콜레스테롤 지표 추가 + 내 정보(나이/혈액형 등) 확장.
 -- (여전히 진단명·복약 등 민감 의료정보는 다루지 않는다 — 체중/혈압/혈당/콜레스테롤 등은
 --  모두 사용자가 직접 측정해 기록하는 일반 웰니스 수치다.)
@@ -808,6 +888,9 @@ alter table profiles add column if not exists birth_date date;
 alter table profiles add column if not exists gender text check (gender in ('male', 'female', 'other'));
 alter table profiles add column if not exists blood_type text check (blood_type in ('A', 'B', 'O', 'AB'));
 alter table profiles add column if not exists height_cm numeric;
+
+
+-- ===== supabase/migrations/0019_programs_pipeline_bookmarks_knowledge_memo.sql =====
 -- 프로그램 메뉴 확장(유형/개발-배포 파이프라인/관리자 계정), 즐겨찾기 URL, Knowledge 메모 구분.
 
 -- ---------------------------------------------------------------
@@ -846,6 +929,7 @@ create table if not exists bookmarks (
 create index if not exists idx_bookmarks_user on bookmarks(user_id, sort_order);
 
 alter table bookmarks enable row level security;
+drop policy if exists bookmarks_own_rows on bookmarks;
 create policy bookmarks_own_rows on bookmarks for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
