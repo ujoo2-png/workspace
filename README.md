@@ -1,10 +1,59 @@
-# 나만의 Work Space (v7.13.0)
+# 나만의 Work Space (v7.15.0)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
 개발계획서 v3.2의 전체 메뉴(일정·프로젝트·프로그램·챌린저·관심주제 브리핑·문화생활·차량관리·Health·Devlog·
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
+
+v7.15.0 — **통합 마이그레이션 SQL 파일의 재실행 안전성(idempotency) 추가 수정 — `bookmarks` 테이블 404 등 해결**:
+- v7.13.0에서 `create policy` 문에만 `drop policy if exists`를 붙여 재실행 안전하게 고쳤는데,
+  실제로는 `create table`(27개 중 11개), `create index`(13개), `create trigger`(5개) 문에도
+  같은 문제가 있었습니다 — 이미 일부 테이블/인덱스/트리거가 있는 프로젝트에 전체 SQL을 다시
+  실행하면 중간에 "relation already exists" 류 오류로 멈추고, **그 뒤에 나오는 문장들(예:
+  `bookmarks` 테이블 생성)은 아예 실행되지 못한 채 남아있게 됩니다.** 사용자분의 프로젝트에서
+  실제로 `bookmarks` 테이블 조회가 404(테이블 없음)로 실패한 것이 바로 이 때문이었습니다.
+- `supabase/combined/all_migrations_0001_to_0019.sql`을 다시 생성해 `create table` →
+  `create table if not exists`, `create index` → `create index if not exists`,
+  `create trigger` → 실행 전 `drop trigger if exists ... on ...;`를 추가했습니다. `alter
+  table ... add column`은 원래부터 전부 `if not exists`가 붙어 있어 문제없었습니다. 이제 이
+  파일은 프로젝트 상태(처음부터 실행하든, 일부만 적용된 상태에서 이어서 실행하든)와 무관하게
+  몇 번을 실행해도 끝까지 안전하게 돕니다.
+- **조치 방법**: Supabase 대시보드 SQL Editor에서 새 `all_migrations_0001_to_0019.sql`을 한
+  번 더 실행해 주세요. 이미 있는 테이블/정책/트리거는 건드리지 않고, 빠져 있던 `bookmarks`
+  테이블 등만 추가로 생성됩니다.
+- 참고: 콘솔에 함께 보였던 `profiles` 400 오류는 Supabase가 방금 추가된 스키마 변경을 API
+  캐시에 아직 반영하지 못해서 발생했을 가능성이 높습니다 — 위 SQL을 실행한 뒤 Supabase 대시보드
+  → Project Settings → API에서 "Reload schema"를 한 번 눌러주시거나, 1~2분 뒤 새로고침해서
+  다시 확인해 주세요. `apis.data.go.kr`의 기상특보(WthrWrnInfoService) 403 오류와
+  `kisedKstartupService01` 커스텀 API 400 오류는 이번 작업과 무관한 기존 기능으로, 각각 해당
+  데이터포털 키가 그 API에 대해 별도 활성화/승인되었는지 data.go.kr에서 확인이 필요합니다.
+
+v7.14.0 — **설정 화면에 "📥 데이터 가져오기" 추가(로컬 ↔ Supabase 계정 간 백업 이전)**:
+- **배경**: 로컬(local) 모드에서 "ejaeyoung"으로 쌓아두신 데이터는, Supabase 모드로 전환 후
+  `ejaeyoung@naver.com`으로 새로 가입하면서 완전히 별개의 계정/데이터가 되어 보이지 않게
+  되었습니다(로컬 데이터는 Supabase로 자동 이전되지 않습니다 — v7.12.0에서 안내드린 내용).
+  이 문제를 직접 해결할 수 있도록, 기존 "데이터 내보내기"의 짝이 되는 가져오기 기능을
+  추가했습니다.
+- **사용법(지금 상황에 맞게)**: ① `js/config.js`의 `CONFIG.mode`를 일시적으로 `'local'`로
+  바꿔 재배포하고 "ejaeyoung"으로 로그인한 뒤, 설정 → "데이터 내보내기"에서 "전체 백업(JSON)"을
+  내려받습니다. ② `CONFIG.mode`를 다시 `'supabase'`로 되돌려 재배포하고
+  `ejaeyoung@naver.com` 계정으로 로그인합니다. ③ 설정 화면의 새 "📥 데이터 가져오기" 버튼을
+  눌러 ①에서 받은 JSON 파일을 선택하면, 현재 로그인한 계정(Supabase든 로컬이든 무엇이든)에
+  그 내용이 그대로 추가됩니다. 기존 데이터는 지워지지 않고, 가져온 데이터가 더해질 뿐입니다.
+  가져오기 전에는 총 건수를 보여주는 확인창이 한 번 더 뜹니다.
+- **내부 동작**: 일정·프로젝트·프로그램·알림·Health 기록·병원/검진 일정·문화생활·Devlog·
+  Knowledge·관심주제의 16개 카테고리를 모두 지원합니다. 백업 파일의 옛 `id`/`user_id`/
+  `생성·수정일`은 가져오는 시점에 전부 새로 부여하고, 챌린지→체크인·차량→정비기록/주유기록처럼
+  "부모-자식" 구조로 묶여 있던 데이터는 부모가 새로 만들어지며 받은 새 id로 자식의 참조를
+  다시 연결합니다(옛 id를 그대로 쓰면 엉뚱한 레코드를 가리키게 되므로). 병원/검진 일정에 걸려
+  있던 "자동 생성된 일정" 연결(`schedule_id`)만은 예외로, 다시 연결하지 않고 독립된 일정으로
+  들어옵니다(일정 자체는 `schedules` 카테고리로 별도로 함께 들어오지만 서로 링크되어 있지는
+  않습니다) — 필요하면 가져온 뒤 Health 화면에서 다시 연결해 주세요. 레코드 하나가 실패해도
+  (예: 참조해야 할 부모를 찾지 못한 경우) 전체를 중단하지 않고 나머지를 계속 진행하며,
+  끝나면 카테고리별 성공/실패 건수를 알려줍니다. 두 테스트용 계정으로 실제 내보내기 →
+  가져오기 왕복을 거쳐, 체크인이 새로 생성된 챌린지의 새 id에 정확히 연결되는지(옛 id를
+  가리키며 끊어지지 않는지)까지 확인했습니다.
 
 v7.13.0 — **마이그레이션 재실행 오류(`policy "projects_own_rows" already exists`) 수정**:
 - 전환하신 Supabase 프로젝트에는 이미 과거에 스키마/정책(RLS policy)이 적용돼 있었고, 그 상태에서

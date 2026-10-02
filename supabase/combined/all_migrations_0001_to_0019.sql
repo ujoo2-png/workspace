@@ -154,10 +154,13 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_projects_updated_at on projects;
 create trigger trg_projects_updated_at before update on projects
   for each row execute function set_updated_at();
+drop trigger if exists trg_schedules_updated_at on schedules;
 create trigger trg_schedules_updated_at before update on schedules
   for each row execute function set_updated_at();
+drop trigger if exists trg_programs_updated_at on programs;
 create trigger trg_programs_updated_at before update on programs
   for each row execute function set_updated_at();
 
@@ -229,6 +232,7 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
+drop trigger if exists trg_predict_completion on project_progress;
 create trigger trg_predict_completion
   after insert on project_progress
   for each row execute function calc_predicted_completion();
@@ -325,7 +329,7 @@ select cron.schedule(
 -- ---------------------------------------------------------------
 -- 챌린저
 -- ---------------------------------------------------------------
-create table challenges (
+create table if not exists challenges (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -339,7 +343,7 @@ create table challenges (
   updated_at timestamptz not null default now()
 );
 
-create table challenge_checkins (
+create table if not exists challenge_checkins (
   id uuid primary key default gen_random_uuid(),
   challenge_id uuid references challenges(id) on delete cascade not null,
   checkin_date date not null,
@@ -349,8 +353,8 @@ create table challenge_checkins (
   unique (challenge_id, checkin_date)
 );
 
-create index idx_challenges_user on challenges(user_id, status);
-create index idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
+create index if not exists idx_challenges_user on challenges(user_id, status);
+create index if not exists idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
 
 alter table challenges enable row level security;
 drop policy if exists challenges_own_rows on challenges;
@@ -366,7 +370,7 @@ create policy challenge_checkins_own_rows on challenge_checkins for all to authe
 -- ---------------------------------------------------------------
 -- 차량관리
 -- ---------------------------------------------------------------
-create table vehicles (
+create table if not exists vehicles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -377,7 +381,7 @@ create table vehicles (
   deleted_at timestamptz
 );
 
-create table vehicle_maintenance (
+create table if not exists vehicle_maintenance (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   item text not null,
@@ -390,7 +394,7 @@ create table vehicle_maintenance (
   created_at timestamptz not null default now()
 );
 
-create table vehicle_fuel_logs (
+create table if not exists vehicle_fuel_logs (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   logged_at date not null,
@@ -400,10 +404,10 @@ create table vehicle_fuel_logs (
   created_at timestamptz not null default now()
 );
 
-create index idx_vehicles_user on vehicles(user_id) where deleted_at is null;
-create index idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
-create index idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
-create index idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
+create index if not exists idx_vehicles_user on vehicles(user_id) where deleted_at is null;
+create index if not exists idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
+create index if not exists idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
+create index if not exists idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
 
 alter table vehicles enable row level security;
 drop policy if exists vehicles_own_rows on vehicles;
@@ -425,7 +429,7 @@ create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authent
 -- ---------------------------------------------------------------
 -- Health (일반 웰니스 지표만 — 진단명·복약 등 민감 의료정보는 다루지 않는다)
 -- ---------------------------------------------------------------
-create table health_metrics (
+create table if not exists health_metrics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   metric_type text not null check (metric_type in ('weight', 'exercise', 'sleep', 'steps', 'condition')),
@@ -435,7 +439,7 @@ create table health_metrics (
   recorded_at timestamptz not null default now()
 );
 
-create table health_appointments (
+create table if not exists health_appointments (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -447,8 +451,8 @@ create table health_appointments (
   created_at timestamptz not null default now()
 );
 
-create index idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
-create index idx_health_appointments_user on health_appointments(user_id, appointment_date);
+create index if not exists idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
+create index if not exists idx_health_appointments_user on health_appointments(user_id, appointment_date);
 
 alter table health_metrics enable row level security;
 drop policy if exists health_metrics_own_rows on health_metrics;
@@ -463,7 +467,7 @@ create policy health_appointments_own_rows on health_appointments for all to aut
 -- ---------------------------------------------------------------
 -- 문화생활(PlayList) — 영화/음악/연극/음악회 등
 -- ---------------------------------------------------------------
-create table playlist_items (
+create table if not exists playlist_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   content_type text not null check (content_type in ('movie','music','theater','concert','musical','exhibition','book','etc')),
@@ -480,8 +484,8 @@ create table playlist_items (
   deleted_at timestamptz
 );
 
-create index idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
-create index idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
+create index if not exists idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
+create index if not exists idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
 
 alter table playlist_items enable row level security;
 drop policy if exists playlist_own_rows on playlist_items;
@@ -499,7 +503,7 @@ create policy playlist_own_rows on playlist_items for all to authenticated
 -- 직접 RSS를 수집하므로 feed_fetch_logs / item_feedback / track_token 클릭추적처럼
 -- Edge Function 전용 기능은 이번 라운드에는 포함하지 않았다(고도화 시 원래 설계대로 추가).
 
-create table briefing_topics (
+create table if not exists briefing_topics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -511,7 +515,7 @@ create table briefing_topics (
   updated_at timestamptz not null default now()
 );
 
-create table feed_sources (
+create table if not exists feed_sources (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -521,7 +525,7 @@ create table feed_sources (
   created_at timestamptz not null default now()
 );
 
-create table briefing_items (
+create table if not exists briefing_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   topic_id uuid references briefing_topics(id) on delete set null,
@@ -537,9 +541,9 @@ create table briefing_items (
   unique (user_id, item_hash)
 );
 
-create index idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
-create index idx_briefing_topics_user on briefing_topics(user_id, active);
-create index idx_feed_sources_user on feed_sources(user_id, enabled);
+create index if not exists idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
+create index if not exists idx_briefing_topics_user on briefing_topics(user_id, active);
+create index if not exists idx_feed_sources_user on feed_sources(user_id, enabled);
 
 alter table briefing_topics enable row level security;
 drop policy if exists briefing_topics_own_rows on briefing_topics;
@@ -568,6 +572,7 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_briefing_topic_limit on briefing_topics;
 create trigger trg_briefing_topic_limit
   before insert on briefing_topics
   for each row execute function enforce_briefing_topic_limit();

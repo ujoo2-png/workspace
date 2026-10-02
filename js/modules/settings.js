@@ -111,6 +111,7 @@
           el('div', { class: 'row wrap', style: 'gap:8px' }, Object.entries(CSV_EXPORTS).map(([key, spec]) =>
             el('button', { class: 'nm-btn', onclick: () => exportCsv(key, spec) }, `${spec.label} CSV`)
           )),
+          importDataSection(),
         ]),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '앱 정보'),
@@ -824,6 +825,34 @@
       });
     }
 
+    // 📥 데이터 가져오기 UI — "데이터 내보내기" 카드 하단에 붙는 가져오기 섹션.
+    // 숨겨진 파일 input을 버튼 클릭으로 열고, 선택한 파일을 importData()로 넘긴다.
+    function importDataSection() {
+      const fileInput = el('input', {
+        type: 'file',
+        accept: 'application/json',
+        style: 'display:none',
+        onchange: async (e) => {
+          const file = e.target.files && e.target.files[0];
+          e.target.value = '';
+          if (!file) return;
+          await importData(file);
+        },
+      });
+      const importBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: () => fileInput.click(),
+      }, '📥 데이터 가져오기');
+      return el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
+        el('strong', { style: 'font-size:13px' }, '📥 데이터 가져오기'),
+        el('p', { class: 'text-muted', style: 'font-size:11px' },
+          '다른 계정/모드에서 내보낸 백업(JSON) 파일을 현재 로그인한 계정으로 가져옵니다. ' +
+          '기존 데이터는 삭제되지 않고 추가됩니다.'),
+        el('div', { class: 'row', style: 'gap:8px; margin-top:6px' }, [importBtn, fileInput]),
+      ]);
+    }
+
     function exportData() {
       const payload = {
         exportedAt: new Date().toISOString(),
@@ -853,6 +882,221 @@
       toast('내보내기가 완료되었습니다.', 'success');
     }
   }
+
+  // ---- 📥 데이터 가져오기 (전체 백업 JSON → 현재 로그인한 계정/모드에 추가) ----
+  // exportData()가 만드는 백업 파일을 다시 읽어 레코드를 하나씩 생성한다. 로컬 모드와
+  // Supabase 모드 모두에서 동작해야 하므로 appState의 addX() 래퍼(모드마다 매번 refreshAll을
+  // 호출해 느림) 대신 window.getStore().create(table, obj)를 직접 사용하고, 끝에 한 번만
+  // refreshAll()을 호출한다.
+  const IMPORT_FLAT_TABLES = {
+    schedules: 'schedules',
+    projects: 'projects',
+    programs: 'programs',
+    notifications: 'notifications',
+    healthMetrics: 'health_metrics',
+    healthAppointments: 'health_appointments',
+    playlistItems: 'playlist_items',
+    devlogs: 'devlogs',
+    knowledgeDocs: 'knowledge_docs',
+    briefingTopics: 'briefing_topics',
+  };
+  const IMPORT_LABELS = {
+    schedules: '일정', projects: '프로젝트', programs: '프로그램', notifications: '알림',
+    challenges: '챌린지', checkinsByChallenge: '챌린지 체크인', vehicles: '차량',
+    maintenanceByVehicle: '정비기록', fuelLogsByVehicle: '주유기록', healthMetrics: 'Health 기록',
+    healthAppointments: '병원/검진 일정', playlistItems: '문화생활', devlogs: 'Devlog',
+    knowledgeDocs: 'Knowledge', briefingTopics: '관심주제',
+  };
+  // 새로 생성될 때 스토어가 직접 채워야 하는 필드. 옛 id를 그대로 밀어넣으면
+  // localStore.create()는 `{ id: uid(), ...obj }` 순서상 obj.id가 그걸 덮어써 버리고
+  // (= 새 id가 아예 생성되지 않고), supabaseStore는 이미 쓰인 PK라 충돌할 수 있다.
+  // user_id/created_at/updated_at/deleted_at도 가져오는 시점에 새로 채워져야 하는 값이다.
+  const IMPORT_RESERVED_FIELDS = ['id', 'created_at', 'updated_at', 'deleted_at', 'user_id'];
+
+  // 레코드에서 시스템 필드(+ 호출부가 지정한 추가 필드)를 제거한 새 객체를 반환하는 순수 함수.
+  function sanitizeImportRecord(record, extraOmitKeys = []) {
+    const omit = new Set([...IMPORT_RESERVED_FIELDS, ...extraOmitKeys]);
+    const out = {};
+    for (const [k, v] of Object.entries(record || {})) {
+      if (!omit.has(k)) out[k] = v;
+    }
+    return out;
+  }
+
+  // 옛(백업 당시) 부모 id를, 이번 가져오기에서 새로 생성된 id로 바꿔주는 순수 함수.
+  // 그 부모 자체가 생성에 실패했거나 백업에 없었다면 null을 반환한다(자식은 건너뛴다).
+  function remapForeignId(oldId, idMap) {
+    if (oldId === null || oldId === undefined || !idMap) return null;
+    const mapped = idMap[oldId];
+    return mapped === undefined ? null : mapped;
+  }
+
+  // 업로드된 JSON이 이 앱의 백업 파일 형태인지 최소한으로 검증하는 순수 함수.
+  function isValidImportPayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const KNOWN_KEYS = Object.keys(IMPORT_LABELS).concat('exportedAt');
+    return KNOWN_KEYS.some((k) => k in payload);
+  }
+
+  // 가져올 전체 레코드 수를 세는 순수 함수(확인 다이얼로그에 보여줄 용도).
+  function countImportRecords(payload) {
+    let n = 0;
+    for (const cat of Object.keys(IMPORT_FLAT_TABLES)) {
+      if (Array.isArray(payload[cat])) n += payload[cat].length;
+    }
+    if (Array.isArray(payload.challenges)) n += payload.challenges.length;
+    if (Array.isArray(payload.vehicles)) n += payload.vehicles.length;
+    for (const key of ['checkinsByChallenge', 'maintenanceByVehicle', 'fuelLogsByVehicle']) {
+      const grouped = payload[key];
+      if (grouped && typeof grouped === 'object') {
+        for (const rows of Object.values(grouped)) {
+          if (Array.isArray(rows)) n += rows.length;
+        }
+      }
+    }
+    return n;
+  }
+
+  async function importData(file) {
+    let payload;
+    try {
+      const text = await file.text();
+      payload = JSON.parse(text);
+    } catch (e) {
+      toast('올바른 JSON 파일이 아닙니다: ' + (e.message || e), 'error');
+      return;
+    }
+    if (!isValidImportPayload(payload)) {
+      toast('백업 파일 형식이 올바르지 않습니다(이 앱에서 내보낸 백업 JSON인지 확인해 주세요).', 'error');
+      return;
+    }
+
+    const total = countImportRecords(payload);
+    if (!total) {
+      toast('가져올 데이터가 없는 백업 파일입니다.', 'info');
+      return;
+    }
+    if (!confirmDialog(`백업 파일에서 총 ${total}건을 현재 계정으로 가져옵니다. 기존 데이터는 지워지지 않고 추가만 됩니다. 계속할까요?`)) {
+      return;
+    }
+
+    const store = window.getStore();
+    const uid = appState.user.id;
+    const summary = {}; // category -> { ok, fail }
+    const failDetails = [];
+    function record(cat, ok, reason) {
+      if (!summary[cat]) summary[cat] = { ok: 0, fail: 0 };
+      if (ok) summary[cat].ok++;
+      else {
+        summary[cat].fail++;
+        if (reason) failDetails.push(`${IMPORT_LABELS[cat] || cat}: ${reason}`);
+      }
+    }
+
+    // 1) 독립적인(부모-자식 관계가 없는) 카테고리
+    for (const [cat, table] of Object.entries(IMPORT_FLAT_TABLES)) {
+      const rows = payload[cat];
+      if (!Array.isArray(rows)) continue;
+      for (const row of rows) {
+        try {
+          // health_appointments.schedule_id는 가져오기 당시 함께 만든 옛 일정을 가리키던 값이라
+          // 그대로 두면 엉뚱한(또는 존재하지 않는) 일정을 가리키게 된다 — 연결 없이 가져온다.
+          const extraOmit = cat === 'healthAppointments' ? ['schedule_id'] : [];
+          const clean = sanitizeImportRecord(row, extraOmit);
+          await store.create(table, { ...clean, user_id: uid });
+          record(cat, true);
+        } catch (e) {
+          record(cat, false, e.message || String(e));
+        }
+      }
+    }
+
+    // 2) 챌린지 → 체크인 (옛 챌린지 id를 새 id로 매핑해야 체크인이 올바른 챌린지에 붙는다)
+    const challengeIdMap = {};
+    if (Array.isArray(payload.challenges)) {
+      for (const ch of payload.challenges) {
+        try {
+          const clean = sanitizeImportRecord(ch);
+          const created = await store.create('challenges', { ...clean, user_id: uid });
+          challengeIdMap[ch.id] = created.id;
+          record('challenges', true);
+        } catch (e) {
+          record('challenges', false, e.message || String(e));
+        }
+      }
+    }
+    if (payload.checkinsByChallenge && typeof payload.checkinsByChallenge === 'object') {
+      for (const [oldChallengeId, checkins] of Object.entries(payload.checkinsByChallenge)) {
+        const newChallengeId = remapForeignId(oldChallengeId, challengeIdMap);
+        for (const c of checkins || []) {
+          if (!newChallengeId) {
+            record('checkinsByChallenge', false, `연결된 챌린지(이전 id: ${oldChallengeId})를 가져오지 못해 건너뜀`);
+            continue;
+          }
+          try {
+            const clean = sanitizeImportRecord(c, ['challenge_id']);
+            await store.create('challenge_checkins', { ...clean, challenge_id: newChallengeId });
+            record('checkinsByChallenge', true);
+          } catch (e) {
+            record('checkinsByChallenge', false, e.message || String(e));
+          }
+        }
+      }
+    }
+
+    // 3) 차량 → 정비기록/주유기록 (옛 차량 id를 새 id로 매핑)
+    const vehicleIdMap = {};
+    if (Array.isArray(payload.vehicles)) {
+      for (const v of payload.vehicles) {
+        try {
+          const clean = sanitizeImportRecord(v);
+          const created = await store.create('vehicles', { ...clean, user_id: uid });
+          vehicleIdMap[v.id] = created.id;
+          record('vehicles', true);
+        } catch (e) {
+          record('vehicles', false, e.message || String(e));
+        }
+      }
+    }
+    for (const [cat, table] of [['maintenanceByVehicle', 'vehicle_maintenance'], ['fuelLogsByVehicle', 'vehicle_fuel_logs']]) {
+      const grouped = payload[cat];
+      if (!grouped || typeof grouped !== 'object') continue;
+      for (const [oldVehicleId, rows] of Object.entries(grouped)) {
+        const newVehicleId = remapForeignId(oldVehicleId, vehicleIdMap);
+        for (const r of rows || []) {
+          if (!newVehicleId) {
+            record(cat, false, `연결된 차량(이전 id: ${oldVehicleId})을 가져오지 못해 건너뜀`);
+            continue;
+          }
+          try {
+            const clean = sanitizeImportRecord(r, ['vehicle_id']);
+            await store.create(table, { ...clean, vehicle_id: newVehicleId });
+            record(cat, true);
+          } catch (e) {
+            record(cat, false, e.message || String(e));
+          }
+        }
+      }
+    }
+
+    await appState.refreshAll();
+
+    const totalOk = Object.values(summary).reduce((s, v) => s + v.ok, 0);
+    const totalFail = Object.values(summary).reduce((s, v) => s + v.fail, 0);
+    const breakdown = Object.entries(summary)
+      .filter(([, v]) => v.ok || v.fail)
+      .map(([cat, v]) => `${IMPORT_LABELS[cat] || cat} ${v.ok}건${v.fail ? ` (실패 ${v.fail}건)` : ''}`)
+      .join(', ');
+    if (totalFail) {
+      console.warn('[데이터 가져오기] 실패 상세:', failDetails);
+      toast(`가져오기 완료: 총 ${totalOk}건 성공, ${totalFail}건 실패 — ${breakdown}`, 'error');
+    } else {
+      toast(`가져오기 완료: 총 ${totalOk}건을 가져왔습니다 (${breakdown})`, 'success');
+    }
+  }
+
+  // 순수 로직은 Node 유닛테스트(tests/importExport.test.mjs)에서 직접 검증할 수 있도록 노출한다.
+  window.__importExport = { sanitizeImportRecord, remapForeignId, isValidImportPayload, countImportRecords };
 
   function applyTheme(theme) {
     const root = document.documentElement;
