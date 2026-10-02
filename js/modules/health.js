@@ -143,7 +143,7 @@
     let weeklyGoal = Number(localStorage.getItem('workspace:health:weeklyGoal')) || 3;
     let showGuide = false;
     let trendType = 'weight';
-    let trendPeriod = 'week';
+    let trendRange = 'week';
     let recordFilter = 'all';
     let recordPage = 1;
     const PAGE_SIZE = 10;
@@ -169,6 +169,32 @@
     ];
     // 카드별로 독립된 퀵레인지 상태를 갖는다(하나를 바꿔도 다른 카드에 영향 없음). 기본값은 "최근 10개"(원자료).
     const dashboardRangeByMetric = { weight: 'raw10', steps: 'raw10', bp_systolic: 'raw10', bp_diastolic: 'raw10' };
+
+    // 6.2: "핵심지표대시보드" 카드들과 아래 "예측·트렌드" 섹션이 동일한 퀵레인지 버튼 UI를 쓰도록
+    // 공통 헬퍼로 뽑아낸다(각자 따로 구현하면 매핑(반기→월×6 등)이 서로 달라지기 쉽다).
+    // rangeKey가 'raw10'이면 집계 없이 최근 10개 원자료를, 그 외에는 DASHBOARD_RANGES에 정의된
+    // period/periods로 aggregateMetricTrend를 사용해 집계한 값을 돌려준다.
+    function computeQuickRangeSeries(rows, rangeKey) {
+      const sorted = rows.slice().sort((a, b) => (a.recorded_at || '').localeCompare(b.recorded_at || ''));
+      if (rangeKey === 'raw10') {
+        const recent = sorted.slice(-10);
+        return { labels: recent.map((r) => (r.recorded_at || '').slice(5, 10)), values: recent.map((r) => r.value), hasAny: recent.length > 0 };
+      }
+      const rangeDef = DASHBOARD_RANGES.find((r) => r.key === rangeKey) || DASHBOARD_RANGES[1];
+      const trend = aggregateMetricTrend(rows, rangeDef.period, rangeDef.periods, todayISO());
+      return { labels: trend.labels, values: trend.values.map((v) => v ?? 0), hasAny: trend.values.some((v) => v !== null) };
+    }
+
+    // 퀵레인지 버튼 한 줄(현재 선택된 range를 강조 표시)을 만드는 공통 함수.
+    function quickRangeButtons(currentRange, onSelect) {
+      return el('div', { class: 'row wrap', style: 'gap:4px' },
+        DASHBOARD_RANGES.map((r) => el('button', {
+          class: `nm-btn ${currentRange === r.key ? 'nm-btn--primary' : ''}`,
+          style: 'padding:3px 8px; font-size:11px',
+          onclick: () => onSelect(r.key),
+        }, r.label))
+      );
+    }
 
     function latestByType() {
       const result = {};
@@ -253,7 +279,7 @@
         showGuide
           ? el('div', { class: 'health-guide-box text-muted', style: 'font-size:12px; margin-bottom:10px' }, [
               el('div', {}, '· 예측: 최근 14일간의 운동 기록을 바탕으로 이번 주 목표 달성 가능성(%)을 계산합니다. 기록이 많을수록(특히 8회 이상) 신뢰도가 높아집니다.'),
-              el('div', { style: 'margin-top:4px' }, '· 트렌드: 아래에서 지표와 기간(주간/월간/분기)을 고르면, 그 기간 동안의 평균값 변화를 그래프로 보여줍니다. 막대가 비어 있으면 그 기간에 기록이 없었다는 뜻입니다.'),
+              el('div', { style: 'margin-top:4px' }, '· 트렌드: 아래에서 지표와 기간(주간/월간/반기/분기/연간/최근3년)을 고르면, 그 기간 동안의 평균값 변화를 그래프로 보여줍니다. 막대가 비어 있으면 그 기간에 기록이 없었다는 뜻입니다.'),
             ])
           : null,
         el('div', { class: 'row row--between wrap', style: 'gap:16px; margin-top:8px' }, [
@@ -365,32 +391,15 @@
         const sorted = rows.slice().sort((a, b) => (a.recorded_at || '').localeCompare(b.recorded_at || ''));
         const last = sorted[sorted.length - 1];
         const currentRange = dashboardRangeByMetric[def.key] || 'raw10';
-
-        let labels, values, hasAny;
-        if (currentRange === 'raw10') {
-          const recent = sorted.slice(-10);
-          hasAny = recent.length > 0;
-          labels = recent.map((r) => (r.recorded_at || '').slice(5, 10));
-          values = recent.map((r) => r.value);
-        } else {
-          const rangeDef = DASHBOARD_RANGES.find((r) => r.key === currentRange);
-          const trend = aggregateMetricTrend(rows, rangeDef.period, rangeDef.periods, todayISO());
-          hasAny = trend.values.some((v) => v !== null);
-          labels = trend.labels;
-          values = trend.values.map((v) => v ?? 0);
-        }
+        const { labels, values, hasAny } = computeQuickRangeSeries(rows, currentRange);
 
         const card = el('div', { class: 'nm-card health-dashboard-card' }, [
           el('div', { class: 'row row--between', style: 'align-items:baseline' }, [
             el('strong', { style: 'font-size:13px' }, def.label),
             el('span', { class: 'text-muted', style: 'font-size:12px' }, last ? `${last.value}${last.unit || ''}` : '-'),
           ]),
-          el('div', { class: 'row wrap health-dashboard-card__ranges', style: 'gap:4px; margin-top:6px' },
-            DASHBOARD_RANGES.map((r) => el('button', {
-              class: `nm-btn ${currentRange === r.key ? 'nm-btn--primary' : ''}`,
-              style: 'padding:3px 8px; font-size:11px',
-              onclick: () => { dashboardRangeByMetric[def.key] = r.key; draw(); },
-            }, r.label))
+          el('div', { class: 'health-dashboard-card__ranges', style: 'margin-top:6px' },
+            [quickRangeButtons(currentRange, (key) => { dashboardRangeByMetric[def.key] = key; draw(); })]
           ),
         ]);
         if (hasAny) {
@@ -407,20 +416,16 @@
     }
 
     // ---- 트렌드 차트 ----
+    // 6.2: 기존에는 주간/월간/분기 3개짜리 단순 탭이었는데, 위 "핵심지표대시보드" 카드들과 같은
+    // 퀵레인지 버튼(주간/월간/반기/분기/연간/최근3년, 독립 상태 trendRange)으로 통일한다.
     function trendSection() {
       const typeOptions = Object.entries(METRIC_TYPE_LABEL);
       const select = el('select', { class: 'nm-select', style: 'width:auto', onchange: (e) => { trendType = e.target.value; draw(); } });
       for (const [value, label] of typeOptions) select.append(el('option', { value }, label));
       select.value = trendType;
 
-      const periodTabs = el('div', { class: 'row', style: 'gap:6px' }, [
-        periodBtn('week', '주간'), periodBtn('month', '월간'), periodBtn('quarter', '분기'),
-      ]);
-
       const rows = appState.healthMetrics.filter((m) => m.metric_type === trendType);
-      const periodsCount = trendPeriod === 'week' ? 8 : trendPeriod === 'month' ? 6 : 4;
-      const trend = aggregateMetricTrend(rows, trendPeriod, periodsCount, todayISO());
-      const hasAny = trend.values.some((v) => v !== null);
+      const { labels, values, hasAny } = computeQuickRangeSeries(rows, trendRange);
 
       const chartHost = el('div', { style: 'margin-top:10px' });
       if (!hasAny) {
@@ -428,21 +433,16 @@
       } else {
         // 막대 그래프 사용 — 기록이 없는 구간은 값 0인 선이 아니라 "빈 막대"로 보여야
         // 실제로 낮은 값을 기록한 것처럼 오해하지 않는다.
-        chartHost.append(window.simpleBarChart(trend.labels, trend.values.map((v) => v ?? 0)));
+        chartHost.append(window.simpleBarChart(labels, values));
       }
 
       return el('div', {}, [
         el('div', { class: 'row row--between wrap', style: 'gap:10px' }, [
           el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [el('strong', { style: 'font-size:13px' }, '트렌드 그래프'), select]),
-          periodTabs,
+          quickRangeButtons(trendRange, (key) => { trendRange = key; draw(); }),
         ]),
         chartHost,
       ]);
-    }
-
-    function periodBtn(key, label) {
-      const active = trendPeriod === key;
-      return el('button', { class: `nm-btn ${active ? 'nm-btn--primary' : ''}`, style: 'padding:6px 12px; font-size:12px', onclick: () => { trendPeriod = key; draw(); } }, label);
     }
 
     // ---- 나이대별 건강 제안 ----

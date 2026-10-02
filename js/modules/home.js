@@ -219,6 +219,7 @@
                   ]),
                   el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [
                     d.pop !== null && d.pop !== undefined ? el('span', { class: 'nm-badge', title: '강수확률' }, `☔ ${d.pop}%`) : null,
+                    d.precip !== null && d.precip !== undefined && d.precip > 0 ? el('span', { class: 'nm-badge', title: '강수량' }, `💧 ${d.precip}mm`) : null,
                     el('span', { style: 'font-weight:700' }, `${d.min ?? '-'}° / ${d.max ?? '-'}°`),
                   ]),
                 ])

@@ -101,9 +101,12 @@
 
   // Open-Meteo는 current(실시간)와 daily(주간예보)를 한 번의 요청으로 함께 받을 수 있다.
   // 7일 최고/최저기온 + 날씨코드를 가져와 홈 화면의 날씨 카드 클릭 시 주간예보로 보여준다.
+  // (기존에는 daily 파라미터에 강수 관련 항목이 전혀 없어 "강수확률/강수량"이 항상 빠진 채
+  // 기온만 보이는 문제가 있었다 — precipitation_probability_max/precipitation_sum을 추가해
+  // pop(강수확률 %)/precip(강수량 mm)으로 함께 반환한다.)
   async function fetchWeeklyForecast(city) {
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=7`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,precipitation_sum&timezone=auto&forecast_days=7`;
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return null;
       const data = await res.json();
@@ -114,6 +117,8 @@
         max: daily.temperature_2m_max?.[i] ?? null,
         min: daily.temperature_2m_min?.[i] ?? null,
         code: daily.weather_code?.[i] ?? null,
+        pop: daily.precipitation_probability_max?.[i] ?? null,
+        precip: daily.precipitation_sum?.[i] ?? null,
       }));
     } catch {
       return null; // 네트워크 차단 환경에서도 조용히 실패

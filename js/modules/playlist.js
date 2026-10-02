@@ -61,7 +61,7 @@
         return;
       }
 
-      const grid = el('div', { class: 'grid-3' });
+      const grid = el('div', { class: 'playlist-grid' });
       for (const p of rows) {
         const mapUrl = p.venue_name ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.venue_name)}` : null;
         // poster_url이 비어 있으면, 첨부파일로 올려둔 이미지가 있는지 확인해서 그걸 포스터로 대신 보여준다
