@@ -6,7 +6,7 @@
 // file:// 로 index.html을 그냥 더블클릭해서 열어도 동작하도록 하기 위한 구조.
 // globalThis를 쓰면 브라우저(window)와 Node(단위 테스트) 양쪽에서 동일하게 동작한다.
 globalThis.CONFIG = {
-  mode: 'supabase',
+  mode: 'local',
 
   // 앱 버전. 로그인 화면·사이드바·설정 화면이 모두 이 값을 참조하므로,
   // 배포 패키지(zip) 버전을 바꿀 때는 여기 한 곳만 수정하면 된다.
