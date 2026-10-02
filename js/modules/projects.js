@@ -107,6 +107,23 @@
       );
     }
 
+    // 태그 기반 Knowledge 연동(1.2) — 이 프로젝트의 태그와 겹치는 Knowledge 자료가 있으면
+    // 작은 링크 목록으로 보여준다. appState.knowledgeDocs는 js/modules/knowledge.js가 다루는
+    // 독립 저장소지만, 태그가 겹치면 여기서도 바로 눈에 띄도록 가볍게 연결한다.
+    function relatedKnowledgeLink(tags) {
+      if (!tags || !tags.length || !appState.knowledgeDocs) return null;
+      const matches = appState.knowledgeDocs.filter((d) => d.status !== 'archived' && (d.tags || []).some((t) => tags.includes(t)));
+      if (!matches.length) return null;
+      return el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, [
+        '📚 관련 Knowledge 자료: ',
+        ...matches.slice(0, 3).map((d, i) => el('span', {}, [
+          i > 0 ? ', ' : '',
+          el('a', { href: '#/knowledge', onclick: (e) => { e.preventDefault(); window.navigate('/knowledge'); } }, escapeHtml(d.title)),
+        ])),
+        matches.length > 3 ? ` 외 ${matches.length - 3}건` : '',
+      ]);
+    }
+
     function detailPane(p, CONFIG) {
       if (!p) return el('div', {});
       const prediction = predictProjectCompletion(appState.progressByProject[p.id] || [], todayISO(), CONFIG.predict.projectMinRecords);
@@ -133,6 +150,7 @@
               (p.tags || []).length
                 ? el('div', { class: 'row wrap', style: 'gap:4px; margin-top:6px' }, p.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`)))
                 : null,
+              relatedKnowledgeLink(p.tags),
             ]),
             el('div', { class: 'icon-row' }, [
               el('button', { class: 'nm-btn nm-btn--icon', title: '진행률 기록', onclick: () => openProgressForm(p) }, '📈'),

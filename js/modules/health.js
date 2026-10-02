@@ -156,6 +156,19 @@
       { key: 'bp_systolic', label: '수축기 혈압', hue: '#ef4444' },
       { key: 'bp_diastolic', label: '이완기 혈압', hue: '#f59e0b' },
     ];
+    // 6.1 퀵레인지 버튼 정의 — 각 버튼을 누르면 aggregateMetricTrend(period, periods)로 집계한다.
+    // "최근 3년"은 주간으로 집계하면 156구간이나 돼 알아보기 어려우므로 분기(quarter) 단위로 묶는다.
+    const DASHBOARD_RANGES = [
+      { key: 'raw10', label: '최근 10개' },
+      { key: 'week', label: '주간', period: 'week', periods: 8 },
+      { key: 'month', label: '월간', period: 'month', periods: 6 },
+      { key: 'half', label: '반기', period: 'month', periods: 6 }, // 최근 6개월(월별)
+      { key: 'quarter', label: '분기', period: 'quarter', periods: 4 },
+      { key: 'year', label: '연간', period: 'quarter', periods: 4 }, // 최근 1년(분기별)
+      { key: 'year3', label: '최근3년', period: 'quarter', periods: 12 }, // 최근 3년(분기별)
+    ];
+    // 카드별로 독립된 퀵레인지 상태를 갖는다(하나를 바꿔도 다른 카드에 영향 없음). 기본값은 "최근 10개"(원자료).
+    const dashboardRangeByMetric = { weight: 'raw10', steps: 'raw10', bp_systolic: 'raw10', bp_diastolic: 'raw10' };
 
     function latestByType() {
       const result = {};
@@ -342,21 +355,46 @@
     }
 
     // ---- 상단 미니 대시보드(4지표 항상 표시) ----
+    // 6.1: 기본값은 "최근 등록된 10개 값"을 원자료 그대로 보여주고(집계/평균 없이), 카드별로
+    // 독립된 퀵레인지 버튼(주간/월간/반기/분기/연간/최근3년)을 눌러 그 기간의 집계 그래프로
+    // 바꿔볼 수 있다. 버튼을 다시 "최근 10개"로 누르면 원자료로 돌아간다.
     function dashboardSection() {
       const grid = el('div', { class: 'health-dashboard-grid' });
       for (const def of DASHBOARD_METRICS) {
         const rows = appState.healthMetrics.filter((m) => m.metric_type === def.key);
-        const trend = aggregateMetricTrend(rows, 'week', 8, todayISO());
-        const hasAny = trend.values.some((v) => v !== null);
-        const last = rows.slice().sort((a, b) => (b.recorded_at || '').localeCompare(a.recorded_at || ''))[0];
+        const sorted = rows.slice().sort((a, b) => (a.recorded_at || '').localeCompare(b.recorded_at || ''));
+        const last = sorted[sorted.length - 1];
+        const currentRange = dashboardRangeByMetric[def.key] || 'raw10';
+
+        let labels, values, hasAny;
+        if (currentRange === 'raw10') {
+          const recent = sorted.slice(-10);
+          hasAny = recent.length > 0;
+          labels = recent.map((r) => (r.recorded_at || '').slice(5, 10));
+          values = recent.map((r) => r.value);
+        } else {
+          const rangeDef = DASHBOARD_RANGES.find((r) => r.key === currentRange);
+          const trend = aggregateMetricTrend(rows, rangeDef.period, rangeDef.periods, todayISO());
+          hasAny = trend.values.some((v) => v !== null);
+          labels = trend.labels;
+          values = trend.values.map((v) => v ?? 0);
+        }
+
         const card = el('div', { class: 'nm-card health-dashboard-card' }, [
           el('div', { class: 'row row--between', style: 'align-items:baseline' }, [
             el('strong', { style: 'font-size:13px' }, def.label),
             el('span', { class: 'text-muted', style: 'font-size:12px' }, last ? `${last.value}${last.unit || ''}` : '-'),
           ]),
+          el('div', { class: 'row wrap health-dashboard-card__ranges', style: 'gap:4px; margin-top:6px' },
+            DASHBOARD_RANGES.map((r) => el('button', {
+              class: `nm-btn ${currentRange === r.key ? 'nm-btn--primary' : ''}`,
+              style: 'padding:3px 8px; font-size:11px',
+              onclick: () => { dashboardRangeByMetric[def.key] = r.key; draw(); },
+            }, r.label))
+          ),
         ]);
         if (hasAny) {
-          card.append(el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(trend.labels, trend.values.map((v) => v ?? 0), def.hue)]));
+          card.append(el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(labels, values, def.hue)]));
         } else {
           card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:14px 0; text-align:center' }, '기록 없음'));
         }

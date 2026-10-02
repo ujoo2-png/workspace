@@ -15,6 +15,8 @@
     let tagFilter = 'all';
     let typeFilter = 'all'; // all | link | memo
     let selected = new Set();
+    let sortKey = 'created_at';
+    let sortDir = 'desc';
 
     function draw() {
       container.innerHTML = '';
@@ -80,7 +82,7 @@
         const q = query.trim().toLowerCase();
         rows = rows.filter((d) => (d.title || '').toLowerCase().includes(q) || (d.memo || '').toLowerCase().includes(q));
       }
-      rows = rows.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      rows = sortKnowledgeRows(rows, sortKey, sortDir);
 
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '저장된 문서/링크/메모가 없습니다. 나중에 다시 볼 자료나 생각을 기록해보세요.'));
@@ -120,9 +122,20 @@
       const tableWrap = el('div', { class: 'data-table-wrap' });
       const table = el('table', { class: 'data-table' });
       table.append(
+        el('colgroup', {}, [
+          el('col', { style: 'width:34px' }),
+          el('col', { style: 'width:40px' }),
+          el('col', { style: 'width:34%' }),
+          el('col', { style: 'width:10%' }),
+          el('col', { style: 'width:24%' }),
+          el('col', { style: 'width:8%' }),
+          el('col', { style: 'width:150px' }),
+        ])
+      );
+      table.append(
         el('thead', {}, [
           el('tr', {}, [
-            el('th', { style: 'width:34px' }, [
+            el('th', {}, [
               el('input', {
                 type: 'checkbox',
                 checked: rows.length > 0 && selCount === rows.length ? true : undefined,
@@ -133,12 +146,12 @@
                 },
               }),
             ]),
-            el('th', { style: 'width:40px' }, 'No'),
-            el('th', {}, '제목'),
-            el('th', { style: 'width:90px' }, '종류'),
+            el('th', {}, 'No'),
+            sortTh('title', '제목'),
+            sortTh('doc_type', '종류'),
             el('th', {}, '태그'),
-            el('th', { style: 'width:60px' }, '첨부'),
-            el('th', { style: 'width:150px' }, '작업'),
+            sortTh('attach', '첨부'),
+            el('th', {}, '작업'),
           ]),
         ])
       );
@@ -177,6 +190,28 @@
       container.append(tableWrap);
     }
 
+    // 5.1 공통 list UI — 컬럼 헤더를 눌러 정렬(오름/내림 토글), 활성 컬럼엔 ▲/▼ 표시.
+    function sortTh(key, label) {
+      const active = sortKey === key;
+      return el(
+        'th',
+        { class: active ? 'is-sorted' : '', onclick: () => { if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc'; else { sortKey = key; sortDir = 'asc'; } draw(); } },
+        [label, active ? el('span', { class: 'sort-arrow' }, sortDir === 'asc' ? '▲' : '▼') : null]
+      );
+    }
+
+    function sortKnowledgeRows(rows, key, dir) {
+      const sorted = rows.slice().sort((a, b) => {
+        let cmp;
+        if (key === 'attach') cmp = appState.getAttachments('knowledge_docs', a.id).length - appState.getAttachments('knowledge_docs', b.id).length;
+        else if (key === 'doc_type') cmp = (a.doc_type || 'link').localeCompare(b.doc_type || 'link');
+        else if (key === 'title') cmp = (a.title || '').localeCompare(b.title || '');
+        else cmp = (a.created_at || '').localeCompare(b.created_at || '');
+        return dir === 'asc' ? cmp : -cmp;
+      });
+      return sorted;
+    }
+
     function typeTabBtn(key, label) {
       const active = typeFilter === key;
       return el('button', { class: `quick-tab ${active ? 'quick-tab--active' : ''}`, onclick: () => { typeFilter = key; draw(); } }, label);
@@ -193,15 +228,26 @@
       toast('삭제했습니다.', 'success');
     }
 
-    // 열람(읽기 전용) 모달 — 지금까지는 링크는 URL만 눌러서 열 수 있었고, 메모는 수정 모달을
-    // 열어야만 내용을 볼 수 있었다. 제목/내용/URL/태그/첨부파일을 한 화면에서 바로 볼 수 있게 한다.
+    // 열람(읽기 전용) 모달 — 1.1: 첨부파일을 목록으로만 보여주던 것을 실제로 "미리보기"하도록
+    // 바꿨다. 이미지는 <img>로, PDF는 <iframe>으로 모달 안에서 바로 보여주고, 그 외 파일은
+    // 기존처럼 다운로드 링크만 보여준다. 링크형(URL) 문서는 외부 사이트라 iframe으로 끼워넣으면
+    // X-Frame-Options 등으로 대부분 막히므로 iframe 시도 대신 "새 탭에서 열기" 버튼을 크고
+    // 눈에 띄게 둬서 그게 사실상의 "미리보기" 동작이 되도록 안내한다.
     function openViewModal(d) {
       openModal({
         title: `${TYPE_LABEL[d.doc_type || 'link']} 열람`,
         contentBuilder(body) {
           body.append(el('h2', { style: 'margin:0 0 6px; font-size:18px' }, escapeHtml(d.title)));
           if (d.url) {
-            body.append(el('a', { href: d.url, target: '_blank', rel: 'noopener', style: 'word-break:break-all; font-size:13px' }, d.url));
+            body.append(
+              el('div', { style: 'margin:8px 0 4px' }, [
+                el('a', {
+                  href: d.url, target: '_blank', rel: 'noopener',
+                  class: 'nm-btn nm-btn--primary', style: 'display:inline-flex',
+                }, '🔗 새 탭에서 열기'),
+              ]),
+              el('div', { class: 'text-muted', style: 'word-break:break-all; font-size:12px; margin-top:4px' }, d.url)
+            );
           }
           if (d.memo) {
             body.append(el('div', { class: 'text-muted', style: 'white-space:pre-wrap; margin-top:12px; font-size:14px; line-height:1.6' }, escapeHtml(d.memo)));
@@ -209,8 +255,38 @@
           if ((d.tags || []).length) {
             body.append(el('div', { class: 'row wrap', style: 'gap:4px; margin-top:12px' }, d.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))));
           }
+          const attachments = appState.getAttachments('knowledge_docs', d.id);
+          if (attachments.length) {
+            body.append(el('h3', { style: 'margin:16px 0 8px; font-size:14px' }, '첨부파일 미리보기'));
+            const previewBox = el('div', { class: 'stack', style: 'gap:10px' });
+            for (const a of attachments) {
+              const mime = a.mime_type || '';
+              if (mime.startsWith('image/')) {
+                previewBox.append(
+                  el('div', {}, [
+                    el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `🖼️ ${escapeHtml(a.name)}`),
+                    el('img', { src: a.data, alt: a.name, style: 'max-width:100%; border-radius:8px; display:block' }),
+                  ])
+                );
+              } else if (mime === 'application/pdf') {
+                previewBox.append(
+                  el('div', {}, [
+                    el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `📄 ${escapeHtml(a.name)}`),
+                    el('iframe', { src: a.data, style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
+                  ])
+                );
+              } else {
+                previewBox.append(
+                  el('div', { class: 'item-row' }, [
+                    el('a', { class: 'item-row__main', href: a.data, download: a.name }, `📎 ${escapeHtml(a.name)} (다운로드)`),
+                  ])
+                );
+              }
+            }
+            body.append(previewBox);
+          }
           const attachBox = el('div', { style: 'margin-top:16px' });
-          body.append(el('h3', { style: 'margin:0 0 6px; font-size:14px' }, '첨부파일'), attachBox);
+          body.append(el('h3', { style: 'margin:0 0 6px; font-size:14px' }, '첨부파일 관리(추가/삭제)'), attachBox);
           window.renderAttachmentsPanel(attachBox, 'knowledge_docs', d.id);
         },
       });

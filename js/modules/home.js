@@ -12,7 +12,7 @@
   const WIDGET_LABELS = {
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
-    recent: '🕘 최근 본 항목',
+    recent: '🕘 최근 본 항목', knowledge: '📚 최근 Knowledge',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
 
@@ -181,11 +181,21 @@
         title: `☀️ ${city.name} 주간예보`,
         contentBuilder(body) {
           body.append(el('div', { class: 'text-muted' }, '불러오는 중…'));
-          window.fetchWeeklyForecast(city).then((days) => {
+          // 기상청(KMA) 키가 설정되어 있으면 단기(1~3일 상세)+중기(4~10일 강수확률)를 합친
+          // 기상청 데이터를, 아니면(또는 실패하면) 기존 Open-Meteo 7일 예보를 그대로 보여준다.
+          const loader = window.fetchUnifiedWeeklyForecast ? window.fetchUnifiedWeeklyForecast(city) : window.fetchWeeklyForecast(city).then((days) => ({ days, source: 'open-meteo', note: null }));
+          loader.then(({ days, source, note }) => {
             body.innerHTML = '';
             if (!days || !days.length) {
               body.append(el('div', { class: 'text-muted' }, '예보를 가져오지 못했습니다.'));
               return;
+            }
+            if (note) {
+              body.append(el('div', { class: 'nm-card', style: 'font-size:12px; margin-bottom:10px; padding:8px 10px' }, [
+                el('span', { class: 'text-muted' }, `ℹ️ ${note}`),
+              ]));
+            } else if (source === 'kma') {
+              body.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:10px' }, '출처: 기상청(단기 1~3일 + 중기 4~10일)'));
             }
             const labels = days.map((d) => d.date.slice(5));
             body.append(
@@ -193,15 +203,24 @@
               el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(labels, days.map((d) => d.max ?? 0), '#ef4444')]),
               el('div', { style: 'margin-top:4px' }, [window.simpleLineChart(labels, days.map((d) => d.min ?? 0), '#3b82f6')])
             );
+            if (days.some((d) => d.pop !== null && d.pop !== undefined)) {
+              body.append(
+                el('div', { style: 'margin-top:14px' }, [el('strong', { style: 'font-size:13px' }, '강수확률(%)')]),
+                el('div', { style: 'margin-top:6px' }, [window.simpleBarChart(labels, days.map((d) => d.pop ?? 0))])
+              );
+            }
             const list = el('div', { class: 'item-list', style: 'margin-top:14px' });
             for (const d of days) {
               list.append(
                 el('div', { class: 'item-row' }, [
                   el('div', { class: 'item-row__main' }, [
                     el('div', { class: 'item-row__title' }, d.date),
-                    el('div', { class: 'item-row__meta' }, window.weatherCodeToLabel(d.code)),
+                    el('div', { class: 'item-row__meta' }, d.detail || window.weatherCodeToLabel(d.code)),
                   ]),
-                  el('span', { style: 'font-weight:700' }, `${d.min ?? '-'}° / ${d.max ?? '-'}°`),
+                  el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [
+                    d.pop !== null && d.pop !== undefined ? el('span', { class: 'nm-badge', title: '강수확률' }, `☔ ${d.pop}%`) : null,
+                    el('span', { style: 'font-weight:700' }, `${d.min ?? '-'}° / ${d.max ?? '-'}°`),
+                  ]),
                 ])
               );
             }
@@ -465,6 +484,32 @@
         }
         recentCard.append(list);
         widgets.recent = recentCard;
+      }
+
+      // Knowledge 최근 등록 5건(1.2 — 지금까지 다른 메뉴와 전혀 연동되지 않던 Knowledge를
+      // 홈 화면에서도 한눈에 볼 수 있게 한다). 클릭하면 Knowledge 화면으로 이동한다.
+      const recentKnowledge = (appState.knowledgeDocs || [])
+        .filter((d) => d.status !== 'archived')
+        .slice()
+        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+        .slice(0, 5);
+      if (recentKnowledge.length) {
+        const kList = el('div', { class: 'item-list' });
+        for (const d of recentKnowledge) {
+          kList.append(
+            el('div', { class: 'item-row', style: 'cursor:pointer', onclick: () => navigate('/knowledge') }, [
+              el('span', { class: 'nm-badge' }, d.doc_type === 'memo' ? '📝' : '🔗'),
+              el('div', { class: 'item-row__main' }, [
+                el('div', { class: 'item-row__title' }, escapeHtml(d.title)),
+                el('div', { class: 'item-row__meta' }, (d.tags || []).length ? d.tags.map((t) => `#${t}`).join(' ') : (d.created_at || '').slice(0, 10)),
+              ]),
+            ])
+          );
+        }
+        widgets.knowledge = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [el('h3', {}, '📚 최근 Knowledge'), el('button', { class: 'nm-btn nm-btn--icon', title: 'Knowledge 화면으로', onclick: () => navigate('/knowledge') }, '→')]),
+          kList,
+        ]);
       }
 
       const order = getHomeWidgetOrder();

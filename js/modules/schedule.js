@@ -167,7 +167,10 @@
             el('td', {}, `${formatKoreanDate(s.date)}${s.time ? ' ' + s.time : ''}`),
             el('td', {}, ddayChip(dDay, s.done)),
             el('td', {}, project ? escapeHtml(project.name) : '-'),
-            el('td', {}, (s.tags || []).length ? el('div', { class: 'row wrap', style: 'gap:4px' }, s.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))) : '-'),
+            el('td', {}, [
+              (s.tags || []).length ? el('div', { class: 'row wrap', style: 'gap:4px' }, s.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))) : '-',
+              relatedKnowledgeLink(s.tags),
+            ]),
             el('td', {}, [
               el('div', { class: 'icon-row' }, [
                 el('button', {
@@ -267,6 +270,17 @@
         cursor = window.addDays(cursor, 1);
       }
       container.append(grid);
+    }
+
+    // 태그 기반 Knowledge 연동(1.2) — 일정 태그와 겹치는 Knowledge 자료가 있으면 작게 링크로 보여준다.
+    function relatedKnowledgeLink(tags) {
+      if (!tags || !tags.length || !appState.knowledgeDocs) return null;
+      const matches = appState.knowledgeDocs.filter((d) => d.status !== 'archived' && (d.tags || []).some((t) => tags.includes(t)));
+      if (!matches.length) return null;
+      return el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:3px' }, [
+        '📚 ',
+        el('a', { href: '#/knowledge', onclick: (e) => { e.preventDefault(); window.navigate('/knowledge'); } }, `관련 자료 ${matches.length}건`),
+      ]);
     }
 
     function toggleSort(key) {

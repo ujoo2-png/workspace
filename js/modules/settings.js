@@ -90,7 +90,7 @@
         weatherCard(),
         tmdbCard(),
         publicDataCard(),
-        ...(CONFIG.mode === 'supabase' ? [supabaseKeepAliveCard()] : []),
+        CONFIG.mode === 'supabase' ? supabaseKeepAliveCard() : supabaseLocalModePlaceholderCard(),
         customApiCard(),
         ...(appState.user?.role === 'admin' ? [userManagementCard()] : []),
         el('div', { class: 'nm-card' }, [
@@ -299,6 +299,26 @@
       ]);
     }
 
+    // 로컬(local) 모드에서는 "Supabase 7일 유지" 카드 자체가 숨겨져 있어 사용자 입장에서는
+    // 설명 없이 사라진 것처럼 보일 수 있다. 실제로는 의도한 동작(연결된 Supabase가 없으니
+    // 유지할 것도 없다)이지만, 그 이유를 화면에서 바로 알 수 있도록 안내 카드를 대신 보여준다.
+    function supabaseLocalModePlaceholderCard() {
+      return el('div', { class: 'nm-card' }, [
+        el('div', { class: 'row row--between' }, [
+          el('h3', {}, 'Supabase 7일 유지'),
+          el('span', { class: 'nm-badge' }, '로컬 모드'),
+        ]),
+        el('p', { class: 'text-muted', style: 'font-size:12px' },
+          'Supabase 7일 유지 기능은 "Supabase 연동 모드"에서만 표시됩니다. 현재 이 앱은 ' +
+          '"로컬(local) 모드"로 실행 중이라(이 브라우저에만 데이터가 저장되고 Supabase에 연결되어 ' +
+          '있지 않습니다) 유지할 Supabase 연결이 없어 카드가 나타나지 않는 것이 정상입니다.'),
+        el('p', { class: 'text-muted', style: 'font-size:11px; margin-top:8px' },
+          'Supabase를 직접 연결해 쓰고 싶다면 js/config.js의 CONFIG.mode 값을 \'supabase\'로 바꾸고 ' +
+          'supabaseUrl/supabaseAnonKey를 채운 뒤 다시 배포하면, 이 자리에 실제 "Supabase 7일 유지" ' +
+          '카드가 나타납니다.'),
+      ]);
+    }
+
     // 문화생활 화면의 "이번 주 인기 영화" 연동에 쓸 TMDB API 키. 대시보드 상단 상태 배지가
     // 여기서 저장한 연결 상태(workspace:tmdbStatus)를 그대로 보여준다.
     function tmdbCard() {
@@ -352,6 +372,10 @@
         el('input', { type: 'checkbox', name: 'evChargers', checked: enabled.evChargers || undefined }),
         el('span', { class: 'text-muted' }, '전기차충전소 연동 사용(같은 키) · 전기차 차량관리 화면에서 주변 충전소를 찾습니다'),
       ]);
+      const kmaToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center' }, [
+        el('input', { type: 'checkbox', name: 'kmaForecast', checked: enabled.kmaForecast || undefined }),
+        el('span', { class: 'text-muted' }, '기상청(KMA) 주간예보 연동 사용(같은 키) · 홈 화면의 날씨 주간예보에서 강수확률 등 상세 정보를 보여줍니다(서울/부산/제주 등 국내 프리셋 도시만 지원, 키가 없거나 실패하면 자동으로 Open-Meteo로 대체됩니다)'),
+      ]);
       const saveHolidayBtn = el('button', {
         class: 'nm-btn',
         type: 'button',
@@ -362,6 +386,7 @@
             holidays: holidayToggle.querySelector('input').checked,
             weatherAlerts: weatherAlertToggle.querySelector('input').checked,
             evChargers: evChargerToggle.querySelector('input').checked,
+            kmaForecast: kmaToggle.querySelector('input').checked,
           });
           if (!dataGoKrInput.value.trim()) {
             dataGoKrStatus.textContent = STATUS_LABEL.unset;
@@ -456,6 +481,7 @@
           el('p', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, '아래 두 서비스도 같은 공공데이터포털 키를 쓰지만, data.go.kr에서 각각 별도로 "활용신청"해야 승인됩니다.'),
           weatherAlertToggle,
           evChargerToggle,
+          kmaToggle,
         ]),
         el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
           el('strong', { style: 'font-size:13px' }, '오피넷 유가정보'),

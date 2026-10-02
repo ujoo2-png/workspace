@@ -6,10 +6,10 @@
   const KEY_STORAGE = 'workspace:publicData:dataGoKrKey';
   const OPINET_KEY_STORAGE = 'workspace:publicData:opinetKey';
   const KOPIS_KEY_STORAGE = 'workspace:publicData:kopisKey';
-  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays, fuelPrice, cultureEvents, weatherAlerts, evChargers}
+  const ENABLED_STORAGE = 'workspace:publicData:enabled'; // {holidays, fuelPrice, cultureEvents, weatherAlerts, evChargers, kmaForecast}
   const STATUS_STORAGE = 'workspace:publicData:status'; // connected|error|unset (공휴일 API 기준)
   const CACHE_PREFIX = 'workspace:publicData:cache:';
-  const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true, weatherAlerts: true, evChargers: true };
+  const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true, weatherAlerts: true, evChargers: true, kmaForecast: true };
 
   function getPublicDataKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
   function setPublicDataKey(key) { localStorage.setItem(KEY_STORAGE, key || ''); }

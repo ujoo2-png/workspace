@@ -22,6 +22,10 @@
     const revealedPasswords = new Set();
     let selectedPrograms = new Set();
     let selectedBookmarks = new Set();
+    let programQuery = '';
+    let bookmarkQuery = '';
+    let programSort = { key: 'run_count', dir: 'desc' };
+    let bookmarkSort = { key: 'sort_order', dir: 'asc' };
 
     function draw() {
       container.innerHTML = '';
@@ -52,33 +56,102 @@
       return el('button', { class: `quick-tab ${active ? 'quick-tab--active' : ''}`, onclick: () => { tab = key; draw(); } }, label);
     }
 
+    // 5.1 공통 list UI 헬퍼 — 검색창 입력 중 전체 재렌더로 포커스/커서를 잃는 문제(Knowledge/일정
+    // 화면에서 고쳤던 것과 동일한 버그)를 막기 위해 다시 그려진 입력창에 포커스/커서를 복원한다.
+    function restoreFocus(selector, pos) {
+      const next = container.querySelector(selector);
+      if (next) {
+        next.focus();
+        try { next.setSelectionRange(pos, pos); } catch (e) { /* 일부 input type은 미지원 — 무시 */ }
+      }
+    }
+
+    // 정렬 가능한 컬럼 헤더 — schedule.js와 동일한 패턴(활성 컬럼에 ▲/▼ 표시).
+    function sortableTh(label, key, sortState, onClick) {
+      const active = sortState.key === key;
+      return el('th', { class: active ? 'is-sorted' : '', onclick: () => onClick(key) }, [
+        label, active ? el('span', { class: 'sort-arrow' }, sortState.dir === 'asc' ? '▲' : '▼') : null,
+      ]);
+    }
+    function toggleTableSort(sortState, key) {
+      if (sortState.key === key) return { key, dir: sortState.dir === 'asc' ? 'desc' : 'asc' };
+      return { key, dir: 'asc' };
+    }
+    function sortTableRows(rows, sortState, accessors) {
+      const get = accessors[sortState.key];
+      if (!get) return rows;
+      return rows.slice().sort((a, b) => {
+        const av = get(a);
+        const bv = get(b);
+        let cmp;
+        if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+        else cmp = String(av).localeCompare(String(bv));
+        return sortState.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+
     // ================= 프로그램(리스트 뷰) =================
     function programsSection() {
-      const rows = appState.programs.slice().sort((a, b) => (b.run_count || 0) - (a.run_count || 0));
-      if (!rows.length) {
+      let rows = appState.programs.slice();
+      if (programQuery.trim()) {
+        const q = programQuery.trim().toLowerCase();
+        rows = rows.filter((p) => (p.name || '').toLowerCase().includes(q) || (p.url || '').toLowerCase().includes(q));
+      }
+      rows = sortTableRows(rows, programSort, {
+        name: (r) => (r.name || '').toLowerCase(),
+        url: (r) => (r.url || '').toLowerCase(),
+        devTool: (r) => (r.pipeline?.dev?.tool || '').toLowerCase(),
+        progress: (r) => Object.values(r.pipeline || {}).filter((d) => d && (d.id || d.date)).length,
+        run_count: (r) => r.run_count || 0,
+      });
+      if (!appState.programs.length) {
         return el('div', { class: 'empty-state' }, '직접 만든 웹앱/모바일앱/위젯을 등록하고 개발~배포 과정을 관리해보세요.');
       }
       // 더 이상 존재하지 않는 항목이 선택 상태에 남지 않도록 정리
       selectedPrograms = new Set([...selectedPrograms].filter((id) => rows.some((r) => r.id === id)));
 
       const wrap = el('div', {});
+      wrap.append(
+        el('div', { class: 'filter-bar', style: 'margin-bottom:8px' }, [
+          el('input', {
+            class: 'nm-input program-search-input', style: 'max-width:240px', placeholder: '검색(이름/URL)', value: programQuery,
+            oninput: (e) => { const pos = e.target.selectionStart; programQuery = e.target.value; draw(); restoreFocus('.program-search-input', pos); },
+          }),
+        ])
+      );
       wrap.append(bulkBar(rows, selectedPrograms, async (ids) => {
         await appState.deleteProgramsBulk(ids);
         toast(`${ids.length}건 삭제했습니다.`, 'success');
       }));
 
+      if (!rows.length) {
+        wrap.append(el('div', { class: 'empty-state' }, '검색 결과가 없습니다.'));
+        return wrap;
+      }
+
       const tableWrap = el('div', { class: 'data-table-wrap' });
       const table = el('table', { class: 'data-table' });
       table.append(
+        el('colgroup', {}, [
+          el('col', { style: 'width:34px' }),
+          el('col', { style: 'width:40px' }),
+          el('col', { style: 'width:22%' }),
+          el('col', { style: 'width:22%' }),
+          el('col', { style: 'width:10%' }),
+          el('col', { style: 'width:170px' }),
+          el('col', { style: 'width:230px' }),
+        ])
+      );
+      table.append(
         el('thead', {}, [
           el('tr', {}, [
-            el('th', { style: 'width:34px' }, [selectAllCheckbox(rows, selectedPrograms)]),
-            el('th', { style: 'width:40px' }, 'No'),
-            el('th', {}, '이름'),
-            el('th', {}, 'URL'),
-            el('th', {}, '개발툴'),
-            el('th', { style: 'width:120px' }, '진행현황'),
-            el('th', { style: 'width:190px' }, '작업'),
+            el('th', {}, [selectAllCheckbox(rows, selectedPrograms)]),
+            el('th', {}, 'No'),
+            sortableTh('이름', 'name', programSort, (k) => { programSort = toggleTableSort(programSort, k); draw(); }),
+            sortableTh('URL', 'url', programSort, (k) => { programSort = toggleTableSort(programSort, k); draw(); }),
+            sortableTh('개발툴', 'devTool', programSort, (k) => { programSort = toggleTableSort(programSort, k); draw(); }),
+            sortableTh('진행현황', 'progress', programSort, (k) => { programSort = toggleTableSort(programSort, k); draw(); }),
+            el('th', {}, '작업'),
           ]),
         ])
       );
@@ -297,28 +370,65 @@
 
     // ================= 즐겨찾기 URL(리스트 뷰) =================
     function bookmarksSection() {
-      const rows = appState.bookmarks.slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-      if (!rows.length) {
+      let rows = appState.bookmarks.slice();
+      if (bookmarkQuery.trim()) {
+        const q = bookmarkQuery.trim().toLowerCase();
+        rows = rows.filter((b) => (b.title || '').toLowerCase().includes(q) || (b.url || '').toLowerCase().includes(q));
+      }
+      rows = sortTableRows(rows, bookmarkSort, {
+        title: (r) => (r.title || '').toLowerCase(),
+        url: (r) => (r.url || '').toLowerCase(),
+        category: (r) => (r.category || '').toLowerCase(),
+        sort_order: (r) => r.sort_order || 0,
+      });
+      const customOrder = bookmarkSort.key === 'sort_order' && bookmarkSort.dir === 'asc';
+      if (!appState.bookmarks.length) {
         return el('div', { class: 'empty-state' }, '자주 방문하는 사이트를 즐겨찾기로 등록해보세요. 클릭하면 바로 이동합니다.');
       }
       selectedBookmarks = new Set([...selectedBookmarks].filter((id) => rows.some((r) => r.id === id)));
 
       const wrap = el('div', {});
+      wrap.append(
+        el('div', { class: 'filter-bar', style: 'margin-bottom:8px' }, [
+          el('input', {
+            class: 'nm-input bookmark-search-input', style: 'max-width:240px', placeholder: '검색(제목/URL)', value: bookmarkQuery,
+            oninput: (e) => { const pos = e.target.selectionStart; bookmarkQuery = e.target.value; draw(); restoreFocus('.bookmark-search-input', pos); },
+          }),
+        ])
+      );
       wrap.append(bulkBar(rows, selectedBookmarks, async (ids) => {
         await appState.deleteBookmarksBulk(ids);
         toast(`${ids.length}건 삭제했습니다.`, 'success');
       }));
+      if (!customOrder) {
+        wrap.append(el('p', { class: 'text-muted', style: 'font-size:11px; margin:-4px 0 8px' }, '※ 검색/정렬 중에는 ↑/↓ 순서 변경 버튼이 비활성화됩니다. "작업" 컬럼 정렬을 기본으로 되돌리면 다시 쓸 수 있습니다.'));
+      }
+
+      if (!rows.length) {
+        wrap.append(el('div', { class: 'empty-state' }, '검색 결과가 없습니다.'));
+        return wrap;
+      }
 
       const tableWrap = el('div', { class: 'data-table-wrap' });
       const table = el('table', { class: 'data-table' });
       table.append(
+        el('colgroup', {}, [
+          el('col', { style: 'width:34px' }),
+          el('col', { style: 'width:40px' }),
+          el('col', { style: 'width:28%' }),
+          el('col', { style: 'width:32%' }),
+          el('col', { style: 'width:14%' }),
+          el('col', { style: 'width:170px' }),
+        ])
+      );
+      table.append(
         el('thead', {}, [
           el('tr', {}, [
-            el('th', { style: 'width:34px' }, [selectAllCheckbox(rows, selectedBookmarks)]),
-            el('th', { style: 'width:40px' }, 'No'),
-            el('th', {}, '제목'),
-            el('th', {}, 'URL'),
-            el('th', {}, '분류'),
+            el('th', {}, [selectAllCheckbox(rows, selectedBookmarks)]),
+            el('th', {}, 'No'),
+            sortableTh('제목', 'title', bookmarkSort, (k) => { bookmarkSort = toggleTableSort(bookmarkSort, k); draw(); }),
+            sortableTh('URL', 'url', bookmarkSort, (k) => { bookmarkSort = toggleTableSort(bookmarkSort, k); draw(); }),
+            sortableTh('분류', 'category', bookmarkSort, (k) => { bookmarkSort = toggleTableSort(bookmarkSort, k); draw(); }),
             el('th', { style: 'width:170px' }, '작업'),
           ]),
         ])
@@ -341,8 +451,8 @@
             el('td', {}, b.category ? el('span', { class: 'nm-badge' }, escapeHtml(b.category)) : '-'),
             el('td', {}, [
               el('div', { class: 'icon-row' }, [
-                el('button', { class: 'nm-btn nm-btn--icon', title: '위로', disabled: idx === 0 || undefined, onclick: () => moveBookmark(rows, idx, -1) }, '↑'),
-                el('button', { class: 'nm-btn nm-btn--icon', title: '아래로', disabled: idx === rows.length - 1 || undefined, onclick: () => moveBookmark(rows, idx, 1) }, '↓'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '위로', disabled: !customOrder || idx === 0 || undefined, onclick: () => moveBookmark(rows, idx, -1) }, '↑'),
+                el('button', { class: 'nm-btn nm-btn--icon', title: '아래로', disabled: !customOrder || idx === rows.length - 1 || undefined, onclick: () => moveBookmark(rows, idx, 1) }, '↓'),
                 el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openBookmarkForm(b) }, '✎'),
                 el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeBookmark(b) }, '🗑'),
               ]),

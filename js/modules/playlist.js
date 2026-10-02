@@ -81,7 +81,7 @@
                 ? el('img', { src: posterSrc, alt: '', class: 'playlist-card__poster-img', onerror: "this.parentElement.classList.add('playlist-card__poster--empty'); this.remove();" })
                 : el('span', { class: 'playlist-card__poster-icon' }, TYPE_ICON[p.content_type] || '🎫'),
             ]),
-            el('div', { style: 'font-weight:700; margin:8px 0 2px' }, escapeHtml(p.title)),
+            el('div', { class: 'playlist-card__title' }, escapeHtml(p.title)),
             p.creator ? el('div', { class: 'text-muted', style: 'font-size:12px' }, escapeHtml(p.creator)) : null,
             p.event_date ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, `${p.event_date}${p.event_time ? ' ' + p.event_time : ''}`) : null,
             p.venue_name
