@@ -1,0 +1,90 @@
+/* ChartKit(v7.21.0) — 검증된 8색 범주형 팔레트(고정 순서) + 다크 모드는 별도 선택값 */
+:root {
+  --ck-1: #2a78d6; --ck-2: #eb6834; --ck-3: #1baf7a; --ck-4: #eda100;
+  --ck-5: #e87ba4; --ck-6: #008300; --ck-7: #4a3aa7; --ck-8: #e34948;
+  --ck-grid: #e4e8f0; --ck-axis: #94a3b8; --ck-text: #1e2433; --ck-muted: #6b7280;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ck-1: #3987e5; --ck-2: #d95926; --ck-3: #199e70; --ck-4: #c98500;
+    --ck-5: #d55181; --ck-6: #008300; --ck-7: #9085e9; --ck-8: #e66767;
+    --ck-grid: #2b2f3a; --ck-axis: #6b7280; --ck-text: #e7e9f0; --ck-muted: #9aa0ae;
+  }
+}
+:root[data-theme='dark'] {
+  --ck-1: #3987e5; --ck-2: #d95926; --ck-3: #199e70; --ck-4: #c98500;
+  --ck-5: #d55181; --ck-6: #008300; --ck-7: #9085e9; --ck-8: #e66767;
+  --ck-grid: #2b2f3a; --ck-axis: #6b7280; --ck-text: #e7e9f0; --ck-muted: #9aa0ae;
+}
+.ck-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; box-shadow: var(--shadow-sm); color: var(--ck-text); min-width: 0; }
+.ck-card--mini { padding: 0; border: 0; box-shadow: none; background: transparent; }
+.ck-card--full { position: fixed; z-index: 3500; inset: 4vh 4vw; overflow: auto; box-shadow: 0 0 0 100vmax rgba(8, 12, 22, .6), var(--shadow-md); padding: 20px 24px; }
+.ck-card--full .ck-svg, .ck-card--full .target-line-chart { max-height: 70vh !important; }
+.ck-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+.ck-title { margin: 0; font-size: 14px; }
+.ck-tools { display: flex; gap: 4px; flex-wrap: wrap; }
+.ck-tools--mini { justify-content: flex-end; margin-bottom: 2px; }
+.ck-btn, .ck-chip, .ck-seg__btn, .ck-legend__item, .ck-crumb { font-family: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); border-radius: 999px; padding: 3px 10px; line-height: 1.5; }
+.ck-btn:hover, .ck-chip:hover, .ck-seg__btn:hover, .ck-legend__item:hover, .ck-crumb:hover { border-color: var(--accent); color: var(--accent); }
+.ck-btn:focus-visible, .ck-chip:focus-visible, .ck-seg__btn:focus-visible, .ck-legend__item:focus-visible, .ck-crumb:focus-visible, .ck-svg:focus-visible, .ck-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ck-btn[aria-pressed='true'], .ck-chip[aria-pressed='true'], .ck-seg__btn[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.ck-seg { display: inline-flex; gap: 2px; }
+.ck-crumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0 2px; font-size: 12px; }
+.ck-crumb { border-color: transparent; background: transparent; padding: 1px 6px; }
+.ck-crumb-sep, .ck-hint, .ck-level { color: var(--ck-muted); font-size: 11px; }
+.ck-level { margin-left: auto; }
+.ck-legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.ck-legend__item { display: inline-flex; align-items: center; gap: 6px; color: var(--ck-text); }
+.ck-legend__item.is-off { opacity: .45; text-decoration: line-through; }
+.ck-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.ck-plot { position: relative; }
+.ck-svg { width: 100%; height: auto; max-height: 300px; display: block; touch-action: pan-y; color: var(--ck-text); }
+.ck-svg text, .target-line-chart text { font-family: inherit; }
+.ck-grid { stroke: var(--ck-grid); stroke-width: 1; opacity: .8; }
+.ck-axis { stroke: var(--ck-axis); stroke-width: 1; }
+.ck-axis-text { font-size: 10px; fill: var(--ck-muted); }
+.ck-line { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ck-area { opacity: .18; }
+.ck-dot { stroke: var(--surface); stroke-width: 2; }
+.ck-bar { transition: opacity .15s; }
+.ck-cross { stroke: var(--ck-axis); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.ck-slice { cursor: pointer; stroke: var(--surface); stroke-width: 2; }
+.ck-slice.is-dim { opacity: .3; }
+.ck-donut-total { font-size: 22px; font-weight: 800; fill: var(--ck-text); }
+.ck-tip { position: absolute; z-index: 5; pointer-events: none; min-width: 120px; max-width: 240px; background: var(--surface); color: var(--ck-text); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow-md); padding: 6px 9px; font-size: 12px; }
+.ck-tip[hidden] { display: none; }
+.ck-tip__head { font-weight: 700; margin-bottom: 3px; color: var(--ck-muted); font-size: 11px; }
+.ck-tip__row { display: flex; align-items: center; gap: 6px; }
+.ck-tip__name { flex: 1; }
+.ck-empty { padding: 28px 0; text-align: center; color: var(--ck-muted); font-size: 13px; }
+.ck-foot { font-size: 11px; margin-top: 4px; }
+.ck-table-wrap { max-height: 300px; overflow: auto; margin-top: 6px; }
+.ck-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ck-table th, .ck-table td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.ck-table th:first-child, .ck-table td:first-child { text-align: left; }
+.ck-table thead th { position: sticky; top: 0; background: var(--surface); color: var(--ck-muted); }
+.ck-slicer { display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: center; padding: 10px 12px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.ck-quick, .ck-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.ck-brush { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ck-range { width: 110px; accent-color: var(--accent); }
+.ck-brush__label { font-size: 12px; color: var(--ck-muted); font-variant-numeric: tabular-nums; }
+.ck-chip--reset { margin-left: auto; }
+.ck-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+html.ck-has-full body { overflow: hidden; }
+@media (max-width: 600px) { .ck-grid-2 { grid-template-columns: 1fr; } .ck-card--full { inset: 0; border-radius: 0; } }
+@media (forced-colors: active) { .ck-line, .ck-bar, .ck-dot { forced-color-adjust: none; } }
+/* 목표선 차트가 호버/툴바를 쓰는 건강 카드 */
+.health-dashboard-card .ck-plot svg { cursor: crosshair; }
+
+/* KPI 카드(이전 기간 대비) — 색만으로 구분하지 않도록 ▲/▼ 기호를 함께 쓴다 */
+.ck-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 12px; }
+.ck-kpi { background: var(--bg-surface, var(--bg)); border-radius: 14px; padding: 10px 12px; box-shadow: var(--shadow-out, none); min-width: 0; }
+.ck-kpi__label { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-kpi__value { font-size: 24px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.ck-kpi__unit { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.ck-kpi__delta { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.ck-kpi__delta.is-up { color: #0f7a53; }
+.ck-kpi__delta.is-down { color: #c4292e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .ck-kpi__delta.is-up { color: #4fd1a0; } :root:not([data-theme='light']) .ck-kpi__delta.is-down { color: #ff8a8e; } }
+:root[data-theme='dark'] .ck-kpi__delta.is-up { color: #4fd1a0; }
+:root[data-theme='dark'] .ck-kpi__delta.is-down { color: #ff8a8e; }

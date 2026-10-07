@@ -86,6 +86,8 @@
 }
 
 .main {
+  /* min-width:0 — grid 1fr 트랙의 자동 최소 폭 때문에 표(.data-table-wrap)가 화면보다 넓은 페이지를 만들지 않게 한다(v7.19.0). */
+  min-width: 0;
   padding: 24px 32px 60px;
   max-width: 1680px;
   width: 100%;

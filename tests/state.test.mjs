@@ -64,6 +64,7 @@ test('deleteHealthAppointments는 연동된 일정도 함께 삭제하며 여러
   await setupUser();
   await appState.addHealthAppointment({ title: '정기검진', appointment_date: '2026-10-05' });
   await appState.addHealthAppointment({ title: '치과', appointment_date: '2026-10-10' });
+  await appState.whenSettled(); // v7.19.0: 일정 메뉴 연동은 백그라운드로 진행되므로 끝날 때까지 기다린다
   assert.equal(appState.healthAppointments.length, 2);
   assert.equal(appState.schedules.filter((s) => s.title.includes('정기검진') || s.title.includes('치과')).length, 2);
 

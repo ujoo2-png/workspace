@@ -15,8 +15,88 @@
 
 .health-pagenav button:disabled { opacity: 0.35; cursor: default; }
 
-.health-dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-@media (max-width: 900px) {
-  .health-dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+.health-dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) {
+  .health-dashboard-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .health-dashboard-card { padding: 10px 12px; }
+.target-line-chart { display: block; }
+
+/* 대시보드 카드: 목표값 입력 + "목표 대비" 문구 */
+.health-target-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.health-target-input { width: 84px; padding: 4px 8px; font-size: 12px; }
+.health-target-row .nm-btn--icon { width: 22px; height: 22px; min-width: 0; padding: 0; font-size: 13px; line-height: 1; }
+.health-target-gap { font-size: 12px; margin-top: 4px; color: var(--text); font-weight: 600; }
+
+
+/* ---- 일별 건강 모니터링 ---- */
+.health-daily__summary { margin: 8px 0 10px; font-size: 13px; line-height: 1.6; }
+.health-daily__wrap { max-height: 420px; overflow-y: auto; margin-top: 10px; }
+.health-daily-table th { cursor: default; }
+.health-daily-table tr.is-today td { background: var(--accent-soft); }
+.health-daily__hint {
+  margin-top: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.6;
+  border-left: 3px solid var(--border); background: var(--bg); border-radius: var(--radius-sm); color: var(--text-muted);
+}
+.health-mood-row { gap: 6px; align-items: center; }
+.health-mood-btn { padding: 4px 10px; font-size: 16px; }
+.med-state--ok { color: var(--success); font-weight: 700; }
+.med-state--warn { color: var(--warning); font-weight: 700; }
+.med-state--bad { color: var(--danger); font-weight: 700; }
+
+/* ---- 병원/검진 일정 · 복약 표 ---- */
+.health-appt-table tr.is-past td, .health-med-table tr.is-inactive td { opacity: 0.6; }
+
+/* ---- 💊 복약 관리 ---- */
+.health-med-disclaimer { margin-top: 8px; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+.health-med-refill {
+  margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+  background: var(--warning-soft); color: var(--warning);
+}
+.med-supply-low { color: var(--warning); font-weight: 700; }
+.med-checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 8px; }
+.med-dose {
+  display: flex; align-items: center; gap: 10px; text-align: left; font-family: inherit; cursor: pointer;
+  padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); min-height: 48px;
+}
+.med-dose:hover { background: var(--surface-hover); }
+.med-dose__check {
+  flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; color: #fff;
+}
+.med-dose__body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.med-dose__time { font-size: 12px; color: var(--text-muted); font-weight: 700; }
+.med-dose__name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.med-dose__late { flex: none; font-size: 11px; font-weight: 700; color: var(--warning); }
+.med-dose--taken { background: var(--success-soft); border-color: var(--success); }
+.med-dose--taken .med-dose__check { background: var(--success); border-color: var(--success); }
+.med-dose--late { border-color: var(--warning); }
+.med-dose--skipped { opacity: 0.6; }
+
+.med-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+@media (max-width: 600px) { .med-tiles { grid-template-columns: 1fr; } }
+.med-tile { padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg); border: 1px solid var(--border); }
+.med-tile__value { font-size: 22px; font-weight: 800; }
+.med-tile__label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.med-tile__sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* 최근 7일 점 격자: 채움=복용, 빨강 ×=놓침, 윤곽=예정 (색 + 글자 모양을 함께 써서 색만으로 구분하지 않음) */
+.med-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; overflow-x: auto; }
+.med-grid__head, .med-grid__row { display: grid; grid-template-columns: minmax(90px, 1.4fr) repeat(7, minmax(34px, 1fr)); gap: 6px; align-items: center; }
+.med-grid__head span { font-size: 11px; color: var(--text-muted); text-align: center; }
+.med-grid__head span.is-today { color: var(--accent); font-weight: 800; }
+.med-grid__name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.med-dot {
+  display: inline-flex; align-items: center; justify-content: center; justify-self: center;
+  width: 26px; height: 26px; border-radius: 50%; font-size: 13px; font-weight: 800; font-style: normal;
+  border: 2px solid transparent; box-sizing: border-box;
+}
+.med-dot--taken { background: var(--success); color: #fff; }
+.med-dot--partial { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
+.med-dot--missed { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.med-dot--upcoming { background: transparent; border-color: var(--text-muted); border-style: dashed; color: var(--text-muted); }
+.med-dot--none { color: var(--text-muted); opacity: 0.5; width: 26px; }
+.med-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--text-muted); align-items: center; }
+.med-legend .med-dot { width: 18px; height: 18px; font-size: 10px; vertical-align: middle; }
+.med-weekday { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }

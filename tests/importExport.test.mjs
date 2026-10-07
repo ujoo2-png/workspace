@@ -86,3 +86,33 @@ test('countImportRecords는 평탄한 배열과 그룹(By별) 구조를 모두 �
 test('countImportRecords는 빈 백업에 대해 0을 반환한다', () => {
   assert.equal(countImportRecords({ exportedAt: '2026-01-01' }), 0);
 });
+
+test('splitScheduleImport: 장소/구분/N일 후 필드는 보존하고 부모 먼저, 고아 자식은 독립 일정으로', () => {
+  const { splitScheduleImport } = globalThis.__importExport;
+  const rows = [
+    { id: 'c1', title: '검진 (5일 후)', parent_schedule_id: 'p1', offset_days: 5, is_generated: true, place: '서울치과', category: '개인' },
+    { id: 'p1', title: '검진', place: '서울치과', category: '개인', repeat_offsets: [5, 7] },
+    { id: 'o1', title: '고아', parent_schedule_id: 'gone', offset_days: 3, is_generated: true, category: '업무' },
+  ];
+  const { first, second } = splitScheduleImport(rows);
+  assert.deepEqual(first.map((r) => r.id), ['p1', 'o1']);
+  assert.deepEqual(second.map((r) => r.id), ['c1']);
+  const p = first.find((r) => r.id === 'p1');
+  assert.equal(p.place, '서울치과');
+  assert.equal(p.category, '개인');
+  assert.deepEqual(p.repeat_offsets, [5, 7]);
+  const orphan = first.find((r) => r.id === 'o1');
+  assert.equal(orphan.parent_schedule_id, null);
+  assert.equal(orphan.is_generated, false);
+  assert.equal(orphan.category, '업무');
+  assert.equal(second[0].offset_days, 5);
+  assert.equal(second[0].place, '서울치과');
+});
+
+test('v7.22 기본정보: 비어 있는 필드만 가져오기로 채운다', () => {
+  const { mergeBasicInfoForImport } = globalThis.__importExport;
+  const patch = mergeBasicInfoForImport({ name: '홍길동', phone: '' }, { name: '다른이름', phone: '010-1', email: 'a@b.c' });
+  assert.equal(patch.name, undefined);
+  assert.equal(patch.phone, '010-1');
+  assert.equal(patch.email, 'a@b.c');
+});

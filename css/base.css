@@ -176,6 +176,14 @@ a { color: var(--accent); }
 
 .nm-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 9px; }
 .nm-field label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+/* 필수 입력 표시: 라벨 텍스트 바로 왼쪽의 빨간 * (v7.19.0부터 새로 만드는 폼에 사용) */
+.nm-field .req, .lfg .req, .req-star { color: var(--danger); font-weight: 800; margin-right: 3px; }
+/* 필수 입력 범례("* 필수 입력") — 필수 항목이 있는 모달/폼 맨 위 한 줄 */
+.req-legend { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+.req-legend .req-star { margin-right: 0; }
+.nm-field__hint { font-size: 12px; }
+.nm-field__error { font-size: 12px; color: var(--danger); font-weight: 600; }
+.nm-input[aria-invalid='true'] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 
 .nm-badge {
   display: inline-flex;
@@ -409,6 +417,8 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 .attach-item__name:hover { text-decoration: underline; }
+.attach-item__name--btn { background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; color: var(--accent); }
+.attach-item__name--btn:disabled { opacity: .6; cursor: progress; }
 .attach-item__size { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 .attach-dropzone {
   display: flex;

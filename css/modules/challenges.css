@@ -67,3 +67,83 @@
 .today-log--miss {
   background: var(--danger-soft);
 }
+
+/* ---- v7.20.0: 이번 주(월~일) 달성 알약 7칸 ---- */
+:root {
+  --pill-done: #22c58b; --pill-done-ink: #04331f;
+  --pill-miss: #c6303a; --pill-miss-soft: #fde8e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) { --pill-done: #3ddc9f; --pill-done-ink: #04331f; --pill-miss: #ff7b84; --pill-miss-soft: #3b1d21; }
+}
+:root[data-theme='dark'] { --pill-done: #3ddc9f; --pill-done-ink: #04331f; --pill-miss: #ff7b84; --pill-miss-soft: #3b1d21; }
+
+.week-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.week-pills { display: grid; grid-template-columns: repeat(7, minmax(34px, 1fr)); gap: 6px; flex: 1 1 260px; min-width: 0; }
+.week-pill {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  height: 52px; padding: 0; border-radius: 14px; font: inherit; cursor: pointer; color: var(--text);
+  border: 2px solid var(--border); background: var(--surface-2);
+  transition: transform .08s ease, box-shadow .12s ease;
+}
+.week-pill:disabled { cursor: default; }
+.week-pill:not(:disabled):hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.week-pill:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.week-pill__day { font-size: 11px; font-weight: 700; opacity: .85; }
+.week-pill__mark { font-size: 17px; font-weight: 800; line-height: 1; min-height: 17px; }
+/* 달성: 밝은 채움 + ✓ */
+.week-pill--done { background: var(--pill-done); border-color: var(--pill-done); color: var(--pill-done-ink); }
+/* 미달성(지난 날): 붉은 계열 + 사선 줄무늬 + ✕ — 색을 못 보더라도 구분되게 */
+.week-pill--missed {
+  color: var(--pill-miss); border-color: var(--pill-miss);
+  background: repeating-linear-gradient(135deg, var(--pill-miss-soft) 0 6px, transparent 6px 12px), var(--pill-miss-soft);
+}
+/* 오늘(아직 안 함): 굵은 윤곽 */
+.week-pill--today { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.week-pill--today .week-pill__mark { color: var(--accent); font-size: 12px; }
+.week-pill--is-today .week-pill__day { text-decoration: underline; text-underline-offset: 3px; }
+/* 아직 오지 않은 날: 흐린 중립 */
+.week-pill--future { background: var(--surface-2); color: var(--text-muted); opacity: .75; }
+/* 쉬는 날/기간 밖: 점선 중립 */
+.week-pill--rest, .week-pill--inactive { background: transparent; border-style: dashed; color: var(--text-muted); opacity: .8; }
+.week-pill--rest .week-pill__mark { font-size: 12px; font-weight: 700; }
+.week-pill--inactive { opacity: .5; }
+
+.week-summary { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.week-summary__text { display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); line-height: 1.2; }
+.week-summary__text strong { font-size: 15px; color: var(--text); }
+
+.freq-day { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: 13px; }
+
+/* ---- v7.20.0: D-day 카드 ---- */
+.dday-strip { margin-bottom: 22px; }
+.dday-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.dday-card {
+  position: relative; padding: 12px 14px 12px 16px; border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--dday-color, var(--accent)) 9%, var(--surface));
+  box-shadow: var(--shadow-sm); overflow: hidden; min-width: 0;
+}
+.dday-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--dday-color, var(--accent)); }
+.dday-card__top { display: flex; align-items: center; gap: 6px; }
+.dday-card__emoji { font-size: 18px; }
+.dday-card__title { font-weight: 700; font-size: 13.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dday-card__actions { opacity: 0; transition: opacity .12s; }
+.dday-card:hover .dday-card__actions, .dday-card:focus-within .dday-card__actions { opacity: 1; }
+.dday-card__actions .nm-btn { padding: 1px 6px; min-width: 0; height: 24px; font-size: 12px; }
+.dday-card__num { font-size: 36px; font-weight: 800; letter-spacing: -1px; line-height: 1.15; margin: 4px 0 2px; color: var(--text); font-variant-numeric: tabular-nums; }
+.dday-card--today { box-shadow: 0 0 0 2px var(--dday-color, var(--accent)); }
+.dday-card--today .dday-card__num { color: var(--dday-color, var(--accent)); }
+.dday-card--past .dday-card__num { color: var(--text-muted); }
+.dday-card__date { font-size: 12px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.dday-card__tag { font-size: 11px; padding: 0 7px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+.dday-card__memo { font-size: 12px; color: var(--text-muted); margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dday-colors { display: flex; gap: 8px; }
+.dday-color { cursor: pointer; }
+.dday-color input { position: absolute; opacity: 0; pointer-events: none; }
+.dday-color__dot { display: block; width: 26px; height: 26px; border-radius: 50%; background: var(--c); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+.dday-color input:checked + .dday-color__dot { box-shadow: 0 0 0 2px var(--c), 0 0 0 4px var(--surface), 0 0 0 5px var(--c); }
+.dday-color input:focus-visible + .dday-color__dot { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 520px) { .week-pill { height: 46px; border-radius: 12px; } .dday-card__num { font-size: 30px; } }
+@media (prefers-reduced-motion: reduce) { .week-pill { transition: none; } }
+
+.challenge-card .nm-badge { white-space: nowrap; }
