@@ -30,3 +30,11 @@
 }
 .briefing-dot--critical { background: var(--danger); }
 .briefing-dot--warning { background: var(--warning); }
+
+/* ---- v7.23.0: 관심주제 마법사 ---- */
+.wizard-progress { display: flex; gap: 6px; }
+.wizard-dot { flex: 1; height: 5px; border-radius: 3px; background: var(--border); }
+.wizard-dot.is-done { background: var(--accent); opacity: 0.55; }
+.wizard-dot.is-current { background: var(--accent); }
+.wizard-feeds { margin: 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; }
+.wizard-md { margin: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }

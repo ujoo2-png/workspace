@@ -111,8 +111,9 @@ expect('프레젠테이션: 9초 후 자동으로 다음 슬라이드(kpi)', aut
 await page.keyboard.press('Escape');
 // ---- 애니메이션 효과 끄기: 입장/호버/count-up 즉시 ----
 await page.evaluate(() => window.HomeFx.setAnimationsEnabled(false));
-await page.click('.nav-item[data-path="/schedule"]'); await page.click('.nav-item[data-path="/home"]');
-await page.waitForSelector('.kpi-card__value');
+await page.click('.nav-item[data-path="/schedule"]'); await page.waitForSelector('.calendar-grid'); // 화면이 실제로 바뀐 뒤에 홈으로 돌아간다(연속 클릭 시 이전 홈 DOM을 읽는 경쟁 방지)
+await page.click('.nav-item[data-path="/home"]');
+await page.waitForFunction(() => !document.querySelector('.calendar-grid') && document.querySelector('.kpi-card__value'));
 const off = await page.evaluate(() => ({ v: document.querySelector('.kpi-card__value').textContent, enter: document.querySelector('#view-root .fx-enter') !== null, anim: getComputedStyle(document.querySelector('.home-widget')).animationName }));
 expect('효과 끔: 숫자 즉시 최종값, 입장 효과 없음', off.v === '4' && !off.enter && off.anim === 'none', JSON.stringify(off));
 const errs = errors.filter(Boolean);
