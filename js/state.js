@@ -113,6 +113,10 @@
         profile,
         bookmarks,
         careerLists,
+        // 기기 간 설정 동기화(원격 우선 pull). 실패해도 던지지 않으며(settingsSync가 내부에서 폴백),
+        // 다른 조회와 병렬이라 첫 화면을 추가로 지연시키지 않는다.
+        // 적용된 값은 아래 emit('change') 이전에 localStorage 캐시에 반영된다.
+        settingsResult,
       ] = await Promise.all([
         this.store.list('schedules', { where: { user_id: uid }, orderBy: 'date' }).catch(() => []),
         this.store.list('projects', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
@@ -145,6 +149,7 @@
             this.store.list(table, { where: { user_id: uid }, orderBy: 'sort_order' }).catch(() => [])
           )
         ),
+        window.settingsSync.load(uid).catch(() => ({ changed: [] })),
       ]);
 
       this.schedules = schedules;
@@ -185,7 +190,7 @@
         '_ownerKey'
       );
 
-      this.emit('change', { schedules, projects: this.projects, programs, notifications });
+      this.emit('change', { schedules, projects: this.projects, programs, notifications, settingsChanged: settingsResult?.changed || [] });
       // Supabase 모드에서 데이터를 성공적으로 불러왔다는 것은 Supabase에 실제 요청이 성공했다는
       // 뜻이므로, "Supabase 7일 유지" 기능(설정 화면)의 마지막 활동 시각을 함께 갱신한다.
       if (window.CONFIG?.mode === 'supabase' && window.markSupabaseActive) window.markSupabaseActive();
@@ -294,22 +299,22 @@
 
     // ---- "최근 본 항목"(홈 화면 벤치마킹 기능) ----
     // Raindrop.io/Notion류 앱의 "최근 항목" 위젯을 벤치마킹: 프로그램을 열거나 즐겨찾기를
-    // 열 때마다 최근 사용 목록(localStorage, 최대 8개, 이 브라우저 전용)에 기록해 홈 화면에서
+    // 열 때마다 최근 사용 목록(settingsSync로 기기 간 동기화, 최대 8개)에 기록해 홈 화면에서
     // 바로 다시 열 수 있게 한다.
     _trackRecentlyViewed(type, id, label) {
       try {
         const KEY = 'workspace:recentlyViewed';
-        const raw = localStorage.getItem(KEY);
+        const raw = window.settingsSync.get(KEY);
         let list = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(list)) list = [];
         list = list.filter((item) => !(item.type === type && item.id === id));
         list.unshift({ type, id, label, at: new Date().toISOString() });
-        localStorage.setItem(KEY, JSON.stringify(list.slice(0, 8)));
+        window.settingsSync.set(KEY, JSON.stringify(list.slice(0, 8)));
       } catch { /* localStorage 접근 불가(프라이빗 모드 등)여도 앱 동작엔 영향 없음 */ }
     }
     getRecentlyViewed() {
       try {
-        const raw = localStorage.getItem('workspace:recentlyViewed');
+        const raw = window.settingsSync.get('workspace:recentlyViewed');
         const list = raw ? JSON.parse(raw) : [];
         return Array.isArray(list) ? list : [];
       } catch {

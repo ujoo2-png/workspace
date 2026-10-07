@@ -1,10 +1,60 @@
-# 나만의 Work Space (v7.17.0)
+# 나만의 Work Space (v7.18.0)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
 개발계획서 v3.2의 전체 메뉴(일정·프로젝트·프로그램·챌린저·관심주제 브리핑·문화생활·차량관리·Health·Devlog·
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
+
+v7.18.0 — **기기 간 설정 동기화(Supabase `user_settings`)**: 같은 계정으로 PC 두 대에서 로그인했는데 날씨 지역·위젯 순서·API 키 등이 서로 달랐던 문제를 고쳤습니다. 원인은 이 값들이 각 브라우저의 localStorage에만 저장되고 서로 전혀 공유되지 않던 것이었습니다.
+- **동기화되는 설정(14개 키, 키 이름은 기존 localStorage와 동일)**: `workspace:weatherCities`(날씨 지역),
+  `workspace:customApis`(직접 등록한 커스텀 API 카드 — **항목 안의 `keyValue`(API 키)도 함께 동기화됨**),
+  `workspace:publicData:dataGoKrKey` / `kopisKey` / `opinetKey` / `enabled`(공공데이터포털·KOPIS·오피넷 키와
+  기능별 on/off), `workspace:tmdbApiKey`, `workspace:homeWidgetOrder`(홈 위젯 순서 — 코드 전체를 확인한 결과
+  "숨김 위젯" 설정은 존재하지 않아 순서만 해당), `workspace:clockTimezones`, `workspace:sidebarCollapsed`,
+  `workspace:theme`, `workspace:schedule:hideDone`, `workspace:health:weeklyGoal`, `workspace:recentlyViewed`.
+  `js/` 전체의 `localStorage` 사용처를 전수 조사해 빠진 키가 없음을 확인했습니다.
+- **동기화하지 않는 것(기기별 캐시/상태/세션)**: `customApiCache:*`, `publicData:cache:*`,
+  `publicData:status`, `tmdbStatus`(연결 테스트 결과 — 새 기기에서는 키가 있어도 "미확인"으로 시작해 연결 테스트를
+  한 번 누르면 갱신됨), `auth:remember`, `supabase:lastActive`, 로컬 모드 DB/세션.
+- **구조**: 새 `js/services/settingsSync.js`(`window.settingsSync.get/set/load`). localStorage가 빠른 로컬
+  캐시(동기 `get/set`이라 기존 코드 동작은 그대로)이고, Supabase 모드에서는 `set()`이 800ms 디바운스 후 **바뀐 키만**
+  `user_settings.settings`(jsonb, 사용자당 1행)에 병합 upsert합니다(올리기 직전에 원격 값을 읽어 병합하므로 다른
+  기기가 방금 바꾼 다른 키를 덮어쓰지 않음). 각 모듈의 `localStorage.getItem/setItem` 직접 호출을 이 래퍼로
+  교체했습니다(health·schedule·settings·home·app·state 및 customApi/publicData/clock/briefing/tmdb 서비스).
+  로컬 모드에서는 네트워크 없이 localStorage만 사용합니다.
+- **불러오기(pull)와 최초 시드(seed)**: 로그인 직후와 `refreshAll()`마다(원격 조회는 15초에 한 번으로 제한)
+  `refreshAll`의 기존 `Promise.all` 안에서 원격 행을 읽어 **원격 값이 로컬 캐시를 덮어씁니다(원격 우선)**.
+  원격 행이 없거나 비어 있으면(=동기화 도입 후 처음 로그인하는 기기) 그 기기의 로컬 설정을 1회 올려 클라우드의
+  기준으로 삼습니다. 원격에는 없는데 로컬에만 있는 키가 있으면 그 키만 채워 올립니다. 따라서
+  **"기준으로 삼고 싶은 기기(예: 데스크탑)에서 배포 후 가장 먼저 로그인"** 해야 그 기기의 설정이 노트북으로
+  퍼집니다. 먼저 로그인한 쪽이 비어 있거나 기본값이면 그 값이 기준이 되니 순서에 주의하세요.
+  테마·사이드바 접힘은 원격 값이 도착하는 즉시 반영되고, 나머지는 `refreshAll()`의 `change` 이벤트로
+  화면이 다시 그려지며 반영됩니다. 첫 화면은 이 요청을 따로 기다리지 않습니다(다른 목록 조회와 병렬).
+- **안전장치**: (1) `user_settings` 테이블이 없거나(0022 미실행) 네트워크/RLS 오류면 예외 없이 localStorage만
+  쓰는 상태로 내려가고 콘솔 경고를 1회만 남깁니다. (2) 탭을 닫기 전에 못 올린 변경은 `workspace:settingsSync:dirty`
+  표시로 남겨 다음 로그인 때 원격값에 덮이지 않고 다시 올라갑니다. (3) 같은 브라우저에서 **다른 계정**으로
+  로그인하면 이전 계정의 로컬 설정 캐시(API 키 포함)를 비운 뒤 시작하므로 새 계정의 클라우드로 올라가지 않습니다.
+- **⚠️ 보안 트레이드오프(API 키)**: 공공데이터포털/KOPIS/오피넷/TMDB 키와 커스텀 API의 `keyValue`가 이제
+  `user_settings.settings`에 **평문 JSON**으로 저장됩니다(이번 버전에서는 암호화하지 않음). RLS(`user_id = auth.uid()`)로
+  본인 행만 읽고 쓸 수 있고 브라우저 → Supabase 구간은 HTTPS지만, Supabase 프로젝트 소유자/DB 접근 권한자에게는
+  보입니다(v7.17.0 ⑧의 "키는 브라우저에만 저장" 설명은 이 버전부터 해당하지 않습니다). 이 키들은 원래도 각
+  브라우저에 평문으로 저장되었고, 프로그램 관리자 비밀번호(v7.17.0 ②)와 달리 잠금 암호 없이 자동으로 쓰여야 하는
+  값이라 암호화 대상에서 제외했습니다. 필요하면 다음 버전에서 `secretCrypto`로 별도 암호화를 검토할 수 있습니다.
+  **JSON 전체 백업/CSV 내보내기에는 설정(API 키 포함)이 포함되지 않으며**(내보내기는 원래 일정·프로젝트 등 데이터
+  테이블만 대상) 가져오기(`importData`)도 설정을 건드리지 않습니다 — 이 부분은 변경하지 않았습니다.
+- **⚠️ 적용 방법**: Supabase 대시보드 SQL Editor에서 `supabase/combined/all_migrations_0001_to_0022.sql`(또는
+  `supabase/migrations/0022_user_settings.sql` 단독)을 한 번 실행하세요. 재실행해도 안전합니다
+  (`create table if not exists`, `drop policy/trigger if exists`). 실행 전까지는 위 폴백대로 기존처럼 브라우저별로만
+  저장됩니다. 아직 0021(보안 강화)을 실행하지 않았다면 통합 파일에 함께 들어 있으니 이번에 같이 실행하면 됩니다.
+  통합 파일은 `..._0001_to_0021.sql`을 대체하며 기존 파일은 삭제했습니다.
+- **테스트**: 새 `tests/settingsSync.test.mjs`(16건 — 시드/덮어쓰기 판단, 키 단위 병합, 디바운스·실패 재시도,
+  다른 계정 캐시 폐기, 재조회 제한, 가짜 스토어로 시드→pull→테이블 없음 폴백)를 추가했고, `state.test.mjs`는
+  `settingsSync.js`를 함께 로드하도록 고쳐 전체 72건 → 88건이 되었습니다. 브라우저 검증(Playwright): 로컬 모드
+  임시 복사본에서 테마/날씨 지역/위젯 순서를 바꾸고 새로고침해도 유지·콘솔 에러 없음·네트워크 요청 없음,
+  가짜 supabase-js와 공유 가짜 백엔드로 두 개의 브라우저 컨텍스트(데스크탑/노트북)를 띄워 시드 → 노트북 pull →
+  노트북 변경이 데스크탑에 반영, 0022 미실행 폴백까지 확인했습니다. **실제 Supabase 서버와의 통신(실제 RLS·PostgREST
+  upsert 동작)은 이 환경에서 검증하지 못했습니다.**
 
 v7.17.0 — **보안 점검(개인정보 보안 취약점 전수 조사) 및 보완**:
 - **① [높음] 회원 승인(role/status) 권한 상승 가능성 — DB 트리거로 차단**: 0011에서 추가한
@@ -17,7 +67,7 @@ v7.17.0 — **보안 점검(개인정보 보안 취약점 전수 조사) 및 보
   `BEFORE UPDATE` 트리거를 추가해, 관리자가 아닌 사용자가 자기 행을 수정할 때는 `role`/`status`를
   무조건 수정 전 값으로 되돌리도록 DB 레벨에서 강제했습니다. 관리자의 승인/거절 플로우와
   "내 정보 저장"(이름/생년월일 등) 플로우는 그대로 동작합니다. **⚠️ 적용하려면 Supabase
-  대시보드 SQL Editor에서 `supabase/combined/all_migrations_0001_to_0021.sql`(또는
+  대시보드 SQL Editor에서 `supabase/combined/all_migrations_0001_to_0022.sql`(0021 포함, 또는
   `0021_security_hardening.sql` 단독)을 한 번 실행해야 합니다 — 실행 전까지는 이 취약점이
   이론상 그대로 남아 있습니다.**
 - **② [중간] 프로그램 관리자 비밀번호 — 실제 클라이언트 암호화 적용**: `programs.admin_password`가
@@ -74,7 +124,7 @@ v7.17.0 — **보안 점검(개인정보 보안 취약점 전수 조사) 및 보
 - 새 단위 테스트 `tests/secretCrypto.test.mjs`(6건)를 추가해 테스트가 66건 → 72건이
   되었습니다. DB 변경은 `supabase/migrations/0021_security_hardening.sql`로 추가했고,
   통합 파일을 `supabase/combined/all_migrations_0001_to_0021.sql`로 다시 생성했습니다
-  (`..._0001_to_0020.sql`은 더 이상 사용하지 않습니다).
+  (`..._0001_to_0020.sql`은 더 이상 사용하지 않습니다. v7.18.0부터는 0022까지 포함한 `..._0001_to_0022.sql`이 최신입니다).
 
 v7.16.0 — **새 메뉴 "📋 이력/경력" 추가(학력·자격증·교육이수·가입단체·포상·경력·증명사진) · 모든 "신규 등록" 팝업에 파일 첨부 기본 제공 · 첨부 패널 드래그 앤 드롭 업로드**:
 - **새 메뉴: 📋 이력/경력(`#/career`)** — 개인 이력서/경력 관리를 위한 7개 카테고리를 하나의

@@ -7,10 +7,10 @@
   const STATUS_STORAGE = 'workspace:tmdbStatus'; // 'connected' | 'error' | 'unset'
 
   function getTmdbApiKey() {
-    return localStorage.getItem(KEY_STORAGE) || '';
+    return window.settingsSync.get(KEY_STORAGE) || '';
   }
   function setTmdbApiKey(key) {
-    localStorage.setItem(KEY_STORAGE, key || '');
+    window.settingsSync.set(KEY_STORAGE, key || '');
   }
   function getTmdbStatus() {
     if (!getTmdbApiKey()) return 'unset';

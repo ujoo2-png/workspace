@@ -6,7 +6,7 @@
   // 알림의 related_table(js/rules.js가 채움)을 눌렀을 때 이동할 메뉴로 매핑한다.
   const NOTI_TARGET = { projects: '/projects', schedules: '/schedule', vehicles: '/vehicles', challenges: '/challenges', playlist_items: '/playlist' };
 
-  // 홈 화면 위젯을 드래그로 순서를 바꿀 수 있게 한다. 순서는 localStorage에 저장해두고
+  // 홈 화면 위젯을 드래그로 순서를 바꿀 수 있게 한다. 순서는 settingsSync(localStorage 캐시 + Supabase)에 저장해두고
   // 다음 방문 때도 유지한다. 새 버전에서 위젯이 추가되면 저장된 순서 뒤에 이어 붙인다.
   const WIDGET_ORDER_KEY = 'workspace:homeWidgetOrder';
   const WIDGET_LABELS = {
@@ -18,7 +18,7 @@
 
   function getHomeWidgetOrder() {
     try {
-      const raw = localStorage.getItem(WIDGET_ORDER_KEY);
+      const raw = window.settingsSync.get(WIDGET_ORDER_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length) {
@@ -32,7 +32,7 @@
   }
 
   function setHomeWidgetOrder(order) {
-    localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
+    window.settingsSync.set(WIDGET_ORDER_KEY, JSON.stringify(order));
   }
 
   function renderHome(root) {

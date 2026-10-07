@@ -10,7 +10,7 @@
 
   function listCustomApis() {
     try {
-      const raw = JSON.parse(localStorage.getItem(LIST_STORAGE) || '[]');
+      const raw = JSON.parse(window.settingsSync.get(LIST_STORAGE) || '[]');
       return Array.isArray(raw) ? raw : [];
     } catch {
       return [];
@@ -18,7 +18,7 @@
   }
 
   function saveCustomApis(list) {
-    localStorage.setItem(LIST_STORAGE, JSON.stringify(list));
+    window.settingsSync.set(LIST_STORAGE, JSON.stringify(list));
   }
 
   function upsertCustomApi(entry) {

@@ -13,7 +13,7 @@
     let quickTab = 'all'; // all | today | week | overdue | done
     let tagFilter = 'all';
     let query = '';
-    let hideDone = localStorage.getItem(HIDE_DONE_KEY) !== '0'; // 기본값: 숨김
+    let hideDone = window.settingsSync.get(HIDE_DONE_KEY) !== '0'; // 기본값: 숨김
     let sortKey = 'date';
     let sortDir = 'asc';
     let calMonth = todayISO().slice(0, 7); // YYYY-MM
@@ -98,7 +98,7 @@
             el('span', { class: 'text-muted' }, '완료 일정 숨기기'),
             el('button', {
               class: `nm-toggle ${hideDone ? 'nm-toggle--on' : ''}`,
-              onclick: () => { hideDone = !hideDone; localStorage.setItem(HIDE_DONE_KEY, hideDone ? '1' : '0'); draw(); },
+              onclick: () => { hideDone = !hideDone; window.settingsSync.set(HIDE_DONE_KEY, hideDone ? '1' : '0'); draw(); },
             }),
           ]),
         ])

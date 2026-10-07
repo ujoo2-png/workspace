@@ -68,7 +68,7 @@
     const container = el('div', {});
     root.append(container);
 
-    const theme = localStorage.getItem('workspace:theme') || 'auto';
+    const theme = window.settingsSync.get('workspace:theme') || 'auto';
     const CONFIG = window.CONFIG;
     let weatherCities = window.getWeatherCities();
 
@@ -762,7 +762,7 @@
         {
           class: `nm-btn ${active ? 'nm-btn--primary' : ''}`,
           onclick: () => {
-            localStorage.setItem('workspace:theme', value);
+            window.settingsSync.set('workspace:theme', value);
             applyTheme(value);
             renderSettings(rerenderTarget());
           },

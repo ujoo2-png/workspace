@@ -29,6 +29,7 @@ globalThis.uid = () => `id-${++uidCounter}`;
 
 loadGlobalScript('../js/store/localStore.js');
 globalThis.getStore = () => new globalThis.LocalStore();
+loadGlobalScript('../js/services/settingsSync.js'); // state.js가 window.settingsSync에 의존(index.html 로드 순서와 동일)
 loadGlobalScript('../js/state.js');
 const { appState } = globalThis;
 

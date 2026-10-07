@@ -220,6 +220,22 @@
       if (error) throw error;
     }
 
+    // ---- 기기 간 설정 동기화(js/services/settingsSync.js가 사용, 0022_user_settings.sql) ----
+    // user_settings는 사용자당 1행(user_id PK)이다. 행이 없으면 null(=아직 시드되지 않음),
+    // 테이블이 없거나 RLS/네트워크 오류면 throw — 호출부(settingsSync)가 로컬 전용으로 폴백한다.
+    async loadUserSettings() {
+      const client = await this._ensureClient();
+      const { data, error } = await client.from('user_settings').select('settings').maybeSingle();
+      if (error) throw error;
+      return data ? (data.settings || {}) : null;
+    }
+
+    async saveUserSettings(userId, settings) {
+      const client = await this._ensureClient();
+      const { error } = await client.from('user_settings').upsert({ user_id: userId, settings }, { onConflict: 'user_id' });
+      if (error) throw error;
+    }
+
     subscribe(table, cb) {
       // 비동기 초기화이므로 즉시 unsubscribe 함수를 반환할 수 있게 프라미스를 감싼다.
       let unsub = () => {};

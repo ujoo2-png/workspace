@@ -50,7 +50,7 @@
   // 등록된 날씨 지역 목록을 반환한다(없으면 기본 3개로 초기화).
   function getWeatherCities() {
     try {
-      const raw = localStorage.getItem(WEATHER_CITIES_KEY);
+      const raw = window.settingsSync.get(WEATHER_CITIES_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length) return parsed;
@@ -67,7 +67,7 @@
     const CONFIG = window.CONFIG;
     const trimmed = (cities || []).slice(0, CONFIG.weather.maxCities);
     if (trimmed.length < CONFIG.weather.minCities) return getWeatherCities();
-    localStorage.setItem(WEATHER_CITIES_KEY, JSON.stringify(trimmed));
+    window.settingsSync.set(WEATHER_CITIES_KEY, JSON.stringify(trimmed));
     return trimmed;
   }
 

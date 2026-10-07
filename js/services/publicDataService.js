@@ -11,22 +11,22 @@
   const CACHE_PREFIX = 'workspace:publicData:cache:';
   const ENABLED_DEFAULTS = { holidays: true, fuelPrice: true, cultureEvents: true, weatherAlerts: true, evChargers: true, kmaForecast: true };
 
-  function getPublicDataKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
-  function setPublicDataKey(key) { localStorage.setItem(KEY_STORAGE, key || ''); }
-  function getOpinetKey() { return localStorage.getItem(OPINET_KEY_STORAGE) || ''; }
-  function setOpinetKey(key) { localStorage.setItem(OPINET_KEY_STORAGE, key || ''); }
-  function getKopisKey() { return localStorage.getItem(KOPIS_KEY_STORAGE) || ''; }
-  function setKopisKey(key) { localStorage.setItem(KOPIS_KEY_STORAGE, key || ''); }
+  function getPublicDataKey() { return window.settingsSync.get(KEY_STORAGE) || ''; }
+  function setPublicDataKey(key) { window.settingsSync.set(KEY_STORAGE, key || ''); }
+  function getOpinetKey() { return window.settingsSync.get(OPINET_KEY_STORAGE) || ''; }
+  function setOpinetKey(key) { window.settingsSync.set(OPINET_KEY_STORAGE, key || ''); }
+  function getKopisKey() { return window.settingsSync.get(KOPIS_KEY_STORAGE) || ''; }
+  function setKopisKey(key) { window.settingsSync.set(KOPIS_KEY_STORAGE, key || ''); }
 
   function getPublicDataEnabled() {
     try {
-      return { ...ENABLED_DEFAULTS, ...JSON.parse(localStorage.getItem(ENABLED_STORAGE) || '{}') };
+      return { ...ENABLED_DEFAULTS, ...JSON.parse(window.settingsSync.get(ENABLED_STORAGE) || '{}') };
     } catch {
       return { ...ENABLED_DEFAULTS };
     }
   }
   function setPublicDataEnabled(next) {
-    localStorage.setItem(ENABLED_STORAGE, JSON.stringify(next));
+    window.settingsSync.set(ENABLED_STORAGE, JSON.stringify(next));
   }
 
   function getPublicDataStatus() {

@@ -26,7 +26,15 @@
   // 설정 화면의 "커스텀 API 관리"가 메뉴 체크박스 목록을 만들 때 재사용한다.
   window.NAV_ITEMS = NAV_ITEMS;
 
-  window.applyTheme(localStorage.getItem('workspace:theme') || 'auto');
+  window.applyTheme(window.settingsSync.get('workspace:theme') || 'auto');
+
+  // 다른 기기에서 바꾼 설정이 로그인/새로고침 직후 원격에서 내려오면(settingsSync.load) 테마와
+  // 사이드바 접힘 상태는 다시 그릴 필요 없이 바로 반영한다. 나머지(날씨 지역·위젯 순서 등)는
+  // refreshAll()이 끝에서 내보내는 'change' 이벤트로 각 화면이 다시 그려지며 반영된다.
+  window.settingsSync.onChange((keys) => {
+    if (keys.includes('workspace:theme')) window.applyTheme(window.settingsSync.get('workspace:theme') || 'auto');
+    if (keys.includes('workspace:sidebarCollapsed')) applySidebarCollapsed(window.settingsSync.get('workspace:sidebarCollapsed') === '1');
+  });
 
   const app = document.getElementById('app');
 
@@ -97,12 +105,19 @@
   }
 
   const SIDEBAR_COLLAPSED_KEY = 'workspace:sidebarCollapsed';
+  let shellEl = null;
+  let expandBtnEl = null;
+
+  function applySidebarCollapsed(collapsed) {
+    if (shellEl) shellEl.classList.toggle('app-shell--collapsed', collapsed);
+    if (expandBtnEl) expandBtnEl.style.display = collapsed ? '' : 'none';
+  }
 
   function buildShell() {
     const el = window.el;
     const appState = window.appState;
     app.innerHTML = '';
-    const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    const collapsed = window.settingsSync.get(SIDEBAR_COLLAPSED_KEY) === '1';
     const shell = el('div', { class: `app-shell ${collapsed ? 'app-shell--collapsed' : ''}` });
 
     // 좌측 상단 "나만의 Work Space" 클릭 시 어느 화면에서든 홈으로 이동.
@@ -144,6 +159,8 @@
     const main = el('main', { class: 'main' }, [topbar, el('div', { id: 'view-root' })]);
     shell.append(sidebar, main);
     app.append(expandBtn, shell);
+    shellEl = shell;
+    expandBtnEl = expandBtn;
 
     async function logout() {
       if (!window.confirmDialog('로그아웃 하시겠습니까?')) return;
@@ -156,7 +173,7 @@
       const nowCollapsed = !shell.classList.contains('app-shell--collapsed');
       shell.classList.toggle('app-shell--collapsed', nowCollapsed);
       expandBtn.style.display = nowCollapsed ? '' : 'none';
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, nowCollapsed ? '1' : '0');
+      window.settingsSync.set(SIDEBAR_COLLAPSED_KEY, nowCollapsed ? '1' : '0');
     }
   }
 

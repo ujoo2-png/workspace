@@ -140,7 +140,7 @@
   function renderHealth(root) {
     const container = el('div', {});
     root.append(container);
-    let weeklyGoal = Number(localStorage.getItem('workspace:health:weeklyGoal')) || 3;
+    let weeklyGoal = Number(window.settingsSync.get('workspace:health:weeklyGoal')) || 3;
     let showGuide = false;
     let trendType = 'weight';
     let trendRange = 'week';
@@ -300,7 +300,7 @@
               value: weeklyGoal,
               onchange: (e) => {
                 weeklyGoal = Number(e.target.value) || 3;
-                localStorage.setItem('workspace:health:weeklyGoal', String(weeklyGoal));
+                window.settingsSync.set('workspace:health:weeklyGoal', String(weeklyGoal));
                 draw();
               },
             }),

@@ -25,7 +25,7 @@
   // 기본값: 대한민국 1개. 사용자가 설정을 바꾸면 localStorage에 저장되고, 최초 1회만 기본값을 쓴다.
   function getClockZones() {
     try {
-      const raw = localStorage.getItem(CLOCK_ZONES_KEY);
+      const raw = window.settingsSync.get(CLOCK_ZONES_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length) return parsed;
@@ -40,7 +40,7 @@
   function setClockZones(zones) {
     const rest = (zones || []).filter((z) => z.id !== DEFAULT_ZONE.id).slice(0, MAX_EXTRA_ZONES);
     const trimmed = [DEFAULT_ZONE, ...rest];
-    localStorage.setItem(CLOCK_ZONES_KEY, JSON.stringify(trimmed));
+    window.settingsSync.set(CLOCK_ZONES_KEY, JSON.stringify(trimmed));
     return trimmed;
   }
 
