@@ -1,0 +1,63 @@
+서드파티 라이브러리 라이선스 (js/vendor/)
+==================================================================
+이 폴더의 파일은 '양식 문서'(이력/경력 > 📄 양식 문서) 탭을 열 때에만 브라우저가 불러옵니다(지연 로딩).
+원본 그대로의 배포용 최소화(minified) 빌드이며 수정하지 않았습니다. 외부 CDN/서버로 아무 것도 전송하지 않습니다.
+
+------------------------------------------------------------------
+1) ExcelJS 4.4.0  (exceljs.min.js)  — MIT License
+   https://github.com/exceljs/exceljs
+   번들에는 ExcelJS의 의존 라이브러리(jszip, saxes, fast-csv, dayjs, tmp 등)가 함께 들어 있으며
+   각각 MIT/BSD/ISC 등 허용적(permissive) 라이선스입니다(원 저작권 고지는 번들 내부 주석에 유지).
+------------------------------------------------------------------
+The MIT License (MIT)
+
+Copyright (c) 2014-2019 Guyon Roche
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+------------------------------------------------------------------
+2) JSZip 3.10.2  (jszip.min.js)  — MIT OR GPL-3.0-or-later 이중 라이선스
+   이 프로젝트는 MIT 조건을 선택해 사용합니다. https://github.com/Stuk/jszip
+   JSZip은 pako(MIT, zlib 포팅; Andrei Tuputcyn 등)를 포함합니다: https://github.com/nodeca/pako/blob/main/LICENSE
+------------------------------------------------------------------
+The MIT License
+===============
+
+Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+

@@ -5,6 +5,16 @@
   const { appState, el, escapeHtml, toast, confirmDialog, openModal, formatKoreanDate, todayISO, diffDays } = window;
 
   const PRIORITY_LABEL = { high: '높음', medium: '보통', low: '낮음' };
+  // 구분(category) — 색 + 글자(점+라벨)로 함께 표시해 색에만 의존하지 않는다. 색은 css/modules/schedule.css의 --cat-* 토큰.
+  const CATEGORIES = window.SCHEDULE_CATEGORIES;
+  const CAT_KEY = { 개인: 'personal', 회사: 'company', 가족: 'family', 업무: 'work', 기타: 'etc' };
+  const catKey = (c) => CAT_KEY[window.normalizeScheduleCategory(c)];
+  function catBadge(c) {
+    const label = window.normalizeScheduleCategory(c);
+    return el('span', { class: `cat-badge cat-badge--${CAT_KEY[label]}` }, [el('span', { class: 'cat-dot' }), label]);
+  }
+  // "N일 후" 빠른 추가 버튼에 쓰는 값(직접 입력도 가능)
+  const OFFSET_PRESETS = [1, 3, 5, 7, 14, 30];
   const HIDE_DONE_KEY = 'workspace:schedule:hideDone';
 
   function renderSchedule(root) {
@@ -12,6 +22,7 @@
     root.append(container);
     let quickTab = 'all'; // all | today | week | overdue | done
     let tagFilter = 'all';
+    let catFilter = 'all'; // 구분 필터: all | 개인 | 회사 | 가족 | 업무 | 기타
     let query = '';
     let hideDone = window.settingsSync.get(HIDE_DONE_KEY) !== '0'; // 기본값: 숨김
     let sortKey = 'date';
@@ -64,13 +75,21 @@
         ])
       );
 
+      // 구분 필터 칩 + 범례(칩이 곧 범례다: 색 점 + 글자 + 건수)
+      container.append(
+        el('div', { class: 'cat-filter', role: 'group', 'aria-label': '구분 필터' }, [
+          catChip('all', '전체', base.length),
+          ...CATEGORIES.map((c) => catChip(c, c, base.filter((s) => window.normalizeScheduleCategory(s.category) === c).length)),
+        ])
+      );
+
       const allTags = Array.from(new Set(base.flatMap((s) => s.tags || []))).sort();
       container.append(
         el('div', { class: 'filter-bar' }, [
           el('input', {
             class: 'nm-input schedule-search-input',
             style: 'max-width:220px',
-            placeholder: '검색(제목/메모)',
+            placeholder: '검색(제목/메모/장소/구분)',
             value: query,
             oninput: (e) => {
               const pos = e.target.selectionStart;
@@ -93,7 +112,7 @@
                 [el('option', { value: 'all' }, '태그 전체'), ...allTags.map((t) => el('option', { value: t, selected: t === tagFilter || undefined }, `#${t}`))]
               )
             : null,
-          el('button', { class: 'nm-btn', onclick: () => { query = ''; tagFilter = 'all'; quickTab = 'all'; draw(); } }, '초기화'),
+          el('button', { class: 'nm-btn', onclick: () => { query = ''; tagFilter = 'all'; catFilter = 'all'; quickTab = 'all'; draw(); } }, '초기화'),
           el('div', { class: 'row', style: 'margin-left:auto; gap:8px' }, [
             el('span', { class: 'text-muted' }, '완료 일정 숨기기'),
             el('button', {
@@ -112,10 +131,8 @@
       else if (hideDone) rows = rows.filter((s) => !s.done);
 
       if (tagFilter !== 'all') rows = rows.filter((s) => (s.tags || []).includes(tagFilter));
-      if (query.trim()) {
-        const q = query.trim().toLowerCase();
-        rows = rows.filter((s) => (s.title || '').toLowerCase().includes(q) || (s.memo || '').toLowerCase().includes(q));
-      }
+      if (catFilter !== 'all') rows = rows.filter((s) => window.normalizeScheduleCategory(s.category) === catFilter);
+      if (query.trim()) rows = rows.filter((s) => window.scheduleMatchesQuery(s, query));
 
       rows = sortRows(rows, sortKey, sortDir, today);
 
@@ -132,7 +149,9 @@
             el('th', { style: 'width:44px' }, 'No'),
             el('th', { style: 'width:36px' }, '깃발'),
             th('priority', '우선순위'),
+            th('category', '구분'),
             th('title', '제목'),
+            th('place', '장소'),
             th('date', '날짜'),
             th('dday', 'D-day'),
             el('th', {}, '프로젝트'),
@@ -160,13 +179,16 @@
               el('span', { class: `priority-dot priority-dot--${s.priority || 'medium'}` }),
               PRIORITY_LABEL[s.priority] || PRIORITY_LABEL.medium,
             ]),
+            el('td', {}, catBadge(s.category)),
             el('td', {}, [
-              el('div', { style: 'font-weight:700' }, escapeHtml(s.title)),
-              s.memo ? el('div', { class: 'text-muted', style: 'font-size:12px' }, escapeHtml(s.memo)) : null,
+              el('div', { style: 'font-weight:700' }, s.title),
+              repeatBadge(s),
+              s.memo ? el('div', { class: 'text-muted', style: 'font-size:12px' }, s.memo) : null,
             ]),
+            el('td', {}, s.place ? el('span', { class: 'place-text', title: s.place }, `📍 ${s.place}`) : '-'),
             el('td', {}, `${formatKoreanDate(s.date)}${s.time ? ' ' + s.time : ''}`),
             el('td', {}, ddayChip(dDay, s.done)),
-            el('td', {}, project ? escapeHtml(project.name) : '-'),
+            el('td', {}, project ? project.name : '-'),
             el('td', {}, [
               (s.tags || []).length ? el('div', { class: 'row wrap', style: 'gap:4px' }, s.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))) : '-',
               relatedKnowledgeLink(s.tags),
@@ -179,6 +201,9 @@
                   onclick: () => appState.updateSchedule(s.id, { done: !s.done }),
                 }, s.done ? '↺' : '✓'),
                 el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openScheduleForm(s) }, '✎'),
+                s.parent_schedule_id
+                  ? el('button', { class: 'nm-btn nm-btn--icon', title: '부모와 연결 끊기(독립 일정으로)', onclick: () => detach(s) }, '⛓')
+                  : null,
                 el('button', {
                   class: 'nm-btn nm-btn--icon',
                   title: '첨부파일',
@@ -233,6 +258,7 @@
       let cursor = window.addDays(firstIso, -firstWeekday);
       const byDate = {};
       for (const s of appState.schedules) {
+        if (catFilter !== 'all' && window.normalizeScheduleCategory(s.category) !== catFilter) continue;
         if (!byDate[s.date]) byDate[s.date] = [];
         byDate[s.date].push(s);
       }
@@ -250,17 +276,17 @@
           [
             el('div', { class: 'row', style: 'gap:4px; align-items:baseline' }, [
               el('div', { class: 'calendar-cell__daynum' }, String(Number(iso.slice(8, 10)))),
-              holidayMap[iso] ? el('div', { class: 'calendar-cell__holiday', title: holidayMap[iso] }, escapeHtml(holidayMap[iso])) : null,
+              holidayMap[iso] ? el('div', { class: 'calendar-cell__holiday', title: holidayMap[iso] }, holidayMap[iso]) : null,
             ]),
             ...dayItems.slice(0, 3).map((s) =>
               el(
                 'div',
                 {
-                  class: `calendar-cell__item ${s.done ? 'calendar-cell__item--done' : ''}`,
-                  title: s.title,
+                  class: `calendar-cell__item cat-item--${catKey(s.category)} ${s.done ? 'calendar-cell__item--done' : ''}`,
+                  title: `[${window.normalizeScheduleCategory(s.category)}] ${s.title}${s.time ? ' · ' + s.time : ''}${s.place ? ' · 📍' + s.place : ''}${s.offset_days ? ' · ' + s.offset_days + '일 후' : ''}`,
                   onclick: (e) => { e.stopPropagation(); openScheduleForm(s); },
                 },
-                escapeHtml(s.title)
+                [s.parent_schedule_id ? '↳ ' : '', s.title]
               )
             ),
             dayItems.length > 3 ? el('div', { class: 'calendar-cell__more' }, `+${dayItems.length - 3}개`) : null,
@@ -351,7 +377,7 @@
               list.append(
                 el('div', { class: 'item-row' }, [
                   el('div', { class: 'item-row__main' }, [
-                    el('div', { class: 'item-row__title' }, escapeHtml(h.name)),
+                    el('div', { class: 'item-row__title' }, h.name),
                     el('div', { class: 'text-muted', style: 'font-size:12px' }, formatKoreanDate(h.dateIso)),
                   ]),
                 ])
@@ -366,29 +392,183 @@
       });
     }
 
+    // 부모 일정이면 "🔁 +5·+7일", 자동 생성된 자식이면 "↳ 5일 후" 표식.
+    function repeatBadge(s) {
+      if (s.parent_schedule_id) {
+        const parent = appState.schedules.find((x) => x.id === s.parent_schedule_id);
+        return el('div', { class: 'repeat-badge', title: parent ? `"${parent.title}" 일정에서 ${s.offset_days}일 뒤로 자동 생성됨` : '자동 생성된 일정' }, `↳ ${s.offset_days || '?'}일 후 일정${parent ? ` · 원본: ${parent.title}` : ''}`);
+      }
+      const offs = s.repeat_offsets || [];
+      if (offs.length) return el('div', { class: 'repeat-badge repeat-badge--parent', title: '이 일정을 기준으로 N일 뒤 일정이 자동 생성되어 있습니다' }, `🔁 ${offs.map((n) => `+${n}`).join(' · ')}일 후`);
+      return null;
+    }
+
+    function catChip(key, label, count) {
+      const active = catFilter === key;
+      return el('button', {
+        type: 'button',
+        class: `cat-chip ${key === 'all' ? '' : `cat-chip--${CAT_KEY[key]}`} ${active ? 'cat-chip--active' : ''}`,
+        'aria-pressed': active ? 'true' : 'false',
+        onclick: () => { catFilter = key; draw(); },
+      }, [key === 'all' ? null : el('span', { class: 'cat-dot' }), label, el('span', { class: 'cat-chip__count' }, String(count))]);
+    }
+
+    async function detach(s) {
+      if (!confirmDialog(`"${s.title}"을(를) 원본 일정과의 연결을 끊고 독립 일정으로 만들까요?\n(이후 원본을 수정해도 이 일정은 바뀌지 않습니다.)`)) return;
+      try {
+        await appState.detachSchedule(s.id);
+        toast('독립 일정으로 바꿨습니다.', 'success');
+      } catch (e) { toast(`실패했습니다: ${e.message || e}`, 'error'); }
+    }
+
+    // 삭제: 자식("N일 후" 일정)이 있으면 함께 지울지 묻는다(모두 삭제 / 이 일정만 삭제하고 자식은 독립 일정으로 유지 / 취소).
     async function remove(s) {
-      if (!confirmDialog(`"${s.title}" 일정을 삭제할까요?`)) return;
-      await appState.deleteSchedule(s.id);
-      toast('일정을 삭제했습니다.', 'success');
+      const kids = appState.schedules.filter((x) => x.parent_schedule_id === s.id);
+      if (!kids.length) {
+        if (!confirmDialog(`"${s.title}" 일정을 삭제할까요?`)) return;
+        try { await appState.deleteSchedule(s.id); toast('일정을 삭제했습니다.', 'success'); } catch (e) { toast(`삭제하지 못했습니다: ${e.message || e}`, 'error'); }
+        return;
+      }
+      openModal({
+        title: '연결된 "N일 후" 일정이 있습니다',
+        contentBuilder(body, close) {
+          const run = async (deleteChildren) => {
+            close();
+            try {
+              await appState.deleteSchedule(s.id, { deleteChildren });
+              toast(deleteChildren ? `일정과 연결된 ${kids.length}건을 삭제했습니다.` : `일정을 삭제했습니다. 연결된 ${kids.length}건은 독립 일정으로 남았습니다.`, 'success');
+            } catch (e) { toast(`삭제하지 못했습니다: ${e.message || e}`, 'error'); }
+          };
+          body.append(
+            el('p', {}, `"${s.title}"에서 자동 생성된 일정이 ${kids.length}건 있습니다 (${kids.map((k) => `${k.offset_days}일 후`).join(', ')}).`),
+            el('div', { class: 'stack' }, [
+              el('button', { class: 'nm-btn nm-btn--danger', id: 'del-all', onclick: () => run(true) }, `모두 삭제 (이 일정 + ${kids.length}건)`),
+              el('button', { class: 'nm-btn', id: 'del-parent-only', onclick: () => run(false) }, `이 일정만 삭제 (${kids.length}건은 독립 일정으로 유지)`),
+              el('button', { class: 'nm-btn', onclick: close }, '취소'),
+            ])
+          );
+        },
+      });
+    }
+
+    // 필수 입력은 라벨 왼쪽에 빨간 * (css .nm-field .req)
+    function field(label, node, required = false) {
+      return el('div', { class: 'nm-field' }, [el('label', {}, [required ? el('span', { class: 'req', 'aria-hidden': 'true' }, '*') : null, label]), node]);
+    }
+
+    function categorySelect(selected) {
+      const select = el('select', { class: 'nm-select', name: 'category' });
+      for (const c of CATEGORIES) select.append(el('option', { value: c, selected: c === window.normalizeScheduleCategory(selected) || undefined }, c));
+      return select;
+    }
+
+    // "N일 후 알림/반복" 입력: 칩 목록 + 직접 입력("5, 7" 또는 "5일 후") + 빠른 추가 버튼. 1~365, 최대 10개.
+    // getBaseDate()로 현재 날짜 입력값을 읽어 "→ 10/12(월), 10/14(수)에도 일정이 생깁니다" 미리보기를 보여준다.
+    function offsetsField(initial, getBaseDate, getChildCount) {
+      let offsets = window.parseOffsets(initial || []).offsets;
+      const chips = el('div', { class: 'offset-chips' });
+      const preview = el('div', { class: 'text-muted offset-preview' });
+      const msg = el('div', { class: 'offset-msg' });
+      const input = el('input', { class: 'nm-input', id: 'offset-input', placeholder: '예: 5, 7  (며칠 후)', style: 'flex:1; min-width:120px', inputmode: 'numeric', 'aria-label': 'N일 후 직접 입력' });
+      const hidden = el('input', { type: 'hidden', name: 'repeat_offsets' });
+      function setOffsets(list, notice) {
+        const r = window.parseOffsets(list);
+        offsets = r.offsets;
+        const notes = [];
+        if (r.invalid.length) notes.push(`1~${window.MAX_OFFSET_DAYS}일만 가능해요: ${r.invalid.join(', ')} 제외`);
+        if (r.truncated) notes.push(`최대 ${window.MAX_REPEAT_OFFSETS}개까지만 저장돼요`);
+        msg.textContent = notice || notes.join(' · ');
+        render();
+      }
+      function render() {
+        hidden.value = JSON.stringify(offsets);
+        chips.innerHTML = '';
+        for (const n of offsets) {
+          chips.append(el('span', { class: 'offset-chip' }, [`${n}일 후`, el('button', { type: 'button', class: 'offset-chip__x', title: `${n}일 후 제거`, 'aria-label': `${n}일 후 제거`, onclick: () => setOffsets(offsets.filter((x) => x !== n)) }, '×')]));
+        }
+        if (!offsets.length) chips.append(el('span', { class: 'text-muted', style: 'font-size:12px' }, '없음 — 아래에서 추가하세요'));
+        const base = getBaseDate();
+        preview.textContent = offsets.length && base
+          ? `→ ${offsets.map((n) => { const d = window.shiftIso(base, n); return `${d.slice(5).replace('-', '/')}(${window.weekdayLabel(d)})`; }).join(', ')} 에도 일정이 만들어집니다`
+          : '';
+        if (getChildCount() && !offsets.length) preview.textContent = `저장하면 연결된 "N일 후" 일정 ${getChildCount()}건이 삭제됩니다`;
+      }
+      const addFromInput = () => {
+        if (!input.value.trim()) return;
+        setOffsets([...offsets, ...(input.value.match(/\d+(?:\.\d+)?/g) || [])]);
+        input.value = '';
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFromInput(); } });
+      input.addEventListener('blur', addFromInput);
+      const presets = el('div', { class: 'row wrap', style: 'gap:6px' }, OFFSET_PRESETS.map((n) => el('button', { type: 'button', class: 'nm-btn offset-preset', onclick: () => setOffsets([...offsets, n]) }, `+${n}일`)));
+      const wrap = el('div', { class: 'nm-field', id: 'offsets-field' }, [
+        el('label', {}, 'N일 후 반복/알림 (선택)'),
+        chips,
+        el('div', { class: 'row', style: 'gap:6px; margin-top:4px' }, [input, el('button', { type: 'button', class: 'nm-btn', onclick: addFromInput }, '추가')]),
+        presets,
+        msg,
+        preview,
+        hidden,
+      ]);
+      render();
+      wrap.refresh = render;
+      wrap.setDisabled = (on, note) => {
+        input.disabled = on;
+        presets.querySelectorAll('button').forEach((b) => { b.disabled = on; });
+        wrap.querySelectorAll('.offset-chip__x').forEach((b) => { b.disabled = on; });
+        msg.textContent = on ? note || '' : '';
+        wrap.style.opacity = on ? '0.55' : '';
+      };
+      return wrap;
     }
 
     // prefillDate: 달력 보기에서 빈 날짜 칸을 눌렀을 때 그 날짜로 새 일정 폼을 채워준다(existing과는 무관).
     function openScheduleForm(existing, prefillDate) {
+      const isChild = !!existing?.parent_schedule_id;
+      const parent = isChild ? appState.schedules.find((x) => x.id === existing.parent_schedule_id) : null;
+      const childCount = existing && !isChild ? appState.schedules.filter((x) => x.parent_schedule_id === existing.id).length : 0;
       openModal({
         title: existing ? '일정 수정' : '일정 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
+          const dateInput = el('input', { class: 'nm-input', type: 'date', name: 'date', required: true, value: existing?.date || prefillDate || todayISO() });
+          let offsetsNode = null;
+          let repeatNode = null;
+          if (isChild) {
+            form.append(el('div', { class: 'link-banner' }, [
+              el('div', {}, `↳ "${parent ? parent.title : '원본 일정'}"에서 ${existing.offset_days}일 뒤로 자동 생성된 일정입니다.`),
+              el('label', { class: 'row', style: 'gap:8px; margin-top:6px; cursor:pointer' }, [
+                el('input', { type: 'checkbox', name: 'detach', checked: true }),
+                el('span', {}, '부모와 연결을 끊고 독립 일정으로 수정'),
+              ]),
+              el('div', { class: 'text-muted', style: 'font-size:12px' }, '체크를 끄면 원본이 바뀔 때 이 일정도 같이 바뀌므로 여기서는 수정할 수 없습니다.'),
+            ]));
+          }
           form.append(
-            field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' })),
-            field('날짜', el('input', { class: 'nm-input', type: 'date', name: 'date', required: true, value: existing?.date || prefillDate || todayISO() })),
+            field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' }), true),
+            field('날짜', dateInput, true),
             field('시간(선택)', el('input', { class: 'nm-input', type: 'time', name: 'time', value: existing?.time || '' })),
+            field('구분', categorySelect(existing?.category)),
+            field('장소(선택)', el('input', { class: 'nm-input', name: 'place', placeholder: '예: 본사 3층 회의실', value: existing?.place || '' })),
             field('우선순위', prioritySelect(existing?.priority)),
             field('중요 표시(플래그)', flagCheckbox(existing?.flagged)),
             field('연결 프로젝트(선택)', projectSelect(existing?.project_id)),
             field('태그(쉼표로 구분, 선택)', el('input', { class: 'nm-input', name: 'tags', value: (existing?.tags || []).join(', ') })),
-            field('메모', el('textarea', { class: 'nm-textarea', name: 'memo' }, existing?.memo || '')),
-            existing ? null : repeatField()
+            field('메모', el('textarea', { class: 'nm-textarea', name: 'memo' }, existing?.memo || ''))
           );
+          if (!isChild) {
+            repeatNode = existing ? null : repeatField();
+            offsetsNode = offsetsField(existing?.repeat_offsets, () => dateInput.value, () => childCount);
+            dateInput.addEventListener('input', () => offsetsNode.refresh());
+            if (repeatNode) {
+              // 기존 반복(매일/매주/매월 × 횟수)과 "N일 후"는 함께 쓰지 않는다 — 같은 일정을 두 번 만들게 되기 때문.
+              const sel = repeatNode.querySelector('select');
+              sel.addEventListener('change', () => offsetsNode.setDisabled(sel.value !== 'none', '위의 반복 등록(매일/매주/매월)과 "N일 후"는 함께 쓸 수 없어요'));
+              form.append(repeatNode);
+            }
+            form.append(offsetsNode);
+            if (childCount) form.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `이 일정을 수정하면 연결된 "N일 후" 일정 ${childCount}건의 제목/날짜/시간/장소/구분도 함께 바뀝니다(완료 여부는 그대로).`));
+          }
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
           form.append(submitBtn);
           // 신규 등록(반복 없이 1건만 생성되는 경우) 직후 바로 첨부할 수 있도록, 저장되면
@@ -398,47 +578,64 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fd = new FormData(form);
+            if (isChild && fd.get('detach') !== 'on') { toast('변경 사항이 없습니다.', 'info'); close(); return; }
             const tags = String(fd.get('tags') || '').split(',').map((t) => t.trim()).filter(Boolean);
             const data = {
               title: fd.get('title'),
               date: fd.get('date'),
               time: fd.get('time') || null,
+              category: window.normalizeScheduleCategory(fd.get('category')),
+              place: (fd.get('place') || '').trim() || null,
               priority: fd.get('priority') || 'medium',
               flagged: fd.get('flagged') === 'on',
               project_id: fd.get('project_id') || null,
               tags,
               memo: fd.get('memo') || null,
             };
-            if (existing) {
-              await appState.updateSchedule(existing.id, data);
-              toast('일정을 저장했습니다.', 'success');
-              close();
-              return;
-            }
-            // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
-            // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
-            const repeat = fd.get('repeat') || 'none';
-            const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
-            const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : 0;
-            if (repeat === 'none' || stepDays === 0) {
-              const row = await appState.addSchedule(data);
-              toast('일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                el('div', { id: 'new-schedule-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
-            } else {
-              // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
-              // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
-              for (let i = 0; i < count; i++) {
-                await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i) });
+            if (!isChild) data.repeat_offsets = window.parseOffsets(fd.get('repeat_offsets') ? JSON.parse(fd.get('repeat_offsets')) : []).offsets;
+            const warn = () => { const w = appState.schemaWarning; appState.schemaWarning = null; return w; };
+            try {
+              if (existing) {
+                if (isChild) Object.assign(data, { parent_schedule_id: null, is_generated: false, offset_days: null });
+                appState.schemaWarning = null;
+                await appState.updateSchedule(existing.id, data);
+                const w = warn();
+                toast(w ? `저장했습니다. (${w})` : isChild ? '독립 일정으로 저장했습니다.' : '일정을 저장했습니다.', 'success');
+                close();
+                return;
               }
-              toast('일정을 저장했습니다.', 'success');
-              close();
+              // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
+              // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
+              const repeat = fd.get('repeat') || 'none';
+              const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
+              const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : 0;
+              appState.schemaWarning = null;
+              if (repeat === 'none' || stepDays === 0) {
+                const row = await appState.addSchedule(data);
+                const n = (data.repeat_offsets || []).length;
+                const w = warn();
+                toast(w ? `저장했습니다. (${w})` : n ? `저장했습니다. ${n}건의 "N일 후" 일정도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+                submitBtn.style.display = 'none';
+                attachHost.append(
+                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                  el('div', { id: 'new-schedule-attach-box' }),
+                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+                );
+                window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
+              } else {
+                // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
+                // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
+                delete data.repeat_offsets;
+                for (let i = 0; i < count; i++) {
+                  await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i) });
+                }
+                const w = warn();
+                toast(w ? `저장했습니다. (${w})` : '일정을 저장했습니다.', 'success');
+                close();
+              }
+            } catch (err) {
+              toast(`저장하지 못했습니다: ${err.message || err}`, 'error');
             }
           });
         },
@@ -480,10 +677,6 @@
       return select;
     }
 
-    function field(label, node) {
-      return el('div', { class: 'nm-field' }, [el('label', {}, label), node]);
-    }
-
     draw();
     appState.addEventListener('change', draw);
     return () => appState.removeEventListener('change', draw);
@@ -497,6 +690,12 @@
       else if (key === 'priority') cmp = (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1);
       else if (key === 'dday') cmp = diffDays(today, a.date) - diffDays(today, b.date);
       else if (key === 'title') cmp = (a.title || '').localeCompare(b.title || '');
+      else if (key === 'category') cmp = window.SCHEDULE_CATEGORIES.indexOf(window.normalizeScheduleCategory(a.category)) - window.SCHEDULE_CATEGORIES.indexOf(window.normalizeScheduleCategory(b.category));
+      else if (key === 'place') {
+        // 장소가 비어 있는 일정은 정렬 방향과 상관없이 항상 뒤로 보낸다.
+        if (!a.place !== !b.place) return a.place ? -1 : 1;
+        cmp = (a.place || '').localeCompare(b.place || '', 'ko');
+      }
       return dir === 'asc' ? cmp : -cmp;
     });
     // 플래그(중요) 표시된 일정은 정렬 결과 안에서도 항상 위로 끌어올린다.

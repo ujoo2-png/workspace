@@ -164,31 +164,164 @@
     const ui = {};
     for (const c of CATEGORIES) ui[c.key] = { query: '', sort: { key: 'sort_order', dir: 'asc' }, selected: new Set() };
 
+    // ---- v7.22.0 추가 아이디어: 총 경력(겹침 제외) · 경력기술서 자동 문안 · 자격증 만료 임박 ----
+    function careerExtras(cat) {
+      const CLg = window.CareerLogic;
+      const rows = appState.career[cat.key] || [];
+      if (!rows.length) return null;
+      if (cat.key === 'experiences') {
+        const total = CLg.totalExperience(rows, todayISO());
+        return el('div', { class: 'career-extra career-extra--exp' }, [
+          el('span', { class: 'career-extra__main' }, [
+            '총 경력 ', el('strong', { class: 'career-total-exp' }, total.count ? total.text : '계산할 기간 없음'),
+            el('span', { class: 'text-muted', style: 'font-size:12px' }, total.count ? ` · 겹치는 기간은 한 번만 계산(${total.count}건 → ${total.intervals}개 구간)` : ' · 입사일이 있는 경력이 없습니다'),
+          ]),
+          el('button', { class: 'nm-btn career-narrative-btn', onclick: () => openNarrativeModal() }, '📝 경력기술서 만들기'),
+        ]);
+      }
+      if (cat.key === 'certifications') {
+        const sts = rows.map((r) => ({ r, st: CLg.certExpiryStatus(r, todayISO()) }));
+        const soon = sts.filter((x) => x.st.state === 'soon');
+        const expired = sts.filter((x) => x.st.state === 'expired');
+        if (!soon.length && !expired.length) return null;
+        return el('div', { class: 'career-extra career-extra--cert' }, [
+          '⏰ 자격증 유효기간 알림 ',
+          soon.length ? el('span', { class: 'career-exp-badge career-exp-badge--soon' }, `만료 임박 ${soon.length}건 (90일 이내): ${soon.map((x) => x.r.cert_name).join(', ')}`) : null,
+          expired.length ? el('span', { class: 'career-exp-badge career-exp-badge--expired' }, `만료됨 ${expired.length}건: ${expired.map((x) => x.r.cert_name).join(', ')}`) : null,
+        ]);
+      }
+      return null;
+    }
+    function openNarrativeModal() {
+      const CLg = window.CareerLogic;
+      openModal({
+        title: '📝 경력기술서 자동 문안', width: '640px',
+        contentBuilder(body) {
+          let order = 'desc';
+          const ta = el('textarea', { class: 'nm-textarea', rows: 16, name: 'narrative', style: 'font-family:inherit' });
+          const fill = () => { ta.value = CLg.careerNarrative(appState.career.experiences || [], { order, fmt: 'YYYY.MM', todayIso: todayISO() }); };
+          fill();
+          body.append(
+            el('p', { class: 'text-muted', style: 'font-size:12px' }, '등록된 경력(회사·기간·부서/직책·담당업무)으로 만든 초안입니다. 자유롭게 고쳐서 복사해 쓰세요. 양식 문서의 "경력기술서" 칸에는 자동으로 들어갑니다.'),
+            el('label', { class: 'row', style: 'gap:6px; align-items:center; margin-bottom:6px' }, ['정렬',
+              el('select', { class: 'nm-select', style: 'width:auto', onchange: (e) => { order = e.target.value; fill(); } }, [el('option', { value: 'desc' }, '최근 경력부터'), el('option', { value: 'asc' }, '오래된 경력부터')])]),
+            ta,
+            el('div', { class: 'row', style: 'gap:8px; margin-top:8px' }, [
+              el('button', { class: 'nm-btn nm-btn--primary', onclick: async () => { try { await navigator.clipboard.writeText(ta.value); toast('복사했습니다.', 'success'); } catch (e) { ta.select(); toast('자동 복사가 막혔습니다. 선택된 텍스트를 직접 복사해 주세요.', 'error'); } } }, '📋 복사'),
+              el('button', { class: 'nm-btn', onclick: () => { const url = URL.createObjectURL(new Blob([ta.value], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = `경력기술서_${todayISO()}.txt`; a.click(); URL.revokeObjectURL(url); } }, '⬇ .txt 저장'),
+            ])
+          );
+        },
+      });
+    }
+
+    // ---- 기본정보(사용자당 1행) — 민감한 개인정보 ----
+    const BASIC_FORM = [
+      { name: 'name', label: '성명(한글)', type: 'text', required: true, autocomplete: 'name' },
+      { name: 'name_en', label: '영문 이름(선택)', type: 'text' },
+      { name: 'name_hanja', label: '한자 이름(선택)', type: 'text' },
+      { name: 'birth_date', label: '생년월일', type: 'date' },
+      { name: 'gender', label: '성별', type: 'select', options: ['남', '여', '기타'] },
+      { name: 'phone', label: '연락처(휴대폰)', type: 'text', autocomplete: 'tel' },
+      { name: 'email', label: '이메일', type: 'text', autocomplete: 'email' },
+      { name: 'address', label: '주소', type: 'text', autocomplete: 'street-address', wide: true },
+      { name: 'military', label: '병역(선택)', type: 'select', options: ['군필', '미필', '면제', '해당없음'] },
+      { name: 'nationality', label: '국적(선택)', type: 'text' },
+    ];
+    function basicInfoSection() {
+      const cur = appState.careerBasic || {};
+      const prof = appState.profile || {};
+      const wrap = el('div', { class: 'career-basic' });
+      wrap.append(el('div', { class: 'career-pii' }, [
+        el('strong', {}, '🔒 민감한 개인정보 '),
+        '이름·연락처·주소는 이 계정에서만 보이며(DB 행 단위 보안 RLS), 양식 문서를 채울 때만 사용합니다. 어떤 외부 서비스로도 전송하지 않습니다. ',
+        '전체 백업(JSON)에는 포함되니 백업 파일을 안전하게 보관하세요. 주민등록번호 같은 고유식별번호는 일부러 저장 칸을 만들지 않았습니다(양식에서는 직접 입력).',
+      ]));
+      const form = el('form', { class: 'career-basic__form', novalidate: true });
+      const inputs = {};
+      for (const f of BASIC_FORM) {
+        let init = cur[f.name] || '';
+        // 설정의 "내 정보"에 있는 생년월일/성별은 비어 있을 때 미리 채워 준다(저장해야 반영).
+        if (!init && f.name === 'birth_date' && prof.birth_date) init = prof.birth_date;
+        if (!init && f.name === 'gender' && prof.gender) init = { male: '남', female: '여', other: '기타' }[prof.gender] || '';
+        let input;
+        if (f.type === 'select') {
+          input = el('select', { class: 'nm-select', name: f.name }, [el('option', { value: '' }, '(선택 안 함)'), ...f.options.map((o) => el('option', { value: o, selected: o === init || undefined }, o))]);
+        } else {
+          input = el('input', { class: 'nm-input', type: f.type, name: f.name, value: init, autocomplete: f.autocomplete || 'off', required: f.required || undefined });
+        }
+        inputs[f.name] = input;
+        form.append(el('div', { class: `nm-field ${f.wide ? 'career-basic__wide' : ''}` }, [el('label', {}, f.label), input]));
+      }
+      const errBox = el('div', { class: 'cd-error hidden', role: 'alert' });
+      form.append(errBox, el('button', { class: 'nm-btn nm-btn--primary career-basic__save', type: 'submit' }, '저장'));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errBox.classList.add('hidden');
+        const data = {};
+        for (const f of BASIC_FORM) { const v = inputs[f.name].value.trim(); data[f.name] = v === '' ? null : v; }
+        if (!data.name) { errBox.textContent = '성명을 입력해 주세요.'; errBox.classList.remove('hidden'); inputs.name.focus(); return; }
+        if (data.email && !/^\S+@\S+\.\S+$/.test(data.email)) { errBox.textContent = '이메일 형식을 확인해 주세요.'; errBox.classList.remove('hidden'); inputs.email.focus(); return; }
+        try { await appState.saveCareerBasicInfo(data); toast('기본정보를 저장했습니다.', 'success'); } catch (err) { toast(`저장 실패: ${err.message || err}`, 'error'); }
+      });
+      wrap.append(form);
+      wrap.append(el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:12px' }, '여기에 저장한 값은 "📄 양식 문서"에서 성명/생년월일/연락처/이메일/주소/병역/국적 칸을 자동으로 채우는 데 쓰입니다.'));
+      return wrap;
+    }
+
+    // 확장 탭: 📄 양식 문서(지연 로딩) / 👤 기본정보
+    const EXTRA_TABS = [
+      { key: 'docs', label: '양식 문서', icon: '📄', accent: true },
+      { key: 'basic', label: '기본정보', icon: '👤' },
+    ];
+    const docsHost = el('div', { class: 'career-docs-host' });
+    let docsApi = null;
+    let docsState = 'idle'; // idle | loading | ready | error
+
+    function mountDocs() {
+      if (docsState !== 'idle') return;
+      docsState = 'loading';
+      docsHost.append(el('div', { class: 'empty-state' }, '⏳ 양식 문서 도구를 불러오는 중… (처음 한 번만, 약 1MB)'));
+      window.loadFormTools().then(() => {
+        docsHost.innerHTML = '';
+        docsApi = window.renderCareerDocuments(docsHost);
+        docsState = 'ready';
+        draw();
+      }).catch((err) => {
+        docsState = 'idle';
+        docsHost.innerHTML = '';
+        docsHost.append(el('div', { class: 'empty-state' }, [`양식 문서 도구를 불러오지 못했습니다: ${err.message || err} `, el('button', { class: 'nm-btn', onclick: () => { docsHost.innerHTML = ''; mountDocs(); } }, '다시 시도')]));
+      });
+    }
+
     function draw() {
       container.innerHTML = '';
+      const isExtra = EXTRA_TABS.some((t) => t.key === activeCat);
       const cat = CATEGORIES.find((c) => c.key === activeCat);
+      let headBtn = null;
+      if (activeCat === 'docs') headBtn = el('button', { class: 'nm-btn nm-btn--primary', disabled: docsState !== 'ready' || undefined, onclick: () => docsApi && docsApi.openNew() }, '+ 새 양식 문서');
+      else if (cat) headBtn = el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openRecordForm(cat) }, `+ ${cat.label} 추가`);
       container.append(
         el('div', { class: 'page-header' }, [
           el('h1', {}, '이력/경력 관리'),
-          el('div', { class: 'row', style: 'gap:8px' }, [
-            el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openRecordForm(cat) }, `+ ${cat.label} 추가`),
-          ]),
+          el('div', { class: 'row', style: 'gap:8px' }, [headBtn]),
         ])
       );
       container.append(
         el(
           'div',
           { class: 'quick-tabs' },
-          CATEGORIES.map((c) =>
+          [...CATEGORIES.map((c) => ({ key: c.key, label: c.label, icon: c.icon })), ...EXTRA_TABS].map((c) =>
             el(
               'button',
-              { class: `quick-tab ${activeCat === c.key ? 'quick-tab--active' : ''}`, onclick: () => { activeCat = c.key; draw(); } },
-              `${c.icon} ${c.label}`
+              { class: `quick-tab ${activeCat === c.key ? 'quick-tab--active' : ''} ${c.accent ? 'quick-tab--accent' : ''}`, dataset: { tab: c.key }, onclick: () => { activeCat = c.key; draw(); } },
+              [`${c.icon} ${c.label}`, c.accent ? el('span', { class: 'career-new-tag' }, 'NEW') : null]
             )
           )
         )
       );
-      container.append(categorySection(cat));
+      if (activeCat === 'docs') { container.append(docsHost); mountDocs(); } else if (activeCat === 'basic') container.append(basicInfoSection());
+      else if (!isExtra) container.append(categorySection(cat));
     }
 
     function restoreFocus(selector, pos) {
@@ -234,6 +367,9 @@
           }),
         ])
       );
+
+      const extras = careerExtras(cat);
+      if (extras) wrap.append(extras);
 
       if (!allRows.length) {
         wrap.append(el('div', { class: 'empty-state' }, `등록된 ${cat.label} 기록이 없습니다.`));
@@ -322,6 +458,10 @@
             const isTitle = c.key === cat.titleField;
             const val = r[c.key];
             const text = val ? escapeHtml(String(val)) : '-';
+            if (cat.key === 'certifications' && c.key === 'expiry_date') {
+              const st = window.CareerLogic.certExpiryStatus(r, todayISO());
+              return el('td', {}, [el('span', {}, val ? String(val) : '-'), st.state === 'soon' || st.state === 'expired' ? el('span', { class: `career-exp-badge career-exp-badge--${st.state}`, style: 'margin-left:6px' }, window.CareerLogic.expiryLabel(st)) : null]);
+            }
             return isTitle
               ? el('td', { style: 'cursor:pointer', onclick: () => openViewModal(cat, r) }, [el('strong', {}, text)])
               : el('td', {}, text);
@@ -350,7 +490,13 @@
     function photoThumb(r, cat) {
       const atts = appState.getAttachments(tableOf(cat.key), r.id);
       const img = atts.find((a) => (a.mime_type || '').startsWith('image/'));
-      if (img) return el('img', { class: 'career-photo-thumb', src: img.data, alt: r.label || '증명사진' });
+      if (img) {
+        // 목록에는 본문이 없다(v7.21.0 지연 로딩) — 캐시에 있으면 바로, 없으면 백그라운드로 불러온 뒤 다시 그려진다.
+        const data = appState.peekAttachmentData(img.id);
+        if (data) return el('img', { class: 'career-photo-thumb', src: data, alt: r.label || '증명사진' });
+        appState.prefetchAttachmentData([img]);
+        return el('div', { class: 'career-photo-thumb--empty' }, '불러오는 중…');
+      }
       return el('div', { class: 'career-photo-thumb--empty' }, '사진없음');
     }
 
@@ -502,8 +648,13 @@
     }
 
     draw();
-    appState.addEventListener('change', draw);
-    return () => appState.removeEventListener('change', draw);
+    // 양식 문서 탭이 열려 있으면 그 화면이 스스로 갱신한다(자동 저장 때마다 입력 중인 칸의 포커스를 잃지 않게).
+    const onChange = () => { if (activeCat === 'docs' && docsState === 'ready') return; draw(); };
+    appState.addEventListener('change', onChange);
+    return () => {
+      appState.removeEventListener('change', onChange);
+      if (docsApi) docsApi.destroy(); // 편집 중이던 변경은 조용히 임시저장
+    };
   }
 
   window.renderCareer = renderCareer;

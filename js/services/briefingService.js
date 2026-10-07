@@ -76,53 +76,132 @@
     return Promise.all(cities.map((city) => fetchWeatherSafe(city)));
   }
 
-  // Open-Meteo(키 불필요)로 간단한 현재 날씨를 가져온다. 실패해도 브리핑 전체는 계속 표시되어야 한다.
-  async function fetchWeatherSafe(city = getWeatherCities()[0]) {
+  // ---- Open-Meteo "번들": 현재 + 7일 일별 + 시간별(강수확률/강수량/날씨코드)을 한 번의 요청으로 ----
+  // v7.21.0: 홈 날씨 카드(현재), 주간예보(일별), 시계 카드 날씨 테마(시간별)가 모두 이 한 요청을 공유한다.
+  // 같은 좌표는 TTL(20분) 안에서 메모리 + localStorage에 캐시하고, 동시에 들어온 요청은 하나로 합친다 → 중복 호출 없음.
+  // force=true(새로고침 버튼/카드 클릭)면 캐시를 건너뛴다.
+  const BUNDLE_TTL_MS = 20 * 60 * 1000;
+  const bundleMem = new Map(); // key -> { at, data }
+  const bundleInflight = new Map(); // key -> Promise
+  const bundleKey = (city) => `${Number(city.lat).toFixed(2)},${Number(city.lon).toFixed(2)}`;
+  function readBundleCache(key) {
+    const m = bundleMem.get(key);
+    if (m) return m;
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,weather_code`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return {
-        city: city.name,
-        temp: data?.current?.temperature_2m ?? null,
-        code: data?.current?.weather_code ?? null,
-        updatedAt: new Date().toISOString(),
-      };
-    } catch {
-      return null; // 네트워크 차단 환경에서도 앱이 멈추지 않도록 조용히 실패
+      const raw = localStorage.getItem(`workspace:wx:${key}`);
+      if (raw) { const parsed = JSON.parse(raw); if (parsed && parsed.data) { bundleMem.set(key, parsed); return parsed; } }
+    } catch { /* 저장소 접근 불가 — 캐시 없이 동작 */ }
+    return null;
+  }
+  async function fetchWeatherBundle(city, { force = false } = {}) {
+    const key = bundleKey(city);
+    if (!force) {
+      const c = readBundleCache(key);
+      if (c && Date.now() - c.at < BUNDLE_TTL_MS) return c.data;
+      if (bundleInflight.has(key)) return bundleInflight.get(key);
     }
+    const p = (async () => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}`
+          + '&current=temperature_2m,weather_code'
+          + '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,precipitation_sum'
+          + '&hourly=weather_code,precipitation_probability,precipitation'
+          + '&timezone=auto&forecast_days=7';
+        const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+        if (!res.ok) return (readBundleCache(key) || {}).data || null;
+        const data = await res.json();
+        const entry = { at: Date.now(), data };
+        bundleMem.set(key, entry);
+        try { localStorage.setItem(`workspace:wx:${key}`, JSON.stringify(entry)); } catch { /* 용량/차단 무시 */ }
+        return data;
+      } catch {
+        return (readBundleCache(key) || {}).data || null; // 네트워크 실패 시 오래된 캐시라도 사용(없으면 null)
+      }
+    })().finally(() => bundleInflight.delete(key));
+    bundleInflight.set(key, p);
+    return p;
   }
 
-  // 특정 도시의 "현재 날씨"만 즉시 다시 가져온다(홈 화면 날씨 카드를 클릭했을 때 실시간 동기화용).
+  // Open-Meteo로 간단한 현재 날씨를 가져온다(번들 공유). 실패해도 브리핑 전체는 계속 표시되어야 한다.
+  async function fetchWeatherSafe(city = getWeatherCities()[0], opts) {
+    const data = await fetchWeatherBundle(city, opts);
+    if (!data || !data.current) return null;
+    return {
+      city: city.name,
+      temp: data.current.temperature_2m ?? null,
+      code: data.current.weather_code ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  // 특정 도시의 "현재 날씨"만 즉시 다시 가져온다(홈 화면 날씨 카드를 클릭했을 때 실시간 동기화용) — 캐시를 건너뛴다.
   async function refreshWeatherForCity(city) {
-    return fetchWeatherSafe(city);
+    return fetchWeatherSafe(city, { force: true });
   }
 
-  // Open-Meteo는 current(실시간)와 daily(주간예보)를 한 번의 요청으로 함께 받을 수 있다.
-  // 7일 최고/최저기온 + 날씨코드를 가져와 홈 화면의 날씨 카드 클릭 시 주간예보로 보여준다.
-  // (기존에는 daily 파라미터에 강수 관련 항목이 전혀 없어 "강수확률/강수량"이 항상 빠진 채
-  // 기온만 보이는 문제가 있었다 — precipitation_probability_max/precipitation_sum을 추가해
-  // pop(강수확률 %)/precip(강수량 mm)으로 함께 반환한다.)
+  // 7일 일별 예보(최고/최저, 날씨코드, 강수확률 pop %, 강수량 precip mm). 번들을 공유한다.
+  // (예전에는 daily에 강수 항목이 없어 강수확률이 항상 빠졌었다 — v7.x에서 추가된 항목을 유지한다.)
   async function fetchWeeklyForecast(city) {
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,precipitation_sum&timezone=auto&forecast_days=7`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const daily = data?.daily;
-      if (!daily?.time) return null;
-      return daily.time.map((date, i) => ({
-        date,
-        max: daily.temperature_2m_max?.[i] ?? null,
-        min: daily.temperature_2m_min?.[i] ?? null,
-        code: daily.weather_code?.[i] ?? null,
-        pop: daily.precipitation_probability_max?.[i] ?? null,
-        precip: daily.precipitation_sum?.[i] ?? null,
-      }));
-    } catch {
-      return null; // 네트워크 차단 환경에서도 조용히 실패
+    const data = await fetchWeatherBundle(city);
+    const daily = data?.daily;
+    if (!daily?.time) return null;
+    return daily.time.map((date, i) => ({
+      date,
+      max: daily.temperature_2m_max?.[i] ?? null,
+      min: daily.temperature_2m_min?.[i] ?? null,
+      code: daily.weather_code?.[i] ?? null,
+      pop: daily.precipitation_probability_max?.[i] ?? null,
+      precip: daily.precipitation_sum?.[i] ?? null,
+    }));
+  }
+
+  // 시계 카드 테마용: "도시 현지 기준 오늘"의 예보 하루 + 시간별 슬롯 + 현지 시각.
+  // 기상청(KMA) 키/연동이 켜져 있고 단기예보가 있으면 그 시간별(PTY/SKY/POP)을 우선 쓰고, 아니면(또는 실패하면) Open-Meteo 번들로 폴백한다.
+  const kmaThemeCache = new Map(); // key -> { at, value }
+  async function fetchThemeForecast(city, nowMs = Date.now()) {
+    const bundle = await fetchWeatherBundle(city);
+    const offset = bundle?.utc_offset_seconds;
+    const kmaOn = !!(window.getPublicDataKey && window.getPublicDataKey() && window.getPublicDataEnabled && window.getPublicDataEnabled().kmaForecast);
+    if (kmaOn && window.fetchUnifiedWeeklyForecast) {
+      const key = bundleKey(city);
+      let hit = kmaThemeCache.get(key);
+      if (!hit || nowMs - hit.at > BUNDLE_TTL_MS) {
+        const r = await window.fetchUnifiedWeeklyForecast(city).catch(() => null);
+        hit = { at: nowMs, value: r };
+        kmaThemeCache.set(key, hit);
+      }
+      const r = hit.value;
+      if (r && r.source === 'kma' && r.days && r.days.length) {
+        const off = offset ?? 9 * 3600;
+        const date = window.WEATHER_THEME.cityLocalDate(nowMs, off);
+        const day = r.days.find((d) => d.date === date) || r.days[0];
+        return { day, hour: window.WEATHER_THEME.cityLocalHour(nowMs, off), source: 'kma', city: city.name };
+      }
     }
+    if (!bundle || !bundle.daily) return null;
+    const off = offset ?? 0;
+    const date = window.WEATHER_THEME.cityLocalDate(nowMs, off);
+    let i = bundle.daily.time.indexOf(date);
+    if (i < 0) i = 0;
+    const hourly = [];
+    const ht = bundle.hourly?.time || [];
+    for (let k = 0; k < ht.length; k++) {
+      if (ht[k].slice(0, 10) !== bundle.daily.time[i]) continue;
+      hourly.push({
+        h: Number(ht[k].slice(11, 13)),
+        code: bundle.hourly.weather_code?.[k] ?? null,
+        pop: bundle.hourly.precipitation_probability?.[k] ?? null,
+        precip: bundle.hourly.precipitation?.[k] ?? null,
+      });
+    }
+    const day = {
+      date: bundle.daily.time[i],
+      code: bundle.daily.weather_code?.[i] ?? null,
+      pop: bundle.daily.precipitation_probability_max?.[i] ?? null,
+      precip: bundle.daily.precipitation_sum?.[i] ?? null,
+      hourly,
+    };
+    return { day, hour: window.WEATHER_THEME.cityLocalHour(nowMs, off), source: 'open-meteo', city: city.name };
   }
 
   function weatherCodeToLabel(code) {
@@ -144,4 +223,6 @@
   window.weatherCodeToLabel = weatherCodeToLabel;
   window.refreshWeatherForCity = refreshWeatherForCity;
   window.fetchWeeklyForecast = fetchWeeklyForecast;
+  window.fetchWeatherBundle = fetchWeatherBundle;
+  window.fetchThemeForecast = fetchThemeForecast;
 })();

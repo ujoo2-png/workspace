@@ -215,7 +215,7 @@
       return this.db[name];
     }
 
-    async list(table, { where, orderBy, ascending = true } = {}) {
+    async list(table, { where, orderBy, ascending = true, columns } = {}) {
       let rows = this._table(table).filter((r) => !r.deleted_at);
       if (where) {
         rows = rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
@@ -227,6 +227,10 @@
           return ascending ? cmp : -cmp;
         });
       }
+      if (columns) {
+        const keys = String(columns).split(',').map((c) => c.trim()).filter(Boolean);
+        rows = rows.map((r) => Object.fromEntries(keys.filter((k) => k in r).map((k) => [k, r[k]])));
+      }
       return rows;
     }
 
@@ -234,12 +238,36 @@
       return this._table(table).find((r) => r.id === id) || null;
     }
 
-    async create(table, obj) {
+    async create(table, obj, opts = {}) {
       const row = { id: uid(), created_at: new Date().toISOString(), ...obj };
-      this._table(table).push(row);
+      const rows = this._table(table);
+      rows.push(row);
+      try {
+        saveDb(this.db);
+      } catch (e) {
+        // localStorage 용량(브라우저마다 약 5MB) 초과 — 메모리에만 남은 행을 되돌리고 알아볼 수 있는 오류로 바꾼다.
+        rows.splice(rows.indexOf(row), 1);
+        if (e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message)))) {
+          throw new Error('로컬 모드 저장 공간(브라우저 localStorage 약 5MB)이 부족해 저장하지 못했습니다. 큰 파일은 Supabase 모드에서 사용하세요.');
+        }
+        throw e;
+      }
+      this._emit(table);
+      if (opts.columns) {
+        const keys = String(opts.columns).split(',').map((c) => c.trim());
+        return Object.fromEntries(keys.filter((k) => k in row).map((k) => [k, row[k]]));
+      }
+      return row;
+    }
+
+    // supabaseStore.createMany와 같은 인터페이스. 로컬은 저장(saveDb)을 한 번만 한다.
+    async createMany(table, objs) {
+      const created = (objs || []).map((obj) => ({ id: uid(), created_at: new Date().toISOString(), ...obj }));
+      if (!created.length) return [];
+      this._table(table).push(...created);
       saveDb(this.db);
       this._emit(table);
-      return row;
+      return created;
     }
 
     async update(table, id, patch) {

@@ -243,6 +243,8 @@
               min: d.tmin,
               pop: d.pop,
               code: null,
+              // v7.21.0: 시계 카드 날씨 테마가 "오전/오후" 구간별 강수를 판단하도록 시간별 슬롯(KST 시)을 함께 돌려준다.
+              hourly: (d.hourly || []).map((h) => ({ h: Number(String(h.time).slice(0, 2)), pty: h.pty ?? null, sky: h.sky ?? null, pop: h.pop ?? null, precip: null })),
               detail: `${skyLabel(d.hourly?.[Math.floor(d.hourly.length / 2)]?.sky)}${ptyLabel(d.hourly?.[Math.floor(d.hourly.length / 2)]?.pty) ? ' · ' + ptyLabel(d.hourly[Math.floor(d.hourly.length / 2)].pty) : ''}`,
             })),
             ...midTerm.map((d) => ({

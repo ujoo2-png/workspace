@@ -67,7 +67,9 @@
         // poster_url이 비어 있으면, 첨부파일로 올려둔 이미지가 있는지 확인해서 그걸 포스터로 대신 보여준다
         // (예: URL 대신 파일로 포스터 이미지를 첨부해둔 경우에도 카드에 바로 보이도록).
         const attachedImage = appState.getAttachments('playlist_items', p.id).find((a) => (a.mime_type || '').startsWith('image/'));
-        const posterSrc = p.poster_url || attachedImage?.data || null;
+        // 첨부 이미지 본문은 지연 로딩(v7.21.0) — 캐시에 없으면 백그라운드로 받아 오고 끝나면 다시 그려진다.
+        if (!p.poster_url && attachedImage && !appState.peekAttachmentData(attachedImage.id)) appState.prefetchAttachmentData([attachedImage]);
+        const posterSrc = p.poster_url || (attachedImage ? appState.peekAttachmentData(attachedImage.id) : null) || null;
         grid.append(
           el('div', { class: 'nm-card playlist-card' }, [
             // 항목(종류)을 카드 맨 위 헤더에 크게 표기 — 상태 배지는 오른쪽에 나란히.

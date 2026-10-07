@@ -5,11 +5,28 @@
 (function () {
   const { el, escapeHtml, toast, confirmDialog, appState } = window;
 
-  function formatSize(bytes) {
-    if (!bytes && bytes !== 0) return '';
-    if (bytes < 1024) return `${bytes}B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  const formatSize = (bytes) => window.formatBytes(bytes);
+
+  // v7.21.0: 첨부 본문(data)은 목록에 들어 있지 않고 필요할 때만 불러온다(최대 10MB라 전부 받으면 너무 무겁다).
+  // 다운로드: 눌렀을 때 본문을 받아 Blob URL로 저장한다(큰 Data URL을 href에 직접 두지 않는다).
+  async function downloadAttachment(a, btn) {
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 불러오는 중…'; }
+    try {
+      const dataUrl = await appState.getAttachmentData(a.id);
+      const url = URL.createObjectURL(window.dataUrlToBlob(dataUrl));
+      const link = document.createElement('a');
+      link.href = url; link.download = a.name; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e) {
+      toast(e.message || '파일을 불러오지 못했습니다.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+  function downloadButton(a, className, text) {
+    const btn = el('button', { type: 'button', class: className, title: '다운로드', onclick: () => downloadAttachment(a, btn) }, text);
+    return btn;
   }
 
   // container 안에 첨부 목록 + 업로드 버튼을 그려넣는다. ownerTable/ownerId 레코드가 바뀌거나
@@ -26,7 +43,7 @@
       for (const a of rows) {
         list.append(
           el('div', { class: 'attach-item' }, [
-            el('a', { class: 'attach-item__name', href: a.data, download: a.name, title: '다운로드' }, `📎 ${escapeHtml(a.name)}`),
+            downloadButton(a, 'attach-item__name attach-item__name--btn', `📎 ${a.name}`),
             el('span', { class: 'attach-item__size' }, formatSize(a.size)),
             el(
               'button',
@@ -52,28 +69,34 @@
     async function handleFiles(files) {
       files = Array.from(files || []);
       if (!files.length) return;
+      let okCount = 0;
       for (const file of files) {
+        // 용량 초과는 읽기 전에 여기서 먼저 거른다 — 어떤 파일이 왜 안 되는지 파일마다 토스트로 알린다.
+        const chk = window.checkAttachmentSize(ownerTable, file.size, file.name);
+        if (!chk.ok) { toast(chk.message, 'error'); continue; }
         try {
           await appState.addAttachment(ownerTable, ownerId, file);
+          okCount++;
         } catch (err) {
           toast(err.message || '파일 첨부에 실패했습니다.', 'error');
         }
       }
       renderAttachmentsPanel(container, ownerTable, ownerId);
-      toast('파일을 첨부했습니다.', 'success');
+      if (okCount) toast(okCount > 1 ? `${okCount}개 파일을 첨부했습니다.` : '파일을 첨부했습니다.', 'success');
     }
     fileInput.addEventListener('change', async () => {
       await handleFiles(fileInput.files);
       fileInput.value = '';
     });
     const addBtn = el('button', { type: 'button', class: 'nm-btn', onclick: () => fileInput.click() }, '+ 파일 추가');
+    const limitNote = el('span', { class: 'text-muted attach-limit-note', style: 'font-size:12px' }, `파일당 ${window.attachmentLimitLabel(ownerTable)}`);
 
     // 드래그 앤 드롭 업로드 — 이 컴포넌트 하나에만 구현해두면 renderAttachmentsPanel/
     // openAttachmentsModal을 쓰는 모든 메뉴에 공통으로 적용된다("공통 메뉴에 드래그가
     // 되도록 해 줘" 요청). 파일 탐색기에서 드래그해온 파일을 dropzone 위에 놓으면
     // 클릭 업로드와 동일하게 addAttachment()가 호출된다.
     const dropzone = el('div', { class: 'attach-dropzone' }, [
-      el('span', { class: 'text-muted', style: 'font-size:12px' }, '여기로 파일을 드래그하거나, 버튼으로 추가하세요'),
+      el('span', { class: 'text-muted', style: 'font-size:12px' }, `여기로 파일을 드래그하거나, 버튼으로 추가하세요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
     ]);
     let dragCounter = 0;
     dropzone.addEventListener('dragenter', (e) => {
@@ -99,7 +122,7 @@
     });
 
     container.append(
-      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px' }, [addBtn, fileInput]),
+      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px' }, [addBtn, limitNote, fileInput]),
       dropzone,
       list
     );
@@ -127,30 +150,42 @@
     if (!rows.length) return;
     for (const a of rows) {
       const mime = a.mime_type || '';
-      if (mime.startsWith('image/')) {
-        container.append(
-          el('div', {}, [
-            el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `🖼️ ${escapeHtml(a.name)}`),
-            el('img', { src: a.data, alt: a.name, style: 'max-width:100%; border-radius:8px; display:block' }),
-          ])
-        );
-      } else if (mime === 'application/pdf') {
-        container.append(
-          el('div', {}, [
-            el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `📄 ${escapeHtml(a.name)}`),
-            // sandbox="": mime_type는 업로드 시 브라우저가 보고한 값을 그대로 믿으므로(서버 측
-            // 콘텐츠 검증 없음), 확장자/타입을 속여 올린 파일이 섞여 있어도 스크립트 실행 등은
-            // 전혀 할 수 없도록 모든 권한을 제거한 채로만 미리보기 렌더링한다(방어 심층화).
-            el('iframe', { src: a.data, sandbox: '', style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
-          ])
-        );
-      } else {
-        container.append(
-          el('div', { class: 'item-row' }, [
-            el('a', { class: 'item-row__main', href: a.data, download: a.name }, `📎 ${escapeHtml(a.name)} (다운로드)`),
-          ])
-        );
+      const isImg = mime.startsWith('image/');
+      const isPdf = mime === 'application/pdf';
+      if (!isImg && !isPdf) {
+        container.append(el('div', { class: 'item-row' }, [
+          downloadButton(a, 'item-row__main attach-item__name--btn', `📎 ${a.name} (다운로드 · ${formatSize(a.size)})`),
+        ]));
+        continue;
       }
+      // 이미지/PDF: 자리를 먼저 잡고, 본문은 이때 처음 불러온다("불러오는 중…" → 표시). 실패하면 다시 시도 버튼.
+      const slot = el('div', { class: 'attach-preview', 'data-attachment-id': a.id }, [
+        el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `${isImg ? '🖼️' : '📄'} ${a.name} · ${formatSize(a.size)}`),
+      ]);
+      const status = el('div', { class: 'text-muted attach-preview__status', style: 'font-size:12px' }, '⏳ 불러오는 중…');
+      slot.append(status);
+      container.append(slot);
+      const load = () => {
+        status.textContent = '⏳ 불러오는 중…';
+        appState.getAttachmentData(a.id).then((dataUrl) => {
+          const url = URL.createObjectURL(window.dataUrlToBlob(dataUrl));
+          status.remove();
+          if (isImg) {
+            slot.append(el('img', { src: url, alt: a.name, style: 'max-width:100%; border-radius:8px; display:block' }));
+          } else {
+            // sandbox="": mime_type는 업로드 시 브라우저가 보고한 값을 그대로 믿으므로(서버 측 콘텐츠 검증 없음),
+            // 확장자/타입을 속여 올린 파일이 섞여 있어도 스크립트 실행 등은 전혀 할 수 없도록 모든 권한을 제거한 채로만 렌더링한다.
+            slot.append(
+              el('iframe', { src: url, sandbox: '', title: a.name, style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
+              downloadButton(a, 'nm-btn attach-item__name--btn', '⬇ 다운로드')
+            );
+          }
+        }).catch((e) => {
+          status.textContent = '';
+          status.append(`불러오지 못했습니다(${e.message || '오류'}) `, el('button', { type: 'button', class: 'nm-btn', onclick: load }, '다시 시도'));
+        });
+      };
+      load();
     }
   }
 

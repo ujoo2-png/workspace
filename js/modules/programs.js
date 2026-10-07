@@ -139,6 +139,41 @@
       });
     }
 
+    // ---- 상태 점(best-effort, 참고용) ----
+    // 브라우저는 다른 사이트의 응답 상태코드를 CORS 때문에 읽을 수 없다. 그래서 `mode:'no-cors'` GET이
+    // "응답이 돌아왔는지(네트워크 도달 여부)"만 확인하며, 404/500이어도 초록으로 보일 수 있다. 라벨에 그렇게 적는다.
+    // 자동으로 요청을 보내지 않고 사용자가 "상태 확인"을 눌렀을 때만 보낸다(개인 URL을 몰래 호출하지 않기 위함).
+    const pingResults = window.__programPing || (window.__programPing = new Map()); // id -> {state, at, ms}
+    async function pingOne(p) {
+      pingResults.set(p.id, { state: 'checking', at: Date.now() });
+      let state = 'unknown'; let ms = null;
+      try {
+        if (location.protocol === 'https:' && /^http:\/\//i.test(p.url)) throw Object.assign(new Error('mixed'), { mixed: true });
+        const t0 = performance.now();
+        await fetch(p.url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(6000) });
+        ms = Math.round(performance.now() - t0);
+        state = 'up';
+      } catch (e) {
+        state = e && e.mixed ? 'unknown' : 'down';
+      }
+      pingResults.set(p.id, { state, at: Date.now(), ms });
+    }
+    async function pingAll(rows) {
+      await Promise.all(rows.map(pingOne).map((pr) => pr.then(() => draw())));
+      draw();
+    }
+    function healthDot(p) {
+      const r = pingResults.get(p.id);
+      const state = r ? r.state : 'none';
+      const label = { none: '아직 확인 안 함(🩺 상태 확인)', checking: '확인 중…', up: `응답함${r && r.ms != null ? ` (${r.ms}ms)` : ''} — 상태코드는 확인할 수 없는 참고용`, down: '응답 없음(주소 오류·서버 중지·CORS/네트워크 차단일 수 있음)', unknown: 'https 페이지에서 http 주소는 확인할 수 없습니다' }[state];
+      return el('span', { class: `health-dot health-dot--${state === 'up' ? 'up' : state === 'down' ? 'down' : state === 'unknown' ? 'unknown' : 'none'}`, role: 'img', 'aria-label': label, title: label, 'data-ping': state });
+    }
+    function deployBadge(p) {
+      const b = window.deployedBadge(p.pipeline, todayISO());
+      if (!b) return null;
+      return el('div', { style: 'margin-top:2px' }, [el('span', { class: `nm-badge ${b.stale ? 'nm-badge--warning' : 'nm-badge--success'}`, style: 'font-size:11px; padding:1px 8px', title: `마지막 배포일: ${window.lastDeployedDate(p.pipeline)}` }, `🚀 ${b.text}`)]);
+    }
+
     // ================= 프로그램(리스트 뷰) =================
     function programsSection() {
       let rows = appState.programs.slice();
@@ -166,6 +201,11 @@
             class: 'nm-input program-search-input', style: 'max-width:240px', placeholder: '검색(이름/URL)', value: programQuery,
             oninput: (e) => { const pos = e.target.selectionStart; programQuery = e.target.value; draw(); restoreFocus('.program-search-input', pos); },
           }),
+          el('button', {
+            class: 'nm-btn', id: 'program-ping-all',
+            title: '각 프로그램 URL이 응답하는지 확인합니다(브라우저 제약상 상태코드는 볼 수 없는 "응답 여부"만 확인 — 참고용)',
+            onclick: () => pingAll(rows),
+          }, '🩺 상태 확인'),
         ])
       );
       wrap.append(bulkBar(rows, selectedPrograms, async (ids) => {
@@ -215,13 +255,15 @@
             el('td', {}, String(idx + 1)),
             el('td', {}, [
               el('div', { style: 'font-weight:700; display:flex; align-items:center; gap:6px' }, [
-                el('span', {}, p.icon || '🔗'),
+                el('span', { class: 'program-icon', 'data-program-icon': p.id }, window.programIcon(p)),
                 escapeHtml(p.name),
                 el('span', { class: 'nm-badge' }, TYPE_LABEL[p.program_type] || p.program_type || '웹앱'),
               ]),
+              deployBadge(p),
               project ? el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:2px' }, `📁 ${escapeHtml(project.name)}`) : null,
             ]),
             el('td', { style: 'max-width:220px; overflow:hidden; text-overflow:ellipsis' }, [
+              healthDot(p),
               el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, p.url),
             ]),
             el('td', {}, escapeHtml(devTool)),
@@ -261,7 +303,7 @@
     function openDetailModal(p, closePrev) {
       if (closePrev) closePrev();
       const closeThis = openModal({
-        title: `${p.icon || '🔗'} ${p.name} — 상세`,
+        title: `${window.programIcon(p)} ${p.name} — 상세`,
         contentBuilder(body) {
           const pipeline = p.pipeline || {};
           const flow = el('div', { class: 'program-flow' });
@@ -344,9 +386,9 @@
       openModal({
         title: existing ? '프로그램 수정' : '프로그램 등록',
         contentBuilder(body, close) {
-          const form = el('form', { class: 'stack' });
+          const form = el('form', { class: 'stack', novalidate: true });
 
-          const typeSelect = el('select', { class: 'nm-select', name: 'program_type' });
+          const typeSelect = el('select', { class: 'nm-select', name: 'program_type', required: true });
           for (const [value, label] of Object.entries(TYPE_LABEL)) typeSelect.append(el('option', { value }, label));
           typeSelect.value = existing?.program_type || 'web';
 
@@ -356,11 +398,34 @@
           ]);
           projectSelect.value = existing?.project_id || '';
 
+          // 원인(v7.21.0 수정): 예전 URL 칸은 type="url"+required라 "example.com/widget"처럼 스킴 없이 적으면
+          // 브라우저 기본 검증이 막았고, 막혔다는 안내도 작은 말풍선뿐이었다. 또 저장 실패(DB 제약 등)는 예외가 삼켜져
+          // 아무 반응이 없었다. 이제는 스킴이 없으면 https://를 붙여 주고, 오류는 칸 아래에 문장으로 보여 주며 포커스를 옮긴다.
+          const nameInput = el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '', autocomplete: 'off' });
+          const urlInput = el('input', { class: 'nm-input', type: 'text', inputmode: 'url', name: 'url', required: true, placeholder: 'https://…', value: existing?.url || '', autocomplete: 'off', spellcheck: 'false' });
+          const nameErr = el('div', { class: 'field-error', role: 'alert', hidden: true });
+          const urlErr = el('div', { class: 'field-error', role: 'alert', hidden: true });
+          const URL_HINTS = {
+            web: '웹앱이 열리는 주소. 예: https://my-app.vercel.app',
+            mobile: '앱 소개/배포(스토어·TestFlight·APK 다운로드) 페이지 주소',
+            widget: '위젯이 호스팅된 주소(배포 URL 또는 위젯을 보여주는 페이지). 예: https://my-widget.vercel.app',
+            web_mobile: '웹 버전 주소. 예: https://my-app.vercel.app',
+          };
+          const urlHint = el('div', { class: 'nm-field__hint text-muted', id: 'program-url-hint' }, URL_HINTS[typeSelect.value]);
+          const picker = window.createEmojiPicker({ value: existing?.icon || '', name: 'icon', getFallback: () => window.PROGRAM_TYPE_ICON[typeSelect.value] });
+          typeSelect.addEventListener('change', () => { urlHint.textContent = URL_HINTS[typeSelect.value]; picker.refresh(); });
+          function setErr(input, box, msg) {
+            box.hidden = !msg; box.textContent = msg || '';
+            if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+          }
+          nameInput.addEventListener('input', () => setErr(nameInput, nameErr, ''));
+          urlInput.addEventListener('input', () => setErr(urlInput, urlErr, ''));
+
           form.append(
-            field('이름', el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' })),
+            field('이름', nameInput), nameErr,
             field('유형', typeSelect),
-            field('URL', el('input', { class: 'nm-input', type: 'url', name: 'url', required: true, placeholder: 'https://…', value: existing?.url || '' })),
-            field('아이콘(이모지, 선택)', el('input', { class: 'nm-input', name: 'icon', maxlength: '2', value: existing?.icon || '' })),
+            field('URL', urlInput), urlHint, urlErr,
+            field('아이콘(이모지, 선택)', picker.node),
             field('연결된 프로젝트(선택)', projectSelect),
             field('설명(선택)', el('textarea', { class: 'nm-textarea', name: 'description' }, existing?.description || ''))
           );
@@ -437,6 +502,11 @@
           body.append(form, attachHost);
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            const check = window.validateProgramInput({ name: nameInput.value, url: urlInput.value, program_type: typeSelect.value });
+            setErr(nameInput, nameErr, check.errors.name);
+            setErr(urlInput, urlErr, check.errors.url);
+            if (!check.ok) { (check.errors.name ? nameInput : urlInput).focus(); return; }
+            urlInput.value = check.url; // 스킴을 붙여 준 값으로 보여 준다
             const fd = new FormData(form);
             const newPipeline = {};
             for (const stage of PIPELINE_STAGES) {
@@ -465,21 +535,23 @@
             }
 
             const data = {
-              name: fd.get('name'),
+              name: String(fd.get('name')).trim(),
               program_type: fd.get('program_type'),
-              url: fd.get('url'),
-              icon: fd.get('icon') || null,
+              url: check.url,
+              icon: window.normalizeEmoji(fd.get('icon'), 2) || null,
               project_id: fd.get('project_id') || null,
               description: fd.get('description') || null,
               pipeline: newPipeline,
               admin_id: fd.get('admin_id') || null,
               admin_password: adminPassword,
             };
-            if (existing) {
-              await appState.updateProgram(existing.id, data);
-              toast('저장했습니다.', 'success');
-              close();
-            } else {
+            submitBtn.disabled = true;
+            try {
+              if (existing) {
+                await appState.updateProgram(existing.id, data);
+                toast('저장했습니다.', 'success');
+                close();
+              } else {
               const row = await appState.addProgram(data);
               toast('저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
               Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
@@ -490,6 +562,13 @@
                 el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
               );
               window.renderAttachmentsPanel(attachHost.querySelector('#new-program-attach-box'), 'programs', row.id);
+              }
+            } catch (err) {
+              // 저장 실패를 삼키지 않는다 — DB 제약/네트워크 오류를 사용자가 읽을 수 있는 문장으로 보여 준다.
+              const msg = String(err && err.message || err);
+              if (/programs_url_check|check constraint|violates check/i.test(msg)) { setErr(urlInput, urlErr, 'URL은 http:// 또는 https://로 시작해야 합니다.'); urlInput.focus(); }
+              toast(`저장하지 못했습니다: ${msg}`, 'error');
+              submitBtn.disabled = false;
             }
           });
         },
@@ -668,10 +747,11 @@
         title: existing ? '즐겨찾기 수정' : '즐겨찾기 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
+          const bmPicker = window.createEmojiPicker({ value: existing?.icon || '', name: 'icon', getFallback: () => '⭐' });
           form.append(
             field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' })),
             field('URL', el('input', { class: 'nm-input', type: 'url', name: 'url', required: true, placeholder: 'https://…', value: existing?.url || '' })),
-            field('아이콘(이모지, 선택 — 비우면 자동으로 파비콘을 보여줍니다)', el('input', { class: 'nm-input', name: 'icon', maxlength: '2', value: existing?.icon || '' })),
+            field('아이콘(이모지, 선택 — 비우면 ⭐ 기본 아이콘)', bmPicker.node),
             field('분류(선택)', el('input', { class: 'nm-input', name: 'category', placeholder: '예: 업무, 참고', value: existing?.category || '' }))
           );
           form.append(el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'));
@@ -681,7 +761,7 @@
             const data = {
               title: fd.get('title'),
               url: fd.get('url'),
-              icon: fd.get('icon') || null,
+              icon: window.normalizeEmoji(fd.get('icon'), 2) || null,
               category: fd.get('category') || null,
             };
             if (existing) await appState.updateBookmark(existing.id, data);

@@ -72,6 +72,17 @@
         container.append(el('div', { class: 'empty-state' }, '아직 수집된 항목이 없습니다. 관심주제·피드 소스를 등록한 뒤 "지금 가져오기"를 눌러보세요.'));
         return;
       }
+      const buildMd = (onlyUnread) => window.briefingToMarkdown(rows, { topics: appState.briefingTopics, sources: appState.feedSources, date: new Date().toLocaleDateString('sv-SE'), onlyUnread });
+      container.append(el('div', { class: 'row wrap', style: 'margin-bottom:10px; gap:8px' }, [
+        el('button', { class: 'nm-btn', title: '안 읽은 항목을 관심주제별 마크다운으로 복사', onclick: async () => {
+          try { await navigator.clipboard.writeText(buildMd(true)); toast('안 읽은 항목을 마크다운으로 복사했습니다.', 'success'); }
+          catch { toast('복사하지 못했습니다. ".md 저장"을 사용해 주세요.', 'error'); }
+        } }, '📋 마크다운 복사'),
+        el('button', { class: 'nm-btn', title: '전체 목록을 .md 파일로 저장', onclick: () => {
+          const a = el('a', { href: URL.createObjectURL(new Blob([buildMd(false)], { type: 'text/markdown;charset=utf-8' })), download: `briefing-${new Date().toLocaleDateString('sv-SE')}.md` });
+          document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        } }, '⬇ .md 저장'),
+      ]));
       const list = el('div', { class: 'item-list' });
       for (const item of rows) {
         const topic = appState.briefingTopics.find((t) => t.id === item.topic_id);

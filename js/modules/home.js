@@ -12,9 +12,11 @@
   const WIDGET_LABELS = {
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
-    recent: '🕘 최근 본 항목', knowledge: '📚 최근 Knowledge',
+    recent: '🕘 최근 본 항목', programs: '🧩 내 프로그램', knowledge: '📚 최근 Knowledge', dday: '📆 D-day',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
+  // 시계 셀별로 "직전에 보여 준 테마"를 기억해 홈이 다시 그려져도 배경이 끊기지 않고 크로스페이드되게 한다.
+  const wxShown = new Map(); // zoneId -> theme
 
   function getHomeWidgetOrder() {
     try {
@@ -36,6 +38,7 @@
   }
 
   function renderHome(root) {
+    kpiLast.clear(); // 홈에 들어올 때마다 숫자가 0부터 올라가도록
     const container = el('div', {});
     root.append(container);
     let weatherState = { loading: true, data: null };
@@ -73,14 +76,25 @@
 
     // 대한민국(기본) + 최대 2개까지 추가 가능한 여러 도시 시계. 매초 텍스트만 갱신하고
     // (홈 화면 전체를 매초 다시 그리지 않도록) 셀 DOM 참조를 클로저에 보관해 재사용한다.
+    // v7.21.0: 각 시계 셀은 "연결 도시"의 날씨(배경 그라디언트/애니메이션 아이콘/입자/"인천 · 오전 비 · 강수확률 70%")를 보여 준다.
     let clockCells = [];
+    const clockWx = new Map(); // zoneId -> { city, theme, loading, failed }
+    function wxLineContent(z) {
+      const st = clockWx.get(z.id);
+      if (!st || st.loading) return [el('span', { class: 'skel wx-skel', 'aria-label': '날씨 불러오는 중' })];
+      if (!st.theme) return [el('span', { class: 'text-muted wx-line__text', style: 'font-size:11px' }, st.city ? `${st.city.name} · 날씨 정보 없음` : '연결 도시 없음')];
+      return [
+        window.WeatherFx.weatherIcon(st.theme.condition, st.theme.isNight, 28, window.WeatherFx.toneOf(st.theme)),
+        el('span', { class: 'wx-line__text', 'data-wx-caption': '' }, `${st.city.name} · ${st.theme.caption}`),
+      ];
+    }
     function clockCard() {
       const zones = window.getClockZones();
       clockCells = [];
       const card = el('div', { class: 'nm-card clock-card', style: 'margin-bottom:16px' }, [
         el('div', { class: 'row row--between' }, [
           el('h3', {}, '🕒 시계'),
-          el('button', { class: 'nm-btn nm-btn--icon', title: '시계 설정(최대 3개 지역)', onclick: openClockSettings }, '⚙️'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '시계 설정(지역·연결 도시)', onclick: openClockSettings }, '⚙️'),
         ]),
       ]);
       const grid = el('div', { class: 'clock-grid', style: 'margin-top:8px' });
@@ -88,14 +102,29 @@
         const { time, date } = window.formatZoneTime(z.id);
         const timeEl = el('div', { style: 'font-size:22px; font-weight:800; font-variant-numeric:tabular-nums' }, time);
         const dateEl = el('div', { class: 'text-muted', style: 'font-size:11px' }, date);
-        clockCells.push({ zone: z, timeEl, dateEl });
-        grid.append(
-          el('div', { class: 'clock-grid__cell' }, [
+        const lineEl = el('div', { class: 'wx-line' }, wxLineContent(z));
+        const layers = window.WeatherFx.createLayers();
+        const cell = el('div', { class: 'clock-grid__cell wx-cell', 'data-zone': z.id }, [
+          layers.bg, layers.fx,
+          el('div', { class: 'wx-content' }, [
             el('div', { class: 'text-muted', style: 'font-size:12px' }, z.label),
             timeEl,
             dateEl,
-          ])
-        );
+            lineEl,
+          ]),
+        ]);
+        // 마우스 위치에 따라 해/구름이 아주 조금 따라 움직이는 패럴랙스(transform 계열 translate만)
+        cell.addEventListener('pointermove', (e) => {
+          if (!window.HomeFx.motionOn()) return;
+          const r = cell.getBoundingClientRect();
+          cell.style.setProperty('--px', `${(((e.clientX - r.left) / r.width) - 0.5) * 10}px`);
+          cell.style.setProperty('--py', `${(((e.clientY - r.top) / r.height) - 0.5) * 6}px`);
+        });
+        cell.addEventListener('pointerleave', () => { cell.style.setProperty('--px', '0px'); cell.style.setProperty('--py', '0px'); });
+        clockCells.push({ zone: z, timeEl, dateEl, lineEl, cell });
+        grid.append(cell);
+        const st = clockWx.get(z.id);
+        if (st && st.theme) window.WeatherFx.applyTheme(cell, st.theme, wxShown.get(z.id) || null, z.id);
       }
       card.append(grid);
       return card;
@@ -106,6 +135,43 @@
         const { time, date } = window.formatZoneTime(zone.id);
         timeEl.textContent = time;
         dateEl.textContent = date;
+      }
+      const hc = container.querySelector('[data-hero-clock]');
+      if (hc) hc.textContent = window.formatZoneTime('Asia/Seoul').time;
+    }
+
+    // 연결 도시의 예보를 가져와(번들 캐시 공유 — 날씨 위젯과 중복 호출 없음) 셀을 제자리에서 갱신한다(홈 전체를 다시 그리지 않는다).
+    async function loadClockWeather() {
+      const zones = window.getClockZones();
+      let anyLoading = false;
+      for (const z of zones) {
+        const city = window.resolveClockCity(z.id);
+        const prev = clockWx.get(z.id);
+        const sameCity = prev && prev.city && city && prev.city.name === city.name;
+        if (!sameCity || !prev.theme) { clockWx.set(z.id, { city, theme: prev ? prev.theme : null, loading: true }); anyLoading = true; }
+      }
+      if (anyLoading) paintClockWeather();
+      await Promise.all(zones.map(async (z) => {
+        const city = window.resolveClockCity(z.id);
+        if (!city) { clockWx.set(z.id, { city: null, theme: null, loading: false }); return; }
+        const r = await window.fetchThemeForecast(city).catch(() => null);
+        const theme = r ? window.weatherTheme(r.day, r.hour) : null;
+        clockWx.set(z.id, { city, theme, loading: false, source: r ? r.source : null });
+      }));
+      paintClockWeather();
+    }
+    function paintClockWeather() {
+      for (const c of clockCells) {
+        const st = clockWx.get(c.zone.id);
+        c.lineEl.replaceChildren(...wxLineContent(c.zone));
+        if (st && st.theme) {
+          window.WeatherFx.applyTheme(c.cell, st.theme, wxShown.get(c.zone.id) || null, c.zone.id);
+          wxShown.set(c.zone.id, st.theme);
+          c.cell.title = `${st.city.name} 날씨(${st.source === 'kma' ? '기상청' : 'Open-Meteo'}) · ${st.theme.caption}`;
+        } else if (st) {
+          window.WeatherFx.applyTheme(c.cell, null, null);
+          wxShown.delete(c.zone.id);
+        }
       }
     }
 
@@ -121,7 +187,20 @@
             zones.forEach((z, idx) => {
               list.append(
                 el('div', { class: 'item-row' }, [
-                  el('div', { class: 'item-row__main' }, [el('div', { class: 'item-row__title' }, z.label)]),
+                  el('div', { class: 'item-row__main' }, [
+                    el('div', { class: 'item-row__title' }, z.label),
+                    el('label', { class: 'row', style: 'gap:6px; align-items:center; font-size:12px; margin-top:4px' }, [
+                      el('span', { class: 'text-muted' }, '연결 도시(날씨)'),
+                      (() => {
+                        const cur = window.resolveClockCity(z.id);
+                        const sel = el('select', { class: 'nm-select clock-city-select', 'data-zone': z.id, style: 'max-width:160px; padding:4px 8px' },
+                          window.clockCityOptions().map((c) => el('option', { value: c.name }, c.name)));
+                        if (cur) sel.value = cur.name;
+                        sel.addEventListener('change', () => { window.setClockCity(z.id, sel.value); loadClockWeather(); });
+                        return sel;
+                      })(),
+                    ]),
+                  ]),
                   idx === 0
                     ? el('span', { class: 'nm-badge' }, '기본')
                     : el('button', {
@@ -256,9 +335,20 @@
       ]);
     }
 
+    // 입장 애니메이션은 "처음 몇 초"만: 그 사이 데이터가 도착해 홈이 다시 그려져도 애니메이션이 처음부터 다시 시작(깜빡임)하지 않고
+    // 경과 시간만큼 건너뛴 채 이어서 재생된다. 이후의 다시 그리기(알림 읽음 등)에는 입장 효과가 없다.
+    let enterStart = null;
+    const kpiPrev = new Map(); // 라벨 -> 마지막으로 표시한 숫자(변할 때만 count-up)
     function draw() {
+      window.HomeFx.applyFxClass();
       container.innerHTML = '';
       const CONFIG = window.CONFIG;
+      if (enterStart === null) enterStart = performance.now();
+      const enterElapsed = performance.now() - enterStart;
+      const entering = window.HomeFx.motionOn() && enterElapsed < 1400;
+      container.classList.toggle('fx-enter', entering);
+      drawEntering = entering;
+      container.style.setProperty('--enter-skip', `${Number.isFinite(enterElapsed) ? Math.round(enterElapsed) : 0}ms`);
       const today = todayISO();
       const todaySchedules = appState.schedules.filter((s) => s.date === today);
       const dueProjects = appState.projects.filter(
@@ -269,20 +359,29 @@
       container.append(
         el('div', { class: 'page-header' }, [
           el('h1', {}, '홈'),
-          el('button', { class: 'nm-btn nm-btn--primary', onclick: () => navigate('/schedule') }, '+ 빠른 등록'),
+          el('div', { class: 'row', style: 'gap:8px' }, [
+            el('button', { class: 'nm-btn', id: 'home-presentation-btn', title: '전체 화면 자동 순환 대시보드(Esc로 종료)', onclick: openPresentation }, '🖥 프레젠테이션'),
+            el('button', { class: 'nm-btn nm-btn--primary', onclick: () => navigate('/schedule') }, '+ 빠른 등록'),
+          ]),
         ])
       );
 
+      container.append(heroCard());
       container.append(integrationStatusBar());
 
       const widgets = {};
       widgets.clock = clockCard();
 
+      // KPI: 숫자 count-up + 최근/향후 7일 스파크라인(오늘 일정·마감·알림) + 진행 링(진행 중 프로젝트 평균 진행률)
+      const lastDays = Array.from({ length: 7 }, (_, i) => window.addDays(today, i - 6));
+      const nextDays = Array.from({ length: 7 }, (_, i) => window.addDays(today, i));
+      const activeProjects = appState.projects.filter((p) => p.status === 'in_progress');
+      const avgProgress = activeProjects.length ? Math.round(activeProjects.reduce((sum, p) => { const rows = (appState.progressByProject[p.id] || []).slice().sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1)); return sum + (rows.length ? Number(rows[rows.length - 1].progress) || 0 : 0); }, 0) / activeProjects.length) : 0;
       widgets.kpi = el('div', { class: 'kpi-grid' }, [
-        kpi(todaySchedules.length, '오늘 일정', () => navigate('/schedule')),
-        kpi(dueProjects.length, 'D-7 이내 마감', () => navigate('/projects')),
-        kpi(unread.length, '안 읽은 알림', () => document.getElementById('home-noti-card')?.scrollIntoView({ behavior: 'smooth' })),
-        kpi(appState.projects.filter((p) => p.status === 'in_progress').length, '진행 중 프로젝트', () => navigate('/projects')),
+        kpi(todaySchedules.length, '오늘 일정', () => navigate('/schedule'), { spark: window.HomeFx.countsByDay(appState.schedules, 'date', lastDays), sparkTitle: '최근 7일 일정 수' }),
+        kpi(dueProjects.length, 'D-7 이내 마감', () => navigate('/projects'), { spark: window.HomeFx.countsByDay(appState.projects.filter((p) => p.status === 'in_progress'), 'deadline', nextDays), sparkTitle: '앞으로 7일 마감 수' }),
+        kpi(unread.length, '안 읽은 알림', () => document.getElementById('home-noti-card')?.scrollIntoView({ behavior: 'smooth' }), { spark: window.HomeFx.countsByDay(appState.notifications, 'created_at', lastDays), sparkTitle: '최근 7일 알림 수' }),
+        kpi(activeProjects.length, '진행 중 프로젝트', () => navigate('/projects'), { ring: avgProgress, ringTitle: `평균 진행률 ${avgProgress}%` }),
       ]);
 
       // 오늘의 날씨 (등록된 지역, 기본 3 / 최대 5 — 관리는 설정 화면에서)
@@ -296,7 +395,8 @@
         ]),
       ]);
       if (weatherState.loading) {
-        weatherCard.append(el('div', { class: 'text-muted', style: 'margin-top:4px' }, '날씨 정보를 불러오는 중…'));
+        weatherCard.append(el('div', { class: 'weather-grid', style: 'margin-top:8px', role: 'status', 'aria-label': '날씨 정보를 불러오는 중' },
+          Array.from({ length: Math.min(3, window.getWeatherCities().length) }, () => el('div', { class: 'weather-grid__cell' }, [el('div', { class: 'skel', style: 'height:12px; width:40%' }), el('div', { class: 'skel', style: 'height:22px; width:70%; margin-top:8px' })]))));
       } else {
         const cities = window.getWeatherCities();
         const grid = el('div', { class: 'weather-grid', style: 'margin-top:8px' });
@@ -358,14 +458,33 @@
       const weekly = appState.getWeeklyActivitySummary();
       const summaryCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
         el('h3', {}, '이번 주 활동 요약'),
-        el('div', { class: 'kpi-grid', style: 'margin-top:8px' }, [
+        el('div', { class: 'kpi-grid', style: 'margin-top:8px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr))' }, [
           kpi(weekly.doneSchedules, '완료한 일정', () => navigate('/schedule')),
           kpi(weekly.exerciseSessions, '운동 기록', () => navigate('/health')),
           kpi(weekly.checkins, '챌린지 체크인', () => navigate('/challenges')),
-          kpi(weekly.weightDelta !== null ? `${weekly.weightDelta > 0 ? '+' : ''}${weekly.weightDelta}kg` : '-', '체중 변화', () => navigate('/health')),
-        ]),
+          kpi(weekly.weightDelta !== null ? weekly.weightDelta : '-', '체중 변화', () => navigate('/health'), weekly.weightDelta !== null ? { decimals: 1, signed: true, suffix: 'kg' } : {}),
+          // 가장 가까운 D-day(없으면 칸 자체를 빼서 기존 4칸 모양을 유지)
+          weekly.nextDday ? kpi(weekly.nextDday.text, `${weekly.nextDday.emoji ? weekly.nextDday.emoji + ' ' : ''}${weekly.nextDday.title}`, () => navigate('/challenges')) : null,
+        ].filter(Boolean)),
       ]);
       widgets.summary = summaryCard;
+
+      // D-day 위젯(챌린저 메뉴의 D-day 최대 5개를 홈에서도 한눈에). 카드를 누르면 챌린저 화면으로 이동한다.
+      if ((appState.ddays || []).length) {
+        const ddayList = el('div', { class: 'row wrap', style: 'gap:8px; margin-top:8px' });
+        for (const d of window.sortDdays(appState.ddays, today)) {
+          const info = window.ddayInfo(d.target_date, today, !!d.repeat_yearly);
+          ddayList.append(el('button', {
+            class: 'nm-btn home-dday', style: `border-left:4px solid ${d.color || 'var(--accent)'}`, 'data-dday-id': d.id,
+            title: `${window.formatKoreanDate(info.date)}${d.repeat_yearly ? ' · 매년 반복' : ''}`,
+            onclick: () => navigate('/challenges'),
+          }, [`${d.emoji || '🎯'} ${d.title} `, el('strong', { style: info.isPast ? 'opacity:.6' : '' }, info.text)]));
+        }
+        widgets.dday = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [el('h3', {}, '📆 D-day'), el('button', { class: 'nm-btn nm-btn--icon', title: '챌린저에서 관리', onclick: () => navigate('/challenges') }, '→')]),
+          ddayList,
+        ]);
+      }
 
       // 다음 7일 일정 밀집도 예측 (칸을 누르면 해당 날짜의 일정 화면으로 이동)
       const density = predictScheduleDensity(appState.schedules, today, 4);
@@ -373,6 +492,7 @@
         el('h3', {}, '다음 7일 일정 밀집도 예측'),
         el('p', { class: 'text-muted' }, '최근 4주 요일별 평균과 비교해 몰리는 날을 미리 보여줍니다. 칸을 누르면 일정 화면으로 이동합니다.'),
       ]);
+      const maxDensity = Math.max(1, ...density.map((x) => x.count));
       const row = el('div', { class: 'density-row' });
       for (const d of density) {
         row.append(
@@ -380,6 +500,7 @@
             el('div', { class: 'density-cell__day' }, weekdayLabel(d.date)),
             el('div', { class: 'density-cell__count' }, String(d.count)),
             el('div', { class: 'text-muted', style: 'font-size:10px' }, `평균 ${d.average}`),
+            window.HomeFx.bar(maxDensity ? d.count / maxDensity : 0, drawEntering),
           ])
         );
       }
@@ -480,11 +601,25 @@
                 if (item.type === 'program') appState.runProgram(item.id);
                 else if (item.type === 'bookmark') appState.openBookmark(item.id);
               },
-            }, item.label)
+            }, recentLabel(item))
           );
         }
         recentCard.append(list);
         widgets.recent = recentCard;
+      }
+
+      // 내 프로그램 바로 실행(v7.21.0): 프로그램 메뉴에서 저장한 아이콘(없으면 유형별 기본 아이콘)을 그대로 보여 준다.
+      const topPrograms = appState.programs.slice().sort((a, b) => (b.run_count || 0) - (a.run_count || 0)).slice(0, 8);
+      if (topPrograms.length) {
+        widgets.programs = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [
+            el('h3', {}, '🧩 내 프로그램'),
+            el('button', { class: 'nm-btn nm-btn--icon', title: '프로그램 화면에서 관리', onclick: () => navigate('/programs') }, '⚙️'),
+          ]),
+          el('div', { class: 'row wrap', style: 'gap:8px; margin-top:8px' }, topPrograms.map((p) => el('button', {
+            class: 'nm-btn home-program', 'data-program-id': p.id, title: `${p.name} 열기`, onclick: () => appState.runProgram(p.id),
+          }, [el('span', { class: 'program-icon' }, window.programIcon(p)), ` ${p.name}`]))),
+        ]);
       }
 
       // Knowledge 최근 등록 5건(1.2 — 지금까지 다른 메뉴와 전혀 연동되지 않던 Knowledge를
@@ -514,14 +649,131 @@
       }
 
       const order = getHomeWidgetOrder();
+      let wi = 0;
       for (const key of order) {
-        if (widgets[key]) container.append(makeDraggableWidget(key, widgets[key]));
+        if (!widgets[key]) continue;
+        const w = makeDraggableWidget(key, widgets[key]);
+        w.style.setProperty('--i', String(wi++));
+        container.append(w);
       }
+    }
+
+    function recentLabel(item) {
+      if (item.type === 'program') {
+        const p = appState.programs.find((x) => x.id === item.id);
+        if (p) return `${window.programIcon(p)} ${p.name}`; // 아이콘을 나중에 바꿔도 최신 값으로
+      }
+      return item.label;
+    }
+
+    // ---- 인사 헤더(시간대 테마) ----
+    function heroCard() {
+      const hour = new Date().getHours();
+      const part = window.WEATHER_THEME.dayPartOf(hour);
+      const stops = window.WEATHER_THEME.PALETTES.clear[part];
+      const text = window.WEATHER_THEME.pickTextColor(stops);
+      const greet = hour < 5 ? '늦은 시간이에요' : hour < 11 ? '좋은 아침이에요' : hour < 18 ? '좋은 오후예요' : '수고 많으셨어요';
+      const name = appState.user?.name || appState.user?.email?.split('@')[0] || '';
+      const today = todayISO();
+      const left = appState.schedules.filter((s) => s.date === today && !s.done).length;
+      return el('div', {
+        class: 'home-hero', 'data-part': part, style: `background:${window.WeatherFx.gradientCss(stops)}; color:${text.color}; --i:0`,
+      }, [
+        el('div', {}, [
+          el('p', { class: 'home-hero__greet' }, `${greet}${name ? `, ${name}` : ''}`),
+          el('div', { class: 'home-hero__sub' }, `${window.formatKoreanDate(today)} · ${left ? `남은 일정 ${left}건` : '오늘 남은 일정이 없어요'}`),
+        ]),
+        el('div', { class: 'home-hero__clock', 'data-hero-clock': '', 'aria-label': '현재 시각' }, window.formatZoneTime('Asia/Seoul').time),
+      ]);
+    }
+
+    // ---- 프레젠테이션 모드(월 디스플레이) ----
+    function openPresentation() {
+      const today = todayISO();
+      const slides = [];
+      slides.push({
+        id: 'clock', title: '시계 · 날씨',
+        render(n) {
+          n.append(el('h2', {}, '🕒 지금'));
+          const grid = el('div', { class: 'pres__clocks' });
+          for (const z of window.getClockZones()) {
+            const st = clockWx.get(z.id);
+            const layers = window.WeatherFx.createLayers();
+            const cell = el('div', { class: 'pres__clock wx-cell', 'data-zone': z.id }, [layers.bg, layers.fx, el('div', { class: 'wx-content' }, [
+              el('div', { class: 'pres__label' }, z.label),
+              el('div', { class: 'pres__time', 'data-pres-time': z.id }, window.formatZoneTime(z.id).time),
+              el('div', { class: 'pres__label' }, window.formatZoneTime(z.id).date),
+              el('div', { class: 'wx-line' }, st && st.theme ? [window.WeatherFx.weatherIcon(st.theme.condition, st.theme.isNight, 34, window.WeatherFx.toneOf(st.theme)), el('span', { class: 'wx-line__text' }, `${st.city.name} · ${st.theme.caption}`)] : []),
+            ])]);
+            grid.append(cell);
+            if (st && st.theme) window.WeatherFx.applyTheme(cell, st.theme, null, `pres-${z.id}`);
+          }
+          n.append(grid);
+        },
+        tick(n) { n.querySelectorAll('[data-pres-time]').forEach((t) => { t.textContent = window.formatZoneTime(t.dataset.presTime).time; }); },
+      });
+      slides.push({
+        id: 'kpi', title: '요약 지표',
+        render(n) {
+          const todayList = appState.schedules.filter((s) => s.date === today);
+          const due = appState.projects.filter((p) => p.status === 'in_progress' && p.deadline && diffDays(today, p.deadline) <= 7 && diffDays(today, p.deadline) >= 0);
+          const unreadN = appState.notifications.filter((x) => !x.is_read).length;
+          const active = appState.projects.filter((p) => p.status === 'in_progress').length;
+          n.append(el('h2', {}, '📌 오늘의 숫자'));
+          const box = el('div', { class: 'pres__kpis' });
+          for (const [v, label] of [[todayList.length, '오늘 일정'], [due.length, 'D-7 이내 마감'], [unreadN, '안 읽은 알림'], [active, '진행 중 프로젝트']]) {
+            const b = el('b', {}, '0');
+            box.append(el('div', { class: 'pres__kpi' }, [b, el('span', {}, label)]));
+            window.HomeFx.countUp(b, v, { duration: 1100 });
+          }
+          n.append(box);
+        },
+      });
+      slides.push({
+        id: 'today', title: '오늘 일정',
+        render(n) {
+          n.append(el('h2', {}, `📅 오늘 일정 · ${window.formatKoreanDate(today)}`));
+          const list = appState.schedules.filter((s) => s.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || '')).slice(0, 7);
+          if (!list.length) { n.append(el('div', { class: 'pres__empty' }, '오늘 등록된 일정이 없습니다.')); return; }
+          n.append(el('div', { class: 'pres__list' }, list.map((s) => el('div', {}, [el('time', {}, s.time ? s.time.slice(0, 5) : '종일'), el('span', { style: s.done ? 'text-decoration:line-through; opacity:.6' : '' }, s.title)]))));
+        },
+      });
+      if ((appState.ddays || []).length) {
+        slides.push({
+          id: 'dday', title: 'D-day',
+          render(n) {
+            n.append(el('h2', {}, '📆 D-day'));
+            const box = el('div', { class: 'pres__dday' });
+            for (const d of window.sortDdays(appState.ddays, today).slice(0, 4)) {
+              const info = window.ddayInfo(d.target_date, today, !!d.repeat_yearly);
+              box.append(el('div', {}, [el('b', {}, info.text), `${d.emoji || '🎯'} ${d.title}`]));
+            }
+            n.append(box);
+          },
+        });
+      }
+      slides.push({
+        id: 'week', title: '이번 주',
+        render(n) {
+          const w = appState.getWeeklyActivitySummary();
+          n.append(el('h2', {}, '🗓 이번 주 활동'));
+          const box = el('div', { class: 'pres__kpis' });
+          for (const [v, label] of [[w.doneSchedules, '완료한 일정'], [w.exerciseSessions, '운동 기록'], [w.checkins, '챌린지 체크인']]) {
+            const b = el('b', {}, '0');
+            box.append(el('div', { class: 'pres__kpi' }, [b, el('span', {}, label)]));
+            window.HomeFx.countUp(b, v, { duration: 1000 });
+          }
+          n.append(box);
+        },
+      });
+      const btn = container.querySelector('#home-presentation-btn');
+      if (btn) btn.setAttribute('aria-pressed', 'true');
+      window.HomeFx.startPresentation({ slides, onExit: () => { const b = container.querySelector('#home-presentation-btn'); if (b) b.setAttribute('aria-pressed', 'false'); } });
     }
 
     // 위젯을 드래그로 순서를 바꿀 수 있게 감싼다. 순서는 즉시 저장되고 다시 그려진다.
     function makeDraggableWidget(key, node) {
-      const wrapper = el('div', { class: 'home-widget', draggable: 'true' }, [
+      const wrapper = el('div', { class: 'home-widget', draggable: 'true', 'data-flip-key': key, 'data-widget-key': key }, [
         el('span', { class: 'home-widget__handle', title: '드래그해서 위젯 순서 바꾸기' }, '⠿'),
         node,
       ]);
@@ -548,28 +800,55 @@
         order.splice(from, 1);
         order.splice(to, 0, draggedKey);
         setHomeWidgetOrder(order);
-        draw();
+        // FLIP: 다시 그리기 전/후 위치 차이를 transform 애니메이션으로 메워 부드럽게 재정렬한다(입장 효과는 건너뜀).
+        container.classList.remove('fx-enter');
+        enterStart = -Infinity; // 재정렬 중 다시 그려져도 입장 애니메이션이 재생되지 않게
+        window.HomeFx.flip(container, () => { draw(); container.classList.remove('fx-enter'); });
       });
       return wrapper;
     }
 
     draw();
     loadWeather();
+    loadClockWeather();
     loadWeatherAlerts();
     checkSupabaseConnection();
     clockTimer = setInterval(tickClocks, 1000);
+    // 1분마다 시간대(오전→오후→저녁→밤)가 바뀌었는지 다시 계산한다(예보는 캐시 TTL 20분 안에서는 네트워크 요청 없음).
+    const wxTimer = setInterval(() => { if (!document.hidden) loadClockWeather(); }, 60000);
     appState.addEventListener('change', draw);
     return () => {
       appState.removeEventListener('change', draw);
       if (clockTimer) clearInterval(clockTimer);
+      clearInterval(wxTimer);
     };
   }
 
-  function kpi(value, label, onClick) {
+  // KPI 카드. opts: spark(7개 값), ring(0~100), decimals/signed/suffix(숫자 표시 형식). 숫자는 값이 바뀔 때만 count-up한다.
+  const kpiLast = new Map();
+  let drawEntering = false;
+  function kpi(value, label, onClick, opts = {}) {
+    const numeric = typeof value === 'number' && Number.isFinite(value);
+    const fmt = (n) => `${opts.signed && n > 0 ? '+' : ''}${(opts.decimals ? n.toFixed(opts.decimals) : String(Math.round(n)))}${opts.suffix || ''}`;
+    const valueEl = el('div', { class: 'kpi-card__value', 'data-kpi-value': String(value) }, numeric ? fmt(value) : String(value));
+    if (numeric) {
+      // 마지막으로 "실제로 화면에 보인" 값부터 이어서 올라간다 — 숫자가 올라가는 도중 홈이 다시 그려져도 0부터 다시 시작하지 않는다.
+      const prev = kpiLast.has(label) ? kpiLast.get(label) : 0;
+      const rec = (n) => { if (valueEl.isConnected) kpiLast.set(label, n); return fmt(n); };
+      if (prev !== value) { valueEl.textContent = fmt(prev); requestAnimationFrame(() => window.HomeFx.countUp(valueEl, value, { from: prev, format: rec })); }
+    }
+    const kids = [];
+    if (typeof opts.ring === 'number') {
+      kids.push(window.HomeFx.ring(opts.ring, valueEl, drawEntering));
+    } else {
+      kids.push(valueEl);
+    }
+    kids.push(el('div', { class: 'kpi-card__label' }, label));
+    if (opts.spark) { const sp = window.HomeFx.sparkline(opts.spark); const t = document.createElementNS('http://www.w3.org/2000/svg', 'title'); t.textContent = `${opts.sparkTitle || '추이'}: ${opts.spark.join(', ')}`; sp.prepend(t); sp.removeAttribute('aria-hidden'); sp.setAttribute('role', 'img'); kids.push(sp); }
     return el(
       'div',
-      { class: 'nm-card kpi-card', style: onClick ? 'cursor:pointer' : '', onclick: onClick || undefined, title: onClick ? `${label} 화면으로 이동` : undefined },
-      [el('div', { class: 'kpi-card__value' }, String(value)), el('div', { class: 'kpi-card__label' }, label)]
+      { class: 'nm-card kpi-card', style: onClick ? 'cursor:pointer' : '', onclick: onClick || undefined, title: onClick ? `${label} 화면으로 이동${opts.ringTitle ? ` · ${opts.ringTitle}` : ''}` : undefined },
+      kids
     );
   }
 

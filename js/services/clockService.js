@@ -55,6 +55,47 @@
     }
   }
 
+  // ---- 시계별 "연결 도시"(v7.21.0) — 시계 카드의 날씨 배경/아이콘/강수확률에 쓰는 도시 ----
+  // settingsSync로 기기 간 동기화되는 { [시간대 id]: 도시 이름 } 맵. 저장된 값이 없으면:
+  //   · 대한민국(기본) 시계 → 등록된 날씨 지역의 첫 번째 도시
+  //   · 그 밖 시계 → 같은 이름의 프리셋 도시(예: 뉴욕 시계 → 뉴욕)가 있으면 그 도시, 없으면 첫 번째 날씨 도시
+  const CLOCK_CITIES_KEY = 'workspace:clockCities';
+  const ZONE_DEFAULT_CITY = { 'America/New_York': '뉴욕', 'Europe/London': '런던', 'Europe/Paris': '파리', 'Asia/Tokyo': '도쿄', 'Asia/Singapore': '싱가포르' };
+  function getClockCityMap() {
+    try {
+      const raw = window.settingsSync.get(CLOCK_CITIES_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+  }
+  /** 연결 도시로 고를 수 있는 목록: 등록된 날씨 지역 + 프리셋(이름 중복 제거). */
+  function clockCityOptions() {
+    const seen = new Set();
+    const out = [];
+    for (const c of [...(window.getWeatherCities ? window.getWeatherCities() : []), ...((window.CONFIG && window.CONFIG.cityPresets) || [])]) {
+      if (!c || seen.has(c.name)) continue;
+      seen.add(c.name); out.push(c);
+    }
+    return out;
+  }
+  function resolveClockCity(zoneId) {
+    const options = clockCityOptions();
+    const stored = getClockCityMap()[zoneId];
+    const hit = stored && options.find((c) => c.name === stored);
+    if (hit) return hit;
+    const preferred = zoneId !== 'Asia/Seoul' && ZONE_DEFAULT_CITY[zoneId] && options.find((c) => c.name === ZONE_DEFAULT_CITY[zoneId]);
+    return preferred || (window.getWeatherCities ? window.getWeatherCities()[0] : options[0]) || null;
+  }
+  function setClockCity(zoneId, cityName) {
+    const map = { ...getClockCityMap() };
+    if (cityName) map[zoneId] = cityName; else delete map[zoneId];
+    window.settingsSync.set(CLOCK_CITIES_KEY, JSON.stringify(map));
+    return map;
+  }
+
+  window.clockCityOptions = clockCityOptions;
+  window.resolveClockCity = resolveClockCity;
+  window.setClockCity = setClockCity;
   window.CLOCK_ZONE_PRESETS = CLOCK_ZONE_PRESETS;
   window.CLOCK_MAX_EXTRA_ZONES = MAX_EXTRA_ZONES;
   window.getClockZones = getClockZones;

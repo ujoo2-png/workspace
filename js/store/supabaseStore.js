@@ -37,6 +37,8 @@
     'projects', 'schedules', 'programs', 'vehicles', 'playlist_items', 'knowledge_docs', 'devlogs',
     'career_education', 'career_certifications', 'career_trainings', 'career_memberships',
     'career_awards', 'career_experiences', 'career_photos',
+    'career_documents', // v7.22.0 (0025) — career_basic_info는 사용자당 1행이라 deleted_at 없음
+    'health_medications', // v7.19.0 (0023) — health_med_logs는 챌린지 체크인처럼 hard delete라 deleted_at 없음
   ]);
 
   class SupabaseStore {
@@ -175,9 +177,10 @@
     }
 
     // ---- 데이터 CRUD (RLS가 user_id를 강제하므로 여기서는 그대로 전달) ----
-    async list(table, { where, orderBy, ascending = true } = {}) {
+    // columns: 'a,b,c' — 큰 컬럼(첨부파일 base64 본문 등)을 빼고 가볍게 읽을 때 쓴다(기본 '*').
+    async list(table, { where, orderBy, ascending = true, columns } = {}) {
       const client = await this._ensureClient();
-      let q = client.from(table).select('*');
+      let q = client.from(table).select(columns || '*');
       if (TABLES_WITH_SOFT_DELETE.has(table)) q = q.is('deleted_at', null);
       if (where) for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
       if (orderBy) q = q.order(orderBy, { ascending });
@@ -193,9 +196,20 @@
       return data;
     }
 
-    async create(table, obj) {
+    // opts.columns: 응답으로 돌려받을 컬럼(첨부파일은 본문 base64를 다시 받지 않도록 메타 컬럼만 요청한다).
+    async create(table, obj, opts = {}) {
       const client = await this._ensureClient();
-      const { data, error } = await client.from(table).insert(obj).select().single();
+      const { data, error } = await client.from(table).insert(obj).select(opts.columns || '*').single();
+      if (error) throw error;
+      return data;
+    }
+
+    // 여러 행을 "한 번의 요청"으로 insert한다(PostgREST는 배열 insert를 한 문장=원자적으로 처리).
+    // 혈압 수축기/이완기처럼 한 번의 입력이 여러 행이 될 때 왕복 횟수를 줄이기 위한 것(v7.19.0).
+    async createMany(table, rows) {
+      if (!rows || !rows.length) return [];
+      const client = await this._ensureClient();
+      const { data, error } = await client.from(table).insert(rows).select();
       if (error) throw error;
       return data;
     }

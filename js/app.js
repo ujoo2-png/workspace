@@ -18,7 +18,7 @@
     { path: '/career', label: '이력/경력', icon: '📋' },
     { path: '/automation', label: 'Automation', icon: '🤖' },
     { path: '/integrations', label: 'Integrations', icon: '🔗' },
-    { path: '/analytics', label: 'Analytics', icon: '📊' },
+    { path: '/analytics', label: '리포트', icon: '📊' },
     { path: '/programs', label: '프로그램', icon: '🧩' },
     { path: '/settings', label: '설정', icon: '⚙️' },
   ];
@@ -79,6 +79,7 @@
 
     registerRoutes();
     window.startRouter();
+    if (window.startMedReminder) window.startMedReminder(); // 복약 시간 알림(앱이 열려 있을 때만)
     updateNavBadge();
     appState.addEventListener('change', updateNavBadge);
 

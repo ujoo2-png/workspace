@@ -5,7 +5,9 @@
   const CSV_EXPORTS = {
     schedules: { label: '일정', sensitive: false, columns: [
       { key: 'title', label: '제목' }, { key: 'date', label: '날짜' }, { key: 'time', label: '시간' },
+      { key: 'category', label: '구분', value: (r) => window.normalizeScheduleCategory(r.category) }, { key: 'place', label: '장소' },
       { key: 'done', label: '완료' }, { key: 'tags', label: '태그' }, { key: 'memo', label: '메모' },
+      { key: 'repeat_offsets', label: 'N일 후 반복' }, { key: 'offset_days', label: 'N일 후(자동 생성)' },
     ] },
     projects: { label: '프로젝트', sensitive: false, columns: [
       { key: 'name', label: '이름' }, { key: 'status', label: '상태' }, { key: 'priority', label: '우선순위' },
@@ -30,7 +32,7 @@
       { key: 'title', label: '제목' }, { key: 'url', label: 'URL' }, { key: 'tags', label: '태그' },
     ] },
     programs: { label: '프로그램', sensitive: false, columns: [
-      { key: 'name', label: '이름' }, { key: 'program_type', label: '유형' }, { key: 'url', label: 'URL' }, { key: 'run_count', label: '실행횟수' },
+      { key: 'icon', label: '아이콘' }, { key: 'name', label: '이름' }, { key: 'program_type', label: '유형' }, { key: 'url', label: 'URL' }, { key: 'run_count', label: '실행횟수' },
     ] },
     bookmarks: { label: '즐겨찾기', sensitive: false, columns: [
       { key: 'title', label: '제목' }, { key: 'url', label: 'URL' }, { key: 'category', label: '분류' },
@@ -101,6 +103,16 @@
             themeBtn('light', '라이트', theme),
             themeBtn('dark', '다크', theme),
           ]),
+        ]),
+        el('div', { class: 'nm-card' }, [
+          el('h3', {}, '화면 효과'),
+          el('p', { class: 'text-muted' }, '홈 화면의 입장 애니메이션·숫자 카운트업·날씨 배경 모션(빗방울/눈/구름)을 켜고 끕니다. 끄면 정지된 화면으로 보입니다. 운영체제의 "동작 줄이기" 설정이 켜져 있으면 이 설정과 관계없이 항상 정지 상태입니다. 기기 간 동기화됩니다.'),
+          (() => {
+            const cb = el('input', { type: 'checkbox', id: 'fx-toggle', checked: window.HomeFx.animationsEnabled() || undefined });
+            cb.addEventListener('change', () => { window.HomeFx.setAnimationsEnabled(cb.checked); toast(cb.checked ? '애니메이션 효과를 켰습니다.' : '애니메이션 효과를 껐습니다.', 'success'); });
+            return el('label', { class: 'row', style: 'gap:8px; align-items:center; cursor:pointer' }, [cb, el('span', {}, '홈 애니메이션 효과')]);
+          })(),
+          window.HomeFx.prefersReduced() ? el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, 'ℹ️ 이 기기는 "동작 줄이기"가 켜져 있어 효과가 항상 꺼져 있습니다.') : null,
         ]),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '데이터 내보내기'),
@@ -848,13 +860,28 @@
         el('strong', { style: 'font-size:13px' }, '📥 데이터 가져오기'),
         el('p', { class: 'text-muted', style: 'font-size:11px' },
           '다른 계정/모드에서 내보낸 백업(JSON) 파일을 현재 로그인한 계정으로 가져옵니다. ' +
-          '기존 데이터는 삭제되지 않고 추가됩니다.'),
+          '기존 데이터는 삭제되지 않고 추가됩니다. (이력/경력·양식 문서 매칭 값은 포함, 파일 첨부와 증명사진 이미지는 포함되지 않음)'),
         el('div', { class: 'row', style: 'gap:8px; margin-top:6px' }, [importBtn, fileInput]),
       ]);
     }
 
     function exportData() {
-      const payload = {
+      if (appState.careerBasic && !confirmDialog('이 백업 파일에는 기본정보(이름·생년월일·연락처·이메일·주소)가 평문으로 들어갑니다. 파일을 안전한 곳에만 보관하세요. 계속할까요?')) return;
+      const payload = buildExportPayload();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `workspace-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('내보내기가 완료되었습니다.', 'success');
+    }
+  }
+
+  // 전체 백업 JSON 본문을 만든다(순수에 가까운 함수 — 테스트에서 직접 호출). appState의 현재 메모리 상태를 그대로 담는다.
+  function buildExportPayload() {
+    const payload = {
         exportedAt: new Date().toISOString(),
         schedules: appState.schedules,
         projects: appState.projects,
@@ -874,20 +901,23 @@
         fuelLogsByVehicle: appState.fuelLogsByVehicle,
         healthMetrics: appState.healthMetrics,
         healthAppointments: appState.healthAppointments,
+        projectStages: appState.projectStages, // v7.20.0 — WBS 항목(부모/의존관계 포함)
+        ddays: appState.ddays, // v7.20.0
         playlistItems: appState.playlistItems,
         devlogs: appState.devlogs,
         knowledgeDocs: appState.knowledgeDocs,
         briefingTopics: appState.briefingTopics,
+        // v7.22.0 — 이력/경력(증명사진은 이미지 본문이 백업에 없어서 제외), 기본 인적사항(⚠️ 개인정보), 양식 문서(매칭 설정·편집 값; 파일 첨부는 제외)
+        careerEducation: appState.career.education,
+        careerCertifications: appState.career.certifications,
+        careerTrainings: appState.career.trainings,
+        careerMemberships: appState.career.memberships,
+        careerAwards: appState.career.awards,
+        careerExperiences: appState.career.experiences,
+        careerBasicInfo: appState.careerBasic ? [appState.careerBasic] : [],
+        careerDocuments: (appState.careerDocuments || []).map((d) => ({ ...d, template_attachment_id: null, finals: [] })),
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `workspace-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('내보내기가 완료되었습니다.', 'success');
-    }
+    return payload;
   }
 
   // ---- 📥 데이터 가져오기 (전체 백업 JSON → 현재 로그인한 계정/모드에 추가) ----
@@ -906,19 +936,30 @@
     devlogs: 'devlogs',
     knowledgeDocs: 'knowledge_docs',
     briefingTopics: 'briefing_topics',
+    ddays: 'ddays',
+    careerEducation: 'career_education',
+    careerCertifications: 'career_certifications',
+    careerTrainings: 'career_trainings',
+    careerMemberships: 'career_memberships',
+    careerAwards: 'career_awards',
+    careerExperiences: 'career_experiences',
+    careerDocuments: 'career_documents',
+    // careerBasicInfo는 사용자당 1행(unique)이라 아래에서 따로 병합한다.
   };
   const IMPORT_LABELS = {
     schedules: '일정', projects: '프로젝트', programs: '프로그램', notifications: '알림',
     challenges: '챌린지', checkinsByChallenge: '챌린지 체크인', vehicles: '차량',
     maintenanceByVehicle: '정비기록', fuelLogsByVehicle: '주유기록', healthMetrics: 'Health 기록',
     healthAppointments: '병원/검진 일정', playlistItems: '문화생활', devlogs: 'Devlog',
-    knowledgeDocs: 'Knowledge', briefingTopics: '관심주제',
+    knowledgeDocs: 'Knowledge', briefingTopics: '관심주제', projectStages: '프로젝트 WBS 항목', ddays: 'D-day',
+    careerEducation: '학력', careerCertifications: '자격증', careerTrainings: '교육이수', careerMemberships: '가입단체', careerAwards: '포상', careerExperiences: '경력',
+    careerBasicInfo: '기본정보', careerDocuments: '양식 문서',
   };
   // 새로 생성될 때 스토어가 직접 채워야 하는 필드. 옛 id를 그대로 밀어넣으면
   // localStore.create()는 `{ id: uid(), ...obj }` 순서상 obj.id가 그걸 덮어써 버리고
   // (= 새 id가 아예 생성되지 않고), supabaseStore는 이미 쓰인 PK라 충돌할 수 있다.
   // user_id/created_at/updated_at/deleted_at도 가져오는 시점에 새로 채워져야 하는 값이다.
-  const IMPORT_RESERVED_FIELDS = ['id', 'created_at', 'updated_at', 'deleted_at', 'user_id'];
+  const IMPORT_RESERVED_FIELDS = ['id', 'created_at', 'updated_at', 'deleted_at', 'user_id', '_pending'];
 
   // 레코드에서 시스템 필드(+ 호출부가 지정한 추가 필드)를 제거한 새 객체를 반환하는 순수 함수.
   function sanitizeImportRecord(record, extraOmitKeys = []) {
@@ -951,7 +992,9 @@
     for (const cat of Object.keys(IMPORT_FLAT_TABLES)) {
       if (Array.isArray(payload[cat])) n += payload[cat].length;
     }
+    if (Array.isArray(payload.careerBasicInfo)) n += payload.careerBasicInfo.length;
     if (Array.isArray(payload.challenges)) n += payload.challenges.length;
+    if (Array.isArray(payload.projectStages)) n += payload.projectStages.length;
     if (Array.isArray(payload.vehicles)) n += payload.vehicles.length;
     for (const key of ['checkinsByChallenge', 'maintenanceByVehicle', 'fuelLogsByVehicle']) {
       const grouped = payload[key];
@@ -962,6 +1005,33 @@
       }
     }
     return n;
+  }
+
+  // 일정 백업을 "부모(또는 독립) 먼저 / 부모가 백업 안에 있는 자식 나중"으로 나눈다(순수 함수).
+  // 부모가 백업에 없는 자식은 독립 일정으로 바꿔(연결·자동 생성 표식 제거) first에 넣는다. 새 컬럼(place/category/repeat_offsets…)은 그대로 보존된다.
+  function splitScheduleImport(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const ids = new Set(list.map((r) => r.id));
+    const first = [];
+    const second = [];
+    for (const r of list) {
+      if (r.parent_schedule_id && ids.has(r.parent_schedule_id) && r.parent_schedule_id !== r.id) second.push(r);
+      else if (r.parent_schedule_id || r.is_generated || r.offset_days) first.push({ ...r, parent_schedule_id: null, is_generated: false, offset_days: null });
+      else first.push(r);
+    }
+    return { first, second };
+  }
+
+  // 기본정보 가져오기: 이미 내 기본정보가 있으면 "비어 있는 칸만" 백업 값으로 채운다(내가 입력해 둔 값은 지키기 위해). 순수 함수.
+  const BASIC_INFO_FIELDS = ['name', 'name_en', 'name_hanja', 'birth_date', 'gender', 'phone', 'email', 'address', 'military', 'nationality'];
+  function mergeBasicInfoForImport(existing, incoming) {
+    const patch = {};
+    for (const k of BASIC_INFO_FIELDS) {
+      const have = existing ? existing[k] : null;
+      const val = incoming ? incoming[k] : null;
+      if ((have === null || have === undefined || have === '') && val !== null && val !== undefined && val !== '') patch[k] = val;
+    }
+    return patch;
   }
 
   async function importData(file) {
@@ -1001,20 +1071,72 @@
     }
 
     // 1) 독립적인(부모-자식 관계가 없는) 카테고리
+    const projectIdMap = {};
+    const scheduleIdMap = {};
     for (const [cat, table] of Object.entries(IMPORT_FLAT_TABLES)) {
       const rows = payload[cat];
       if (!Array.isArray(rows)) continue;
+      if (cat === 'schedules') continue; // 일정은 부모/자식 연결을 다시 이어야 해서 아래에서 따로 처리
       for (const row of rows) {
         try {
           // health_appointments.schedule_id는 가져오기 당시 함께 만든 옛 일정을 가리키던 값이라
           // 그대로 두면 엉뚱한(또는 존재하지 않는) 일정을 가리키게 된다 — 연결 없이 가져온다.
-          const extraOmit = cat === 'healthAppointments' ? ['schedule_id'] : [];
-          const clean = sanitizeImportRecord(row, extraOmit);
-          await store.create(table, { ...clean, user_id: uid });
+          const extraOmit = cat === 'healthAppointments' ? ['schedule_id'] : cat === 'projects' ? ['lastProgressAt'] : [];
+          let src = row;
+          // 양식 문서: 파일 첨부(양식 원본/최종본)는 백업에 없으므로 연결을 비운다 — 편집 화면에서 양식 파일을 다시 올리면 된다.
+          if (cat === 'careerDocuments') src = { ...row, template_attachment_id: null, finals: [] };
+          const clean = sanitizeImportRecord(src, extraOmit);
+          const created = await store.create(table, { ...clean, user_id: uid });
+          if (cat === 'projects') projectIdMap[row.id] = created.id;
           record(cat, true);
         } catch (e) {
           record(cat, false, e.message || String(e));
         }
+      }
+    }
+
+    // 1-b) 일정: 부모(독립 포함) 먼저 만들고, 자식은 새 부모 id로 다시 연결한다(place/category/repeat_offsets 등 새 컬럼도 그대로 간다).
+    if (Array.isArray(payload.schedules)) {
+      const { first, second } = splitScheduleImport(payload.schedules);
+      for (const row of first) {
+        try {
+          const created = await store.create('schedules', { ...sanitizeImportRecord(row), user_id: uid });
+          scheduleIdMap[row.id] = created.id;
+          record('schedules', true);
+        } catch (e) { record('schedules', false, e.message || String(e)); }
+      }
+      for (const row of second) {
+        try {
+          const newParent = remapForeignId(row.parent_schedule_id, scheduleIdMap);
+          const clean = sanitizeImportRecord(row, ['parent_schedule_id']);
+          const body = newParent ? { ...clean, parent_schedule_id: newParent } : { ...clean, is_generated: false, offset_days: null };
+          const created = await store.create('schedules', { ...body, user_id: uid });
+          scheduleIdMap[row.id] = created.id;
+          record('schedules', true);
+        } catch (e) { record('schedules', false, e.message || String(e)); }
+      }
+    }
+
+    // 1-c) 프로젝트 WBS 항목: 부모 먼저(트리 순서), project_id/parent_id를 새 id로, depends_on은 전부 만든 뒤 새 id로 다시 채운다.
+    if (Array.isArray(payload.projectStages) && payload.projectStages.length) {
+      const stageIdMap = {};
+      const order = window.WBS ? window.WBS.buildTree(payload.projectStages).order.map((r) => r.node) : payload.projectStages;
+      for (const node of order) {
+        const newProject = remapForeignId(node.project_id, projectIdMap);
+        if (!newProject) { record('projectStages', false, `연결된 프로젝트(이전 id: ${node.project_id})를 가져오지 못해 건너뜀`); continue; }
+        try {
+          const clean = sanitizeImportRecord(node, ['project_id', 'parent_id', 'depends_on']);
+          const created = await store.create('project_stages', { ...clean, project_id: newProject, parent_id: remapForeignId(node.parent_id, stageIdMap), user_id: uid });
+          stageIdMap[node.id] = created.id;
+          record('projectStages', true);
+        } catch (e) { record('projectStages', false, e.message || String(e)); }
+      }
+      for (const node of order) {
+        const newId = stageIdMap[node.id];
+        if (!newId || !(node.depends_on || []).length) continue;
+        const deps = node.depends_on.map((d) => { const { id, type } = window.WBS.parseDep(d); const m = remapForeignId(id, stageIdMap); return m ? window.WBS.formatDep(m, type) : null; }).filter(Boolean);
+        if (!deps.length) continue;
+        try { await store.update('project_stages', newId, { depends_on: deps }); } catch (e) { record('projectStages', false, `의존관계 복원 실패: ${e.message || e}`); }
       }
     }
 
@@ -1086,6 +1208,19 @@
       }
     }
 
+    // 1-d) 기본정보(사용자당 1행): 있으면 빈 칸만 채우고, 없으면 새로 만든다.
+    if (Array.isArray(payload.careerBasicInfo) && payload.careerBasicInfo.length) {
+      try {
+        const incoming = sanitizeImportRecord(payload.careerBasicInfo[0]);
+        const existingRows = await store.list('career_basic_info', { where: { user_id: uid } }).catch(() => []);
+        if (existingRows.length) {
+          const patch = mergeBasicInfoForImport(existingRows[0], incoming);
+          if (Object.keys(patch).length) await store.update('career_basic_info', existingRows[0].id, patch);
+        } else await store.create('career_basic_info', { ...incoming, user_id: uid });
+        record('careerBasicInfo', true);
+      } catch (e) { record('careerBasicInfo', false, e.message || String(e)); }
+    }
+
     await appState.refreshAll();
 
     const totalOk = Object.values(summary).reduce((s, v) => s + v.ok, 0);
@@ -1103,7 +1238,7 @@
   }
 
   // 순수 로직은 Node 유닛테스트(tests/importExport.test.mjs)에서 직접 검증할 수 있도록 노출한다.
-  window.__importExport = { sanitizeImportRecord, remapForeignId, isValidImportPayload, countImportRecords };
+  window.__importExport = { sanitizeImportRecord, remapForeignId, isValidImportPayload, countImportRecords, splitScheduleImport, mergeBasicInfoForImport, buildExportPayload, importData };
 
   function applyTheme(theme) {
     const root = document.documentElement;

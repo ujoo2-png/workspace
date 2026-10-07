@@ -28,7 +28,14 @@
     'workspace:theme',
     'workspace:schedule:hideDone',
     'workspace:health:weeklyGoal',
+    'workspace:health:targets', // v7.19.0 — 대시보드 카드별 목표값 JSON {weight,steps,bp_systolic,bp_diastolic}
+    'workspace:health:medReminder', // v7.19.0 — 복약 시간 알림 on/off ('1'/'0')
     'workspace:recentlyViewed',
+    'workspace:clockCities', // v7.21.0 — 시계별 연결 도시 JSON {시간대id: 도시이름}
+    'workspace:animations', // v7.21.0 — 홈 애니메이션 효과 on/off ('1'/'0', 기본 '1')
+    'workspace:briefing:template', // v7.21.0 — 브리핑 Markdown 템플릿(summary/checklist/top3)
+    'workspace:reports:tiles', // v7.21.0 — 리포트 페이지 사용자 구성 타일 JSON
+    'workspace:charts:prefs', // v7.21.0 — 차트별 보기 방식(막대/꺾은선/영역) 선택 JSON
   ];
   const SYNCED_SET = new Set(SYNCED_KEYS);
   const DEBOUNCE_MS = 800;

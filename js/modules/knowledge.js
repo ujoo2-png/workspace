@@ -259,34 +259,8 @@
           if (attachments.length) {
             body.append(el('h3', { style: 'margin:16px 0 8px; font-size:14px' }, '첨부파일 미리보기'));
             const previewBox = el('div', { class: 'stack', style: 'gap:10px' });
-            for (const a of attachments) {
-              const mime = a.mime_type || '';
-              if (mime.startsWith('image/')) {
-                previewBox.append(
-                  el('div', {}, [
-                    el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `🖼️ ${escapeHtml(a.name)}`),
-                    el('img', { src: a.data, alt: a.name, style: 'max-width:100%; border-radius:8px; display:block' }),
-                  ])
-                );
-              } else if (mime === 'application/pdf') {
-                previewBox.append(
-                  el('div', {}, [
-                    el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `📄 ${escapeHtml(a.name)}`),
-                    // sandbox="": 업로드 시 브라우저가 보고한 mime_type을 그대로 신뢰하므로,
-                    // 확장자/타입을 속인 파일이 섞여 있어도 스크립트 실행 등을 막기 위해
-                    // 모든 권한을 제거한 채로만 미리보기를 렌더링한다(방어 심층화).
-                    el('iframe', { src: a.data, sandbox: '', style: 'width:100%; height:400px; border:1px solid var(--border); border-radius:8px' }),
-                  ])
-                );
-              } else {
-                previewBox.append(
-                  el('div', { class: 'item-row' }, [
-                    el('a', { class: 'item-row__main', href: a.data, download: a.name }, `📎 ${escapeHtml(a.name)} (다운로드)`),
-                  ])
-                );
-              }
-            }
             body.append(previewBox);
+            window.renderAttachmentPreviews(previewBox, 'knowledge_docs', d.id);
           }
           const attachBox = el('div', { style: 'margin-top:16px' });
           body.append(el('h3', { style: 'margin:0 0 6px; font-size:14px' }, '첨부파일 관리(추가/삭제)'), attachBox);
@@ -301,7 +275,18 @@
         title: existing ? (isMemo ? '메모 수정' : '문서 수정') : (isMemo ? '메모 등록' : '문서/링크 등록'),
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
-          const urlField = field('URL(선택)', el('input', { class: 'nm-input', type: 'url', name: 'url', placeholder: 'https://...', value: existing?.url || '' }));
+          const urlInput = el('input', { class: 'nm-input', type: 'url', name: 'url', placeholder: 'https://...', value: existing?.url || '' });
+          const urlField = field('URL(선택)', urlInput);
+          // v7.21.0: 같은 링크가 이미 있으면 저장 전에 알려 준다(막지는 않음 — 의도적 중복도 가능)
+          const dupWarn = el('div', { class: 'nm-field__hint', role: 'status', hidden: true, style: 'color:var(--color-warning, #b45309)' });
+          urlField.append(dupWarn);
+          const checkDup = () => {
+            const dup = window.findDuplicateUrl(urlInput.value, appState.knowledgeDocs, existing?.id);
+            dupWarn.hidden = !dup;
+            if (dup) dupWarn.textContent = `⚠️ 이미 등록된 링크입니다: "${dup.title}"`;
+          };
+          urlInput.addEventListener('input', checkDup);
+          urlInput.addEventListener('change', checkDup);
           if (isMemo) urlField.style.display = 'none';
           form.append(
             field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '', placeholder: isMemo ? '메모 제목' : '제목' })),
