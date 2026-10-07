@@ -537,10 +537,69 @@
     };
   }
 
+
+  // ---- 프로젝트 복사 (v7.23.0) ----
+  /**
+   * 프로젝트와 그 WBS 항목을 새 프로젝트로 복사할 "계획"을 만든다(순수 함수 — 저장은 AppState.copyProject가 한다).
+   * 예) "사회복지사" 1~15강 → "노인복지론" 프로젝트로 복사해 재사용.
+   * @param {object} project 원본 프로젝트
+   * @param {object[]} stages 원본 프로젝트의 project_stages 행들
+   * @param {{name?:string, includeStages?:boolean, resetProgress?:boolean, dateMode?:'clear'|'keep'|'shift', shiftBase?:string}} opts
+   *   dateMode: clear=날짜 비움(기본), keep=그대로, shift=가장 이른 시작일이 shiftBase가 되도록 모든 날짜를 같은 일수만큼 이동
+   * @returns {{project:object, stages:{key:string, parentKey:string|null, depth:number, fields:object, deps:{key:string,type:string}[]}[], shiftDays:number|null}}
+   */
+  function planProjectCopy(project, stages, opts = {}) {
+    const { includeStages = true, resetProgress = true, dateMode = 'clear', shiftBase = null } = opts;
+    const mine = (stages || []).filter((r) => r.project_id === project.id);
+    const dates = [project.deadline, ...mine.flatMap((r) => [r.start_date, r.target_date])].filter(Boolean).sort();
+    let shiftDays = null;
+    if (dateMode === 'shift' && shiftBase && dates.length) shiftDays = globalThis.isoDiff(dates[0], shiftBase);
+    const mapDate = (d) => {
+      if (!d || dateMode === 'clear') return null;
+      if (dateMode === 'shift' && shiftDays !== null) return globalThis.shiftIso(d, shiftDays);
+      return d;
+    };
+    const name = String(opts.name || '').trim() || `${project.name} (복사)`;
+    const proj = {
+      name,
+      status: 'in_progress',
+      priority: project.priority || 'medium',
+      tags: (project.tags || []).slice(),
+      memo: project.memo || null,
+      deadline: mapDate(project.deadline),
+      actual_completion_date: null,
+    };
+    const out = [];
+    if (includeStages && mine.length) {
+      const tree = buildTree(mine);
+      const idSet = new Set(mine.map((r) => r.id));
+      for (const row of tree.order) {
+        const r = row.node;
+        const fields = {
+          name: r.name,
+          seq: Number(r.seq) || 0,
+          start_date: mapDate(r.start_date),
+          target_date: mapDate(r.target_date),
+          is_milestone: !!r.is_milestone,
+          memo: r.memo || null,
+          status: resetProgress ? 'todo' : (r.status || 'todo'),
+          progress: resetProgress ? 0 : (Number(r.progress) || 0),
+          actual_start_date: resetProgress ? null : mapDate(r.actual_start_date),
+          actual_completion_date: resetProgress ? null : mapDate(r.actual_completion_date),
+          baseline_start: null,
+          baseline_end: null,
+        };
+        const deps = (r.depends_on || []).map(parseDep).filter((d) => idSet.has(d.id)).map((d) => ({ key: d.id, type: d.type }));
+        out.push({ key: r.id, parentKey: row.parentId, depth: row.depth, fields, deps });
+      }
+    }
+    return { project: proj, stages: out, shiftDays };
+  }
+
   globalThis.WBS = {
     LEVEL_LABELS, MAX_WBS_DEPTH, levelLabel, buildTree, visibleRows, descendantIds, subtreeHeight, depthOf,
     durationDays, rollupDates, rollupProgress, computeRollup, effectiveStatus, progressToStatus, leafProgress,
     DEP_TYPES, parseDep, formatDep, criticalPath, wouldCreateCycle, moveNode, parseOutline, outlineToRows,
-    planLegacyStageMigration, dragDates, snapshotBaseline, baselineVariance, ZOOM_PX, ganttRange, ganttTicks, layoutGantt, ROW_H, HEADER_H,
+    planLegacyStageMigration, planProjectCopy, dragDates, snapshotBaseline, baselineVariance, ZOOM_PX, ganttRange, ganttTicks, layoutGantt, ROW_H, HEADER_H,
   };
 })();

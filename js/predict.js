@@ -760,6 +760,68 @@
     return hay.some((v) => String(v || '').toLowerCase().includes(needle));
   }
 
+
+  // ---- 일정: 기간(시작일~종료일) + 구분 이모지 + 달력 막대 배치 (v7.23.0) ----
+  const SCHEDULE_CATEGORY_EMOJI = { 개인: '🧑', 회사: '🏢', 가족: '👪', 업무: '💼', 기타: '📌' };
+  function scheduleCategoryEmoji(c) { return SCHEDULE_CATEGORY_EMOJI[normalizeScheduleCategory(c)]; }
+  const MAX_SCHEDULE_SPAN_DAYS = 366;
+  /** 종료일(없거나 시작일 이하이면 시작일 = 하루 일정). */
+  function scheduleEnd(s) { return s && s.end_date && s.end_date > s.date ? s.end_date : s && s.date; }
+  function isMultiDaySchedule(s) { return !!s && scheduleEnd(s) !== s.date; }
+  /** 기간 일수(양 끝 포함). 하루 일정 = 1. */
+  function scheduleSpanDays(s) { return isoDiff(s.date, scheduleEnd(s)) + 1; }
+  function scheduleCoversDate(s, iso) { return !!s && iso >= s.date && iso <= scheduleEnd(s); }
+  /** 그 날짜에서 막대의 위치: single | start | mid | end (기간 밖이면 null). */
+  function schedulePosition(s, iso) {
+    if (!scheduleCoversDate(s, iso)) return null;
+    if (!isMultiDaySchedule(s)) return 'single';
+    if (iso === s.date) return 'start';
+    if (iso === scheduleEnd(s)) return 'end';
+    return 'mid';
+  }
+  /** 사람이 읽는 기간 표기: "10/7(수)" 또는 "10/7(수) ~ 10/9(금) · 3일간" */
+  function scheduleRangeLabel(s) {
+    const fmt = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}(${['월', '화', '수', '목', '금', '토', '일'][isoWeekday(iso) - 1]})`;
+    if (!isMultiDaySchedule(s)) return fmt(s.date);
+    return `${fmt(s.date)} ~ ${fmt(scheduleEnd(s))} · ${scheduleSpanDays(s)}일간`;
+  }
+  /** 입력값 검증: 종료일이 시작일보다 앞서거나 너무 길면 이유를 돌려준다(정상이면 null). */
+  function validateScheduleRange(date, endDate) {
+    if (!endDate) return null;
+    if (!isValidIso(endDate)) return '종료일 형식이 올바르지 않습니다.';
+    if (endDate < date) return '종료일은 시작일보다 빠를 수 없어요.';
+    if (isoDiff(date, endDate) + 1 > MAX_SCHEDULE_SPAN_DAYS) return `기간은 최대 ${MAX_SCHEDULE_SPAN_DAYS}일까지 등록할 수 있어요.`;
+    return null;
+  }
+  /**
+   * 달력 격자(gridStart~gridEnd)에 일정을 "줄(lane)"에 맞춰 배치한다. 기간 일정은 모든 날짜 칸에서 같은 줄에 놓여 막대가 이어진다.
+   * @returns {Object<string,Array<{s:object,pos:string}|null>>} 날짜 → 줄 번호 순서의 배열(빈 줄은 null)
+   */
+  function buildCalendarLanes(schedules, gridStart, gridEnd) {
+    const items = (schedules || []).filter((s) => s && s.date && scheduleEnd(s) >= gridStart && s.date <= gridEnd)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+        || scheduleSpanDays(b) - scheduleSpanDays(a)
+        || String(a.time || '').localeCompare(String(b.time || ''))
+        || String(a.id || a.title).localeCompare(String(b.id || b.title)));
+    const lanes = []; // lane -> Set(iso)
+    const byDate = {};
+    for (const s of items) {
+      const from = s.date < gridStart ? gridStart : s.date;
+      const to = scheduleEnd(s) > gridEnd ? gridEnd : scheduleEnd(s);
+      const days = [];
+      for (let d = from; d <= to; d = shiftIso(d, 1)) days.push(d);
+      let lane = lanes.findIndex((set) => days.every((d) => !set.has(d)));
+      if (lane < 0) { lane = lanes.length; lanes.push(new Set()); }
+      for (const d of days) {
+        lanes[lane].add(d);
+        if (!byDate[d]) byDate[d] = [];
+        byDate[d][lane] = { s, pos: schedulePosition(s, d) };
+      }
+    }
+    for (const d of Object.keys(byDate)) for (let i = 0; i < byDate[d].length; i++) if (!byDate[d][i]) byDate[d][i] = null;
+    return byDate;
+  }
+
   // ---- 일정: "N일 후" 반복/알림 ----
   const MAX_REPEAT_OFFSETS = 10;
   const MAX_OFFSET_DAYS = 365;
@@ -784,13 +846,14 @@
   }
   function offsetDate(baseIso, n) { return shiftIso(baseIso, n); }
   function childScheduleTitle(title, n) { return `${title} (${n}일 후)`; }
-  const SCHEDULE_SYNC_FIELDS = ['title', 'date', 'time', 'place', 'category', 'priority', 'project_id', 'tags', 'memo'];
+  const SCHEDULE_SYNC_FIELDS = ['title', 'date', 'end_date', 'time', 'place', 'category', 'priority', 'project_id', 'tags', 'memo'];
 
   /** 부모 일정에서 "N일 후" 자식 일정 한 건의 필드를 만든다(완료 여부·중요 표시는 물려주지 않는다). */
   function childScheduleFields(parent, n) {
     return {
       title: childScheduleTitle(parent.title, n),
       date: offsetDate(parent.date, n),
+      end_date: parent.end_date && parent.end_date > parent.date ? offsetDate(parent.end_date, n) : null,
       time: parent.time || null,
       place: parent.place || null,
       category: normalizeScheduleCategory(parent.category),
@@ -933,6 +996,16 @@
   globalThis.SCHEDULE_CATEGORIES = SCHEDULE_CATEGORIES;
   globalThis.normalizeScheduleCategory = normalizeScheduleCategory;
   globalThis.scheduleMatchesQuery = scheduleMatchesQuery;
+  globalThis.SCHEDULE_CATEGORY_EMOJI = SCHEDULE_CATEGORY_EMOJI;
+  globalThis.scheduleCategoryEmoji = scheduleCategoryEmoji;
+  globalThis.scheduleEnd = scheduleEnd;
+  globalThis.isMultiDaySchedule = isMultiDaySchedule;
+  globalThis.scheduleSpanDays = scheduleSpanDays;
+  globalThis.scheduleCoversDate = scheduleCoversDate;
+  globalThis.schedulePosition = schedulePosition;
+  globalThis.scheduleRangeLabel = scheduleRangeLabel;
+  globalThis.validateScheduleRange = validateScheduleRange;
+  globalThis.buildCalendarLanes = buildCalendarLanes;
   globalThis.MAX_REPEAT_OFFSETS = MAX_REPEAT_OFFSETS;
   globalThis.MAX_OFFSET_DAYS = MAX_OFFSET_DAYS;
   globalThis.parseOffsets = parseOffsets;

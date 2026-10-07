@@ -42,11 +42,13 @@
     },
   };
   // 일정의 v7.20.0(0024) 신규 컬럼 — 마이그레이션 전 DB에서도 기존 저장이 깨지지 않게 폴백할 때 쓴다.
-  const SCHEDULE_NEW_COLS = ['place', 'category', 'repeat_offsets', 'parent_schedule_id', 'offset_days', 'is_generated'];
+  const SCHEDULE_NEW_COLS = ['end_date', 'place', 'category', 'repeat_offsets', 'parent_schedule_id', 'offset_days', 'is_generated'];
   const STAGE_NEW_COLS = ['parent_id', 'progress', 'is_milestone', 'depends_on', 'baseline_start', 'baseline_end', 'legacy_group', 'memo'];
+  const BRIEFING_TOPIC_NEW_COLS = ['search_terms', 'priority_keywords', 'site_urls'];
   const CHALLENGE_NEW_COLS = ['freq_type', 'freq_days', 'freq_times'];
-  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0025.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0025.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
   // 첨부 목록용 메타 컬럼(본문 data 제외) + 본문 메모리 캐시 상한(LRU)
   const ATTACH_META_COLS = 'id,user_id,owner_table,owner_id,name,mime_type,size,created_at';
   const ATTACH_CACHE_MAX_CHARS = 60 * 1024 * 1024;
@@ -313,15 +315,19 @@
       const offsets = window.parseOffsets(payload.repeat_offsets || []).offsets;
       if (offsets.length) payload.repeat_offsets = offsets; else delete payload.repeat_offsets;
       const create = async (p) => (await this._optimisticCreate('schedules', [p]))[0];
-      if (!offsets.length) return this._withoutMissingColumn(create, payload, SCHEDULE_NEW_COLS, '0024');
+      if (!payload.end_date) delete payload.end_date;
+      const hasEnd = !!payload.end_date;
+      if (!offsets.length && !hasEnd) return this._withoutMissingColumn(create, payload, SCHEDULE_NEW_COLS, '0024');
       let row;
       try {
         row = await create(payload);
       } catch (e) {
+        // 기간(종료일) 일정은 컬럼이 없을 때 조용히 하루 일정으로 저장되면 안 되므로 안내와 함께 실패시킨다.
+        if (hasEnd && this._isMissingColumnError(e, ['end_date'])) throw new Error(`기간(종료일) 일정을 쓰려면 ${MIGRATION_0026_HINT}`);
         if (this._isMissingColumnError(e, SCHEDULE_NEW_COLS)) throw new Error(`"N일 후" 반복을 쓰려면 ${MIGRATION_0024_HINT}`);
         throw e;
       }
-      await this._syncScheduleChildren(row);
+      if (offsets.length) await this._syncScheduleChildren(row);
       return row;
     }
     async _syncScheduleChildren(parent) {
@@ -339,12 +345,13 @@
       const cur = this._getRows('schedules').find((r) => r.id === id);
       const next = { ...patch };
       if ('repeat_offsets' in next) next.repeat_offsets = window.parseOffsets(next.repeat_offsets || []).offsets;
-      const strict = (next.repeat_offsets && next.repeat_offsets.length) || (cur?.repeat_offsets || []).length > 0 || next.parent_schedule_id;
+      const strict = !!next.end_date || (next.repeat_offsets && next.repeat_offsets.length) || (cur?.repeat_offsets || []).length > 0 || next.parent_schedule_id;
       const run = (p) => this.store.update('schedules', id, p);
       let saved;
       try {
         saved = await this._optimisticUpdate('schedules', id, next, () => (strict ? run(next) : this._withoutMissingColumn(run, next, SCHEDULE_NEW_COLS, '0024')));
       } catch (e) {
+        if (next.end_date && this._isMissingColumnError(e, ['end_date'])) throw new Error(`기간(종료일) 일정을 쓰려면 ${MIGRATION_0026_HINT}`);
         if (strict && this._isMissingColumnError(e, SCHEDULE_NEW_COLS)) throw new Error(`"N일 후" 반복을 쓰려면 ${MIGRATION_0024_HINT}`);
         throw e;
       }
@@ -375,6 +382,34 @@
       const row = await this.store.create('projects', { ...data, user_id: this.user.id, status: data.status || 'in_progress' });
       await this.refreshAll();
       return row;
+    }
+    /**
+     * 프로젝트를 복사해 새 프로젝트를 만든다(WBS 항목·의존관계 포함, 진행 기록/첨부는 복사하지 않음).
+     * @returns {{project:object, stageCount:number}}
+     */
+    async copyProject(sourceId, opts = {}) {
+      const src = this.projects.find((p) => p.id === sourceId);
+      if (!src) throw new Error('복사할 프로젝트를 찾을 수 없습니다.');
+      const plan = window.WBS.planProjectCopy(src, this.projectStages.filter((r) => !String(r.id).startsWith(TMP_PREFIX)), opts);
+      const project = await this.store.create('projects', { ...plan.project, user_id: this.user.id });
+      const idByKey = new Map();
+      try {
+        const maxDepth = plan.stages.length ? Math.max(...plan.stages.map((x) => x.depth)) : -1;
+        for (let d = 0; d <= maxDepth; d++) {
+          const level = plan.stages.filter((x) => x.depth === d);
+          const payloads = level.map((x) => ({ ...x.fields, project_id: project.id, user_id: this.user.id, parent_id: x.parentKey ? idByKey.get(x.parentKey) || null : null }));
+          const created = level.length === 1 ? [await this.store.create('project_stages', payloads[0])] : await this.store.createMany('project_stages', payloads);
+          level.forEach((x, i) => idByKey.set(x.key, created[i].id));
+        }
+        const depPatches = plan.stages.filter((x) => x.deps.length).map((x) => ({ id: idByKey.get(x.key), deps: x.deps.map((dd) => window.WBS.formatDep(idByKey.get(dd.key), dd.type)).filter((v) => !v.startsWith('undefined')) }));
+        await Promise.all(depPatches.map((x) => this.store.update('project_stages', x.id, { depends_on: x.deps })));
+      } catch (e) {
+        // 중간에 실패하면 반쯤 복사된 프로젝트가 남지 않도록 되돌린다(항목은 on delete cascade).
+        await this.store.remove('projects', project.id).catch(() => {});
+        throw this._stageErr(e);
+      }
+      await this.refreshAll();
+      return { project, stageCount: plan.stages.length };
     }
     async updateProject(id, patch) {
       await this.store.update('projects', id, patch);
@@ -915,11 +950,18 @@
     async addBriefingTopic(data) {
       const activeCount = this.briefingTopics.filter((t) => t.active !== false).length;
       if (activeCount >= 10) throw new Error('관심주제는 최대 10개까지 등록할 수 있습니다.');
-      await this.store.create('briefing_topics', { ...data, user_id: this.user.id, active: data.active ?? true });
+      try {
+        await this.store.create('briefing_topics', { ...data, user_id: this.user.id, active: data.active ?? true });
+      } catch (e) { throw this._topicErr(e); }
       return this.refreshAll();
     }
+    _topicErr(e) {
+      return this._isMissingColumnError(e, BRIEFING_TOPIC_NEW_COLS) ? new Error(`사이트·검색어 설정을 저장하려면 ${MIGRATION_0026_HINT}`) : e;
+    }
     async updateBriefingTopic(id, patch) {
-      await this.store.update('briefing_topics', id, patch);
+      try {
+        await this.store.update('briefing_topics', id, patch);
+      } catch (e) { throw this._topicErr(e); }
       return this.refreshAll();
     }
     async deleteBriefingTopic(id) {
@@ -997,6 +1039,33 @@
           });
           existingHashes.add(hash);
           newCount++;
+        }
+      }
+      // 간편 설정 주제(사이트/검색어를 등록한 주제)는 피드 소스를 따로 만들지 않아도 자기 검색 주소로 직접 수집한다.
+      const MAX_TOTAL_TOPIC_FEEDS = 30;
+      let budget = MAX_TOTAL_TOPIC_FEEDS;
+      for (const topic of activeTopics) {
+        if (!((topic.search_terms || []).length || (topic.site_urls || []).length)) continue;
+        const feeds = window.buildTopicFeeds(topic).slice(0, Math.max(0, budget));
+        budget -= feeds.length;
+        for (let i = 0; i < feeds.length; i += 3) {
+          const batch = feeds.slice(i, i + 3);
+          const results = await Promise.all(batch.map((f) => fetchFeedItems(f.url).then((items) => ({ f, items }), (e) => ({ f, error: e }))));
+          for (const r of results) {
+            if (r.error) { errors.push(`${topic.name} · ${r.f.label}: ${r.error.message}`); continue; }
+            fetchedCount += r.items.length;
+            for (const item of r.items) {
+              if (window.itemHasExcluded(item, topic)) continue;
+              const hash = simpleHash(`${item.title}|${item.link}`);
+              if (existingHashes.has(hash)) continue;
+              await this.store.create('briefing_items', {
+                user_id: this.user.id, topic_id: topic.id, source_id: null,
+                title: item.title, link: item.link, summary: item.summary, published_at: item.publishedAt, item_hash: hash, is_read: false,
+              });
+              existingHashes.add(hash);
+              newCount++;
+            }
+          }
         }
       }
       await this.refreshAll();

@@ -139,7 +139,7 @@
   function errText(e, what) {
     const msg = String(e?.message || e || '');
     if (/health_medications|health_med_logs|schema cache|does not exist|relation/i.test(msg)) {
-      return `${what} 실패: 복약 테이블이 없습니다. Supabase SQL Editor에서 supabase/combined/all_migrations_0001_to_0025.sql을 실행해 주세요.`;
+      return `${what} 실패: 복약 테이블이 없습니다. Supabase SQL Editor에서 supabase/combined/all_migrations_0001_to_0026.sql을 실행해 주세요.`;
     }
     return `${what} 실패: ${msg || '알 수 없는 오류'} (방금 반영한 내용을 취소했습니다)`;
   }

@@ -350,7 +350,7 @@
       drawEntering = entering;
       container.style.setProperty('--enter-skip', `${Number.isFinite(enterElapsed) ? Math.round(enterElapsed) : 0}ms`);
       const today = todayISO();
-      const todaySchedules = appState.schedules.filter((s) => s.date === today);
+      const todaySchedules = appState.schedules.filter((s) => window.scheduleCoversDate(s, today));
       const dueProjects = appState.projects.filter(
         (p) => p.status === 'in_progress' && p.deadline && diffDays(today, p.deadline) <= 7 && diffDays(today, p.deadline) >= 0
       );
@@ -675,7 +675,7 @@
       const greet = hour < 5 ? '늦은 시간이에요' : hour < 11 ? '좋은 아침이에요' : hour < 18 ? '좋은 오후예요' : '수고 많으셨어요';
       const name = appState.user?.name || appState.user?.email?.split('@')[0] || '';
       const today = todayISO();
-      const left = appState.schedules.filter((s) => s.date === today && !s.done).length;
+      const left = appState.schedules.filter((s) => window.scheduleCoversDate(s, today) && !s.done).length;
       return el('div', {
         class: 'home-hero', 'data-part': part, style: `background:${window.WeatherFx.gradientCss(stops)}; color:${text.color}; --i:0`,
       }, [
@@ -715,7 +715,7 @@
       slides.push({
         id: 'kpi', title: '요약 지표',
         render(n) {
-          const todayList = appState.schedules.filter((s) => s.date === today);
+          const todayList = appState.schedules.filter((s) => window.scheduleCoversDate(s, today));
           const due = appState.projects.filter((p) => p.status === 'in_progress' && p.deadline && diffDays(today, p.deadline) <= 7 && diffDays(today, p.deadline) >= 0);
           const unreadN = appState.notifications.filter((x) => !x.is_read).length;
           const active = appState.projects.filter((p) => p.status === 'in_progress').length;
@@ -733,7 +733,7 @@
         id: 'today', title: '오늘 일정',
         render(n) {
           n.append(el('h2', {}, `📅 오늘 일정 · ${window.formatKoreanDate(today)}`));
-          const list = appState.schedules.filter((s) => s.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || '')).slice(0, 7);
+          const list = appState.schedules.filter((s) => window.scheduleCoversDate(s, today)).sort((a, b) => (a.time || '').localeCompare(b.time || '')).slice(0, 7);
           if (!list.length) { n.append(el('div', { class: 'pres__empty' }, '오늘 등록된 일정이 없습니다.')); return; }
           n.append(el('div', { class: 'pres__list' }, list.map((s) => el('div', {}, [el('time', {}, s.time ? s.time.slice(0, 5) : '종일'), el('span', { style: s.done ? 'text-decoration:line-through; opacity:.6' : '' }, s.title)]))));
         },
@@ -835,7 +835,10 @@
       // 마지막으로 "실제로 화면에 보인" 값부터 이어서 올라간다 — 숫자가 올라가는 도중 홈이 다시 그려져도 0부터 다시 시작하지 않는다.
       const prev = kpiLast.has(label) ? kpiLast.get(label) : 0;
       const rec = (n) => { if (valueEl.isConnected) kpiLast.set(label, n); return fmt(n); };
-      if (prev !== value) { valueEl.textContent = fmt(prev); requestAnimationFrame(() => window.HomeFx.countUp(valueEl, value, { from: prev, format: rec })); }
+      if (!window.HomeFx.motionOn()) {
+        // 애니메이션 효과를 끈 상태: 이전 값(0)을 잠깐 보여주지 않고 처음부터 최종값을 그린다.
+        kpiLast.set(label, value);
+      } else if (prev !== value) { valueEl.textContent = fmt(prev); requestAnimationFrame(() => window.HomeFx.countUp(valueEl, value, { from: prev, format: rec })); }
     }
     const kids = [];
     if (typeof opts.ring === 'number') {

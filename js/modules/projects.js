@@ -171,6 +171,7 @@
             el('div', { class: 'icon-row' }, [
               el('button', { class: 'nm-btn nm-btn--icon', title: '진행률 기록', onclick: () => openProgressForm(p) }, '📈'),
               el('button', { class: 'nm-btn nm-btn--icon', title: `관련 Devlog (${relatedDevlogs.length})`, onclick: () => openDevlogList(p, relatedDevlogs) }, '🛠️'),
+              el('button', { class: 'nm-btn nm-btn--icon', title: '복사해서 새 프로젝트 만들기', onclick: () => openCopyForm(p) }, '⧉'),
               el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openProjectForm(p) }, '✎'),
               el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => remove(p) }, '🗑'),
             ]),
@@ -261,6 +262,62 @@
             await appState.recordProgress(p.id, Number(range.value));
             toast('진행률을 기록했습니다.', 'success');
             close();
+          });
+          body.append(form);
+        },
+      });
+    }
+
+    // 프로젝트 복사: 이름·WBS 항목(1~15강 같은 하위 구조)·의존관계를 새 프로젝트로 복제한다. 진행 기록/첨부파일은 복사하지 않는다.
+    function openCopyForm(p) {
+      const stageRows = appState.projectStages.filter((r) => r.project_id === p.id);
+      openModal({
+        title: `"${p.name}" 복사`,
+        contentBuilder(body, close) {
+          const form = el('form', { class: 'stack' });
+          const nameInput = el('input', { class: 'nm-input', name: 'name', required: true, value: `${p.name} (복사)`, autofocus: true });
+          const incl = el('input', { type: 'checkbox', name: 'includeStages', checked: true });
+          const reset = el('input', { type: 'checkbox', name: 'resetProgress', checked: true });
+          const baseInput = el('input', { class: 'nm-input', type: 'date', name: 'shiftBase', value: todayISO() });
+          const baseRow = el('div', { class: 'nm-field', style: 'display:none' }, [el('label', {}, '새 시작일(가장 이른 날짜가 이 날이 되도록 전체 일정을 이동)'), baseInput]);
+          const dateSel = el('select', { class: 'nm-select', name: 'dateMode' }, [
+            el('option', { value: 'clear', selected: true }, '날짜 비우기 (복사 후 새로 입력)'),
+            el('option', { value: 'shift' }, '새 시작일 기준으로 이동 (간격 유지)'),
+            el('option', { value: 'keep' }, '날짜 그대로 복사'),
+          ]);
+          dateSel.addEventListener('change', () => { baseRow.style.display = dateSel.value === 'shift' ? '' : 'none'; });
+          const summary = el('div', { class: 'text-muted', style: 'font-size:12px' }, `항목 ${stageRows.length}개(대·중·소 구조와 순서, 의존관계 포함)를 복사합니다. 진행률 기록과 첨부파일은 복사되지 않아요.`);
+          incl.addEventListener('change', () => { summary.style.opacity = incl.checked ? '1' : '0.5'; });
+          const cb = (input, text) => el('label', { class: 'row', style: 'gap:8px; cursor:pointer' }, [input, el('span', {}, text)]);
+          form.append(
+            field('새 프로젝트 이름', nameInput),
+            cb(incl, 'WBS 항목(강의·단계 등 하위 구조)도 함께 복사'),
+            cb(reset, '항목 상태·진행률·실제 완료일 초기화 (새로 시작)'),
+            field('날짜', dateSel),
+            baseRow,
+            summary,
+            el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '복사해서 만들기')
+          );
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = form.querySelector('button[type=submit]');
+            btn.disabled = true; btn.textContent = '복사 중…';
+            try {
+              const res = await appState.copyProject(p.id, {
+                name: nameInput.value,
+                includeStages: incl.checked,
+                resetProgress: reset.checked,
+                dateMode: dateSel.value,
+                shiftBase: baseInput.value || null,
+              });
+              selectedId = res.project.id;
+              draw();
+              toast(`"${res.project.name}" 프로젝트를 만들었어요. (항목 ${res.stageCount}개 복사)`, 'success');
+              close();
+            } catch (err) {
+              btn.disabled = false; btn.textContent = '복사해서 만들기';
+              toast(`복사하지 못했습니다: ${err.message || err}`, 'error');
+            }
           });
           body.append(form);
         },

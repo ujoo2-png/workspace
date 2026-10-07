@@ -15,22 +15,35 @@
     const rows = (items || []).filter((i) => i && i.link && (!onlyUnread || !i.is_read));
     const topicName = (id) => (topics.find((t) => t.id === id) || {}).name || null;
     const sourceName = (id) => (sources.find((s) => s.id === id) || {}).name || '';
+    const topicOf = (id) => topics.find((t) => t.id === id) || null;
+    const hits = (it, t) => (window.priorityHits && t ? window.priorityHits(it, t) : []);
+    const srcLabel = (it) => sourceName(it.source_id) || (window.deriveSourceLabel ? window.deriveSourceLabel(it) : '');
     const groups = new Map();
     for (const it of rows) {
-      const key = topicName(it.topic_id) || '기타';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(it);
+      const t = topicOf(it.topic_id);
+      const key = (t && t.name) || '기타';
+      if (!groups.has(key)) groups.set(key, { topic: t, list: [] });
+      groups.get(key).list.push(it);
     }
-    const out = ['---', `date: ${date}`, `items: ${rows.length}`, `topics: [${[...groups.keys()].join(', ')}]`, 'type: briefing', '---', '', `# 관심주제 브리핑${date ? ' · ' + date : ''}`, ''];
+    // 주제는 우선순위(높은 순), 주제 안에서는 우선 검색어에 맞는 항목을 먼저, 그다음 최신순.
+    const ordered = [...groups.entries()].sort((a, b) => ((b[1].topic && b[1].topic.priority) || 0) - ((a[1].topic && a[1].topic.priority) || 0));
+    const out = ['---', `date: ${date}`, `items: ${rows.length}`, `topics: [${ordered.map((g) => g[0]).join(', ')}]`, 'type: briefing', '---', '', `# 관심주제 브리핑${date ? ' · ' + date : ''}`, ''];
     if (!rows.length) { out.push('_내보낼 항목이 없습니다._', ''); return out.join('\n'); }
-    for (const [name, list] of groups) {
+    for (const [name, { topic, list }] of ordered) {
+      const sorted = list.slice().sort((a, b) => (hits(b, topic).length ? 1 : 0) - (hits(a, topic).length ? 1 : 0) || String(b.published_at || '').localeCompare(String(a.published_at || '')));
       out.push(`## ${name} (${list.length})`, '');
-      for (const it of list) {
-        const meta = [sourceName(it.source_id), it.published_at ? String(it.published_at).slice(0, 10) : ''].filter(Boolean).join(' · ');
-        out.push(`- [${mdText(it.title)}](${it.link})${meta ? ` — ${meta}` : ''}`);
+      if (topic) {
+        const j = (v) => (Array.isArray(v) ? v.filter(Boolean).join(', ') : '');
+        const cond = [['검색어', j(topic.search_terms)], ['사이트', j(topic.site_urls)], ['⭐ 우선', j(topic.priority_keywords)], ['제외', j(topic.exclude_keywords)]].filter((x) => x[1]).map((x) => `${x[0]}: ${x[1]}`);
+        if (cond.length) out.push(`> ${cond.join(' · ')}`, '');
+      }
+      for (const it of sorted) {
+        const h = hits(it, topic);
+        const meta = [srcLabel(it), it.published_at ? String(it.published_at).slice(0, 10) : ''].filter(Boolean).join(' · ');
+        out.push(`- ${h.length ? '⭐ ' : ''}[${mdText(it.title)}](${it.link})${meta ? ` — ${meta}` : ''}`);
         const sum = clip(it.summary, summaryMax);
         if (sum) out.push(`  - ${sum}`);
-        out.push(`  - ${tagOf(name)}`);
+        out.push(`  - ${tagOf(name)}${h.length ? ' ' + h.map(tagOf).join(' ') : ''}`);
       }
       out.push('');
     }

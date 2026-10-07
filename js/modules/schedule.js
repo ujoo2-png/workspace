@@ -11,7 +11,7 @@
   const catKey = (c) => CAT_KEY[window.normalizeScheduleCategory(c)];
   function catBadge(c) {
     const label = window.normalizeScheduleCategory(c);
-    return el('span', { class: `cat-badge cat-badge--${CAT_KEY[label]}` }, [el('span', { class: 'cat-dot' }), label]);
+    return el('span', { class: `cat-badge cat-badge--${CAT_KEY[label]}` }, [el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, window.scheduleCategoryEmoji(label)), label]);
   }
   // "N일 후" 빠른 추가 버튼에 쓰는 값(직접 입력도 가능)
   const OFFSET_PRESETS = [1, 3, 5, 7, 14, 30];
@@ -59,9 +59,9 @@
       const base = appState.schedules;
       const counts = {
         all: base.length,
-        today: base.filter((s) => s.date === today && !s.done).length,
-        week: base.filter((s) => s.date >= today && s.date <= weekEnd && !s.done).length,
-        overdue: base.filter((s) => !s.done && s.date < today).length,
+        today: base.filter((s) => window.scheduleCoversDate(s, today) && !s.done).length,
+        week: base.filter((s) => window.scheduleEnd(s) >= today && s.date <= weekEnd && !s.done).length,
+        overdue: base.filter((s) => !s.done && window.scheduleEnd(s) < today).length,
         done: base.filter((s) => s.done).length,
       };
 
@@ -124,9 +124,9 @@
       );
 
       let rows = base.slice();
-      if (quickTab === 'today') rows = rows.filter((s) => s.date === today);
-      else if (quickTab === 'week') rows = rows.filter((s) => s.date >= today && s.date <= weekEnd);
-      else if (quickTab === 'overdue') rows = rows.filter((s) => !s.done && s.date < today);
+      if (quickTab === 'today') rows = rows.filter((s) => window.scheduleCoversDate(s, today));
+      else if (quickTab === 'week') rows = rows.filter((s) => window.scheduleEnd(s) >= today && s.date <= weekEnd);
+      else if (quickTab === 'overdue') rows = rows.filter((s) => !s.done && window.scheduleEnd(s) < today);
       else if (quickTab === 'done') rows = rows.filter((s) => s.done);
       else if (hideDone) rows = rows.filter((s) => !s.done);
 
@@ -152,7 +152,7 @@
             th('category', '구분'),
             th('title', '제목'),
             th('place', '장소'),
-            th('date', '날짜'),
+            th('date', '날짜(기간)'),
             th('dday', 'D-day'),
             el('th', {}, '프로젝트'),
             el('th', {}, '태그'),
@@ -164,7 +164,8 @@
       const tbody = el('tbody', {});
       rows.forEach((s, idx) => {
         const project = appState.projects.find((p) => p.id === s.project_id);
-        const dDay = diffDays(today, s.date);
+        const dDay = diffDays(today, window.scheduleEnd(s) < today ? window.scheduleEnd(s) : s.date > today ? s.date : today);
+        const ongoing = window.isMultiDaySchedule(s) && window.scheduleCoversDate(s, today);
         tbody.append(
           el('tr', { class: s.done ? 'is-done' : '' }, [
             el('td', {}, String(idx + 1)),
@@ -186,8 +187,10 @@
               s.memo ? el('div', { class: 'text-muted', style: 'font-size:12px' }, s.memo) : null,
             ]),
             el('td', {}, s.place ? el('span', { class: 'place-text', title: s.place }, `📍 ${s.place}`) : '-'),
-            el('td', {}, `${formatKoreanDate(s.date)}${s.time ? ' ' + s.time : ''}`),
-            el('td', {}, ddayChip(dDay, s.done)),
+            el('td', {}, window.isMultiDaySchedule(s)
+              ? el('div', {}, [el('div', {}, window.scheduleRangeLabel(s)), s.time ? el('div', { class: 'text-muted', style: 'font-size:12px' }, `시작 ${s.time}`) : null])
+              : `${formatKoreanDate(s.date)}${s.time ? ' ' + s.time : ''}`),
+            el('td', {}, ongoing && !s.done ? el('span', { class: 'dday-chip dday-chip--soon', title: `종료까지 ${diffDays(today, window.scheduleEnd(s))}일` }, `진행 중 · 종료 D-${diffDays(today, window.scheduleEnd(s))}`) : ddayChip(dDay, s.done)),
             el('td', {}, project ? project.name : '-'),
             el('td', {}, [
               (s.tags || []).length ? el('div', { class: 'row wrap', style: 'gap:4px' }, s.tags.map((t) => el('span', { class: 'nm-badge' }, `#${t}`))) : '-',
@@ -256,17 +259,18 @@
       const firstIso = `${calMonth}-01`;
       const firstWeekday = new Date(`${firstIso}T00:00:00`).getDay();
       let cursor = window.addDays(firstIso, -firstWeekday);
-      const byDate = {};
-      for (const s of appState.schedules) {
-        if (catFilter !== 'all' && window.normalizeScheduleCategory(s.category) !== catFilter) continue;
-        if (!byDate[s.date]) byDate[s.date] = [];
-        byDate[s.date].push(s);
-      }
+      const gridEnd = window.addDays(cursor, 41);
+      const visible = appState.schedules.filter((s) => catFilter === 'all' || window.normalizeScheduleCategory(s.category) === catFilter);
+      const lanesByDate = window.buildCalendarLanes(visible, cursor, gridEnd);
+      const MAX_LANES = 3;
 
       for (let i = 0; i < 42; i++) {
         const iso = cursor;
         const inMonth = iso.slice(0, 7) === calMonth;
-        const dayItems = (byDate[iso] || []).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        const lanes = lanesByDate[iso] || [];
+        const shown = lanes.slice(0, MAX_LANES);
+        const hidden = lanes.slice(MAX_LANES).filter(Boolean).length;
+        const isWeekStart = new Date(`${iso}T00:00:00`).getDay() === 0;
         const cell = el(
           'div',
           {
@@ -278,24 +282,31 @@
               el('div', { class: 'calendar-cell__daynum' }, String(Number(iso.slice(8, 10)))),
               holidayMap[iso] ? el('div', { class: 'calendar-cell__holiday', title: holidayMap[iso] }, holidayMap[iso]) : null,
             ]),
-            ...dayItems.slice(0, 3).map((s) =>
-              el(
+            ...shown.map((slot) => {
+              if (!slot) return el('div', { class: 'calendar-cell__item calendar-cell__item--empty', 'aria-hidden': 'true' }, '\u00a0');
+              const { s, pos } = slot;
+              // 기간 막대: 시작일·주(일요일)의 첫 칸에만 제목을 쓰고, 이어지는 칸은 색 막대만 이어 붙인다.
+              const showTitle = pos === 'single' || pos === 'start' || isWeekStart;
+              const dow = new Date(`${iso}T00:00:00`).getDay();
+              const emoji = window.scheduleCategoryEmoji(s.category);
+              return el(
                 'div',
                 {
-                  class: `calendar-cell__item cat-item--${catKey(s.category)} ${s.done ? 'calendar-cell__item--done' : ''}`,
-                  title: `[${window.normalizeScheduleCategory(s.category)}] ${s.title}${s.time ? ' · ' + s.time : ''}${s.place ? ' · 📍' + s.place : ''}${s.offset_days ? ' · ' + s.offset_days + '일 후' : ''}`,
+                  class: `calendar-cell__item cat-item--${catKey(s.category)} span--${pos} ${dow === 0 ? 'span--rowstart' : ''} ${dow === 6 ? 'span--rowend' : ''} ${s.done ? 'calendar-cell__item--done' : ''}`,
+                  title: `${emoji} [${window.normalizeScheduleCategory(s.category)}] ${s.title} · ${window.scheduleRangeLabel(s)}${s.time ? ' · ' + s.time : ''}${s.place ? ' · 📍' + s.place : ''}${s.offset_days ? ' · ' + s.offset_days + '일 후' : ''}`,
                   onclick: (e) => { e.stopPropagation(); openScheduleForm(s); },
                 },
-                [s.parent_schedule_id ? '↳ ' : '', s.title]
-              )
-            ),
-            dayItems.length > 3 ? el('div', { class: 'calendar-cell__more' }, `+${dayItems.length - 3}개`) : null,
+                showTitle ? [el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, emoji), s.parent_schedule_id ? '↳ ' : '', s.title] : '\u00a0'
+              );
+            }),
+            hidden ? el('div', { class: 'calendar-cell__more' }, `+${hidden}개`) : null,
           ]
         );
         grid.append(cell);
         cursor = window.addDays(cursor, 1);
       }
       container.append(grid);
+      container.append(el('div', { class: 'cal-legend', 'aria-label': '구분 범례' }, window.SCHEDULE_CATEGORIES.map((c) => el('span', { class: `cat-badge cat-badge--${CAT_KEY[c]}` }, [el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, window.scheduleCategoryEmoji(c)), c]))));
     }
 
     // 태그 기반 Knowledge 연동(1.2) — 일정 태그와 겹치는 Knowledge 자료가 있으면 작게 링크로 보여준다.
@@ -410,7 +421,7 @@
         class: `cat-chip ${key === 'all' ? '' : `cat-chip--${CAT_KEY[key]}`} ${active ? 'cat-chip--active' : ''}`,
         'aria-pressed': active ? 'true' : 'false',
         onclick: () => { catFilter = key; draw(); },
-      }, [key === 'all' ? null : el('span', { class: 'cat-dot' }), label, el('span', { class: 'cat-chip__count' }, String(count))]);
+      }, [key === 'all' ? null : el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, window.scheduleCategoryEmoji(key)), label, el('span', { class: 'cat-chip__count' }, String(count))]);
     }
 
     async function detach(s) {
@@ -458,7 +469,7 @@
 
     function categorySelect(selected) {
       const select = el('select', { class: 'nm-select', name: 'category' });
-      for (const c of CATEGORIES) select.append(el('option', { value: c, selected: c === window.normalizeScheduleCategory(selected) || undefined }, c));
+      for (const c of CATEGORIES) select.append(el('option', { value: c, selected: c === window.normalizeScheduleCategory(selected) || undefined }, `${window.scheduleCategoryEmoji(c)} ${c}`));
       return select;
     }
 
@@ -532,6 +543,19 @@
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
           const dateInput = el('input', { class: 'nm-input', type: 'date', name: 'date', required: true, value: existing?.date || prefillDate || todayISO() });
+          const endInput = el('input', { class: 'nm-input', type: 'date', name: 'end_date', value: existing?.end_date || '', min: dateInput.value });
+          const endInfo = el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' });
+          const refreshEnd = () => {
+            endInput.min = dateInput.value;
+            if (endInput.value && endInput.value < dateInput.value) endInput.value = dateInput.value;
+            const err = window.validateScheduleRange(dateInput.value, endInput.value);
+            endInfo.textContent = err || (endInput.value && endInput.value > dateInput.value ? `📆 ${window.scheduleRangeLabel({ date: dateInput.value, end_date: endInput.value })}` : '비워 두면 하루 일정이에요.');
+          };
+          const endClear = el('button', { type: 'button', class: 'nm-btn', style: 'padding:4px 10px', onclick: () => { endInput.value = ''; refreshEnd(); } }, '종료일 지우기');
+          const endWrap = el('div', {}, [el('div', { class: 'row', style: 'gap:8px' }, [endInput, endClear]), endInfo]);
+          dateInput.addEventListener('input', refreshEnd);
+          endInput.addEventListener('input', refreshEnd);
+          refreshEnd();
           let offsetsNode = null;
           let repeatNode = null;
           if (isChild) {
@@ -546,7 +570,8 @@
           }
           form.append(
             field('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: existing?.title || '' }), true),
-            field('날짜', dateInput, true),
+            field('시작일', dateInput, true),
+            field('종료일(선택 — 여러 날에 걸친 일정이면 입력)', endWrap),
             field('시간(선택)', el('input', { class: 'nm-input', type: 'time', name: 'time', value: existing?.time || '' })),
             field('구분', categorySelect(existing?.category)),
             field('장소(선택)', el('input', { class: 'nm-input', name: 'place', placeholder: '예: 본사 3층 회의실', value: existing?.place || '' })),
@@ -583,6 +608,7 @@
             const data = {
               title: fd.get('title'),
               date: fd.get('date'),
+              end_date: fd.get('end_date') && fd.get('end_date') > fd.get('date') ? fd.get('end_date') : null,
               time: fd.get('time') || null,
               category: window.normalizeScheduleCategory(fd.get('category')),
               place: (fd.get('place') || '').trim() || null,
@@ -593,6 +619,8 @@
               memo: fd.get('memo') || null,
             };
             if (!isChild) data.repeat_offsets = window.parseOffsets(fd.get('repeat_offsets') ? JSON.parse(fd.get('repeat_offsets')) : []).offsets;
+            const rangeErr = window.validateScheduleRange(fd.get('date'), fd.get('end_date'));
+            if (rangeErr) { toast(rangeErr, 'error'); return; }
             const warn = () => { const w = appState.schemaWarning; appState.schemaWarning = null; return w; };
             try {
               if (existing) {
@@ -628,7 +656,7 @@
                 // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
                 delete data.repeat_offsets;
                 for (let i = 0; i < count; i++) {
-                  await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i) });
+                  await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i), end_date: data.end_date ? window.addDays(data.end_date, stepDays * i) : null });
                 }
                 const w = warn();
                 toast(w ? `저장했습니다. (${w})` : '일정을 저장했습니다.', 'success');
