@@ -10,7 +10,7 @@ globalThis.CONFIG = {
 
   // 앱 버전. 로그인 화면·사이드바·설정 화면이 모두 이 값을 참조하므로,
   // 배포 패키지(zip) 버전을 바꿀 때는 여기 한 곳만 수정하면 된다.
-  version: 'v7.25.1',
+  version: 'v7.25.2',
 
   // Supabase 프로젝트 설정 (mode: 'supabase'일 때만 사용)
   // anon/publishable key는 RLS로 보호되는 값이라 클라이언트에 두어도 안전합니다.
