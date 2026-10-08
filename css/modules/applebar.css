@@ -4,7 +4,7 @@
 :root[data-theme='dark'] { --applebar-bg: rgba(28, 31, 39, 0.72); --applebar-line: rgba(255, 255, 255, 0.1); }
 
 .applebar {
-  position: sticky; top: 0; z-index: 70; height: var(--applebar-h);
+  position: sticky; top: 0; z-index: 70; min-height: var(--applebar-h);
   background: var(--applebar-bg);
   -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--applebar-line);
@@ -88,3 +88,15 @@ body.nav-top .main { padding-top: 22px; }
   .applebar__panel--user { right: -8px; }
 }
 @media (prefers-reduced-motion: reduce) { .applebar__sheet, .applebar__burger span { transition: none; } }
+
+/* v7.25.1: '더보기' 제거 — 모든 메뉴를 바로 노출. 데스크톱은 2단(윗줄: 로고·검색·알림·사용자 / 아랫줄: 전체 메뉴, 좁으면 줄바꿈) */
+@media (min-width: 921px) {
+  .applebar__inner { height: auto; grid-template-columns: 1fr auto; grid-template-areas: 'brand actions' 'nav nav'; row-gap: 0; padding-top: 6px; padding-bottom: 6px; }
+  .applebar__brand { grid-area: brand; }
+  .applebar__actions { grid-area: actions; }
+  .applebar__nav { grid-area: nav; justify-self: stretch; }
+  .applebar__list { flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+  .applebar__link { padding: 5px 10px; font-size: 12.5px; }
+}
+@media (max-width: 920px) { body.nav-both .sidebar, body.nav-both .sidebar-toggle { display: none; } body.nav-both .app-shell { grid-template-columns: minmax(0, 1fr); } }
+body.nav-both .applebar__brand { visibility: hidden; }

@@ -1,6 +1,6 @@
 /* v7.24.0 Coterie 스타일 벤토 홈 */
-.bento{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(120px,auto);gap:14px;max-width:1200px;margin:0 auto}
-.bento-tile{background:var(--surface,#fff);border:1px solid var(--border,rgba(0,0,0,.08));border-radius:22px;padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.04);min-width:0;transition:transform .15s,box-shadow .15s}
+.bento{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;gap:14px;max-width:1200px;margin:0 auto}
+.bento-tile{min-height:120px;background:var(--surface,#fff);border:1px solid var(--border,rgba(0,0,0,.08));border-radius:22px;padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.04);min-width:0;transition:transform .15s,box-shadow .15s}
 .bento-tile[style*="cursor:pointer"]:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.08)}
 .bento-hero{grid-column:span 2;grid-row:span 2;background:linear-gradient(145deg,#1d1d1f,#3a3a3f);color:#fff;display:flex;flex-direction:column;justify-content:space-between}
 .bento-hero__hello{font-size:15px;opacity:.8}
@@ -27,3 +27,12 @@
 .bento-pill{border:1px solid var(--border,rgba(0,0,0,.12));background:transparent;color:inherit;border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer}
 @media (max-width:900px){.bento{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:520px){.bento{grid-template-columns:minmax(0,1fr)}.bento-hero,.bento-weather,.bento-today,.bento-projects,.bento-links{grid-column:span 1}.bento-hero{grid-row:span 1;gap:14px}}
+
+.bento-brief{min-height:0;grid-column:1/-1;padding:12px 18px;border-radius:999px;background:var(--surface,#fff)}
+.bento-brief__t{font-size:14px}
+.bento-bar-top{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;margin-bottom:-6px}
+.bento-edit{border:1px solid var(--border,rgba(0,0,0,.12));background:transparent;color:inherit;border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer}
+.bento-editing{outline:2px dashed rgba(0,113,227,.5);outline-offset:-4px}
+.bento-hidden{opacity:.4}
+.bento-editbar{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin:-6px 0 8px;opacity:.9}
+.bento-editbar button{border:none;background:rgba(127,127,127,.2);color:inherit;border-radius:8px;padding:2px 8px;cursor:pointer;font-size:11px}

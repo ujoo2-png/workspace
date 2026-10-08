@@ -46,6 +46,38 @@ expect('옛 반복 필드 제거', (await page.locator('.nm-modal [name=repeat_k
 await page.screenshot({ path: path.join(SHOTS, 'schedule-offsets.png') });
 await page.keyboard.press('Escape');
 
+// 4b) v7.25 벤토: 한 줄 브리핑 / 카드 숨기기 저장 / 빠른 일정 추가
+await page.evaluate(() => { location.hash = '#/home'; }); await page.waitForSelector('.bento');
+expect('한 줄 브리핑', (await page.locator('.bento-brief').count()) === 1 && /✨/.test(await page.locator('.bento-brief').innerText()));
+await page.click('.bento-edit');
+expect('편집 모드 카드 막대', (await page.locator('.bento-editbar').count()) >= 6);
+await page.click('[data-bento="bento-dday"] [data-act=toggle]');
+await page.click('.bento-edit:has-text("완료")');
+expect('D-day 카드 숨김', (await page.locator('[data-bento="bento-dday"]').count()) === 0);
+await page.reload({ waitUntil: 'load' }); await page.waitForSelector('.bento');
+expect('숨김 상태 유지', (await page.locator('[data-bento="bento-dday"]').count()) === 0);
+await page.keyboard.press('Control+k'); await page.waitForSelector('.quickfind-list');
+await page.fill('.nm-modal input.nm-input', '+내일 오후 3시 치과');
+expect('새 일정 항목', /일정 추가: 치과/.test(await page.locator('.quickfind-list').innerText()));
+await page.keyboard.press('Enter'); await page.waitForTimeout(500);
+const added = await page.evaluate(() => window.appState.schedules.find((x) => x.title === '치과'));
+expect('일정 생성(15:00)', !!added && String(added.time).startsWith('15:00'), JSON.stringify(added));
+
+// 4c) v7.25.1: 사이드바+상단바 동시 / 더보기 없이 전체 메뉴 / 날씨 카드 클릭 → 주간예보
+const b = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+b.on('pageerror', (e) => errors.push('both pageerror: ' + e.message));
+await b.route('**/api.open-meteo.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+await login(b, base, { nav: 'both', home: 'bento' });
+await b.waitForSelector('.bento');
+expect('사이드바 + 상단바 동시', (await b.locator('.sidebar').count()) === 1 && (await b.locator('.applebar').count()) === 1);
+expect('더보기 버튼 없음', (await b.locator('.applebar__more').count()) === 0);
+const vis = await b.locator('.applebar__list .applebar__link').evaluateAll((ns) => ns.filter((n) => n.getBoundingClientRect().width > 0).length);
+expect('상단 메뉴 16개 모두 표시', vis === 16, String(vis));
+await b.screenshot({ path: path.join(SHOTS, 'both-desktop.png') });
+await b.click('[data-bento="bento-weather"]'); await b.waitForTimeout(500);
+expect('날씨 카드 → 주간예보 모달', (await b.locator('.nm-modal').count()) >= 1 && /주간예보/.test(await b.locator('.nm-modal').first().innerText()));
+expect('설정으로 이동하지 않음', !/settings/.test(await b.evaluate(() => location.hash)));
+
 // 5) 모바일
 const m = await (await browser.newContext({ viewport: { width: 390, height: 800 } })).newPage();
 m.on('pageerror', (e) => errors.push('mobile pageerror: ' + e.message));

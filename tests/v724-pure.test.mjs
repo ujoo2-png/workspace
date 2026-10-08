@@ -83,3 +83,34 @@ test('hwpx: 구형 .hwp 바이트와 손상 파일은 친절한 오류', { skip 
   await assert.rejects(g.HwpBridge.hwpxToDocx(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2])), /hwpx/);
   await assert.rejects(g.HwpBridge.hwpxToDocx(new Uint8Array([1, 2, 3, 4, 5])), /열 수 없습니다/);
 });
+
+test('hwpx 되쓰기: 채운 docx → 원본 hwpx의 같은 칸에 글자 기록(구조 유지)', { skip }, async () => {
+  const { FT, FE } = F.loadAppScripts();
+  load('../js/services/hwpxBridge.js');
+  const src = await makeHwpx();
+  const { bytes } = await g.HwpBridge.hwpxToDocx(src);
+  const { analysis } = await FE.analyzeTemplate(bytes, 'docx');
+  const OPTS = { dateFormat: 'YYYY-MM-DD', order: 'asc', addRows: true };
+  const ds = FT.buildDataset({ career: F.sampleCareer(), basic: F.sampleBasic, todayIso: '2026-10-07' });
+  const values = FT.buildInitialValues(analysis, ds, OPTS);
+  const mapping = { version: 1, kind: 'docx', fields: analysis.fields, repeats: analysis.repeats, options: OPTS, warnings: [] };
+  const filled = await FE.fillTemplate('docx', bytes, mapping, values, { dataset: ds });
+  const out = await g.HwpBridge.docxToHwpx(filled.bytes);
+  assert.ok(out.changed >= 2, `changed=${out.changed}`);
+  const z = await libs.JSZip.loadAsync(out.bytes);
+  const xml = await z.file('Contents/section0.xml').async('string');
+  assert.ok(xml.includes(F.sampleBasic.name), '이름');
+  assert.ok(xml.includes('<hp:cellSpan colSpan="1" rowSpan="2"/>'), '병합 정보 유지');
+  assert.ok(xml.includes('성 명') && xml.includes('이 력 서'));
+  assert.equal(await z.file('mimetype').async('string'), 'application/hwp+zip');
+  await assert.rejects(g.HwpBridge.docxToHwpx(bytes.length ? (await (async () => { const zz = await libs.JSZip.loadAsync(bytes); zz.remove('hwpx/original.hwpx'); return zz.generateAsync({ type: 'uint8array' }); })()) : bytes), /원본/);
+});
+test('parseQuickSchedule: 날짜·시간 표현 분리', () => {
+  const t = '2026-10-08'; // 목요일
+  assert.deepEqual(g.parseQuickSchedule('+내일 오후 3시 팀 회의', t), { title: '팀 회의', date: '2026-10-09', time: '15:00' });
+  assert.deepEqual(g.parseQuickSchedule('일정 모레 14:30 병원', t), { title: '병원', date: '2026-10-10', time: '14:30' });
+  assert.equal(g.parseQuickSchedule('다음주 금요일 발표', t).date, '2026-10-16');
+  assert.equal(g.parseQuickSchedule('10/20 시험', t).date, '2026-10-20');
+  assert.equal(g.parseQuickSchedule('1/5 새해', t).date, '2027-01-05');
+  assert.equal(g.parseQuickSchedule('+', t), null);
+});
