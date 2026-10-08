@@ -60,7 +60,8 @@
   //   · 대한민국(기본) 시계 → 등록된 날씨 지역의 첫 번째 도시
   //   · 그 밖 시계 → 같은 이름의 프리셋 도시(예: 뉴욕 시계 → 뉴욕)가 있으면 그 도시, 없으면 첫 번째 날씨 도시
   const CLOCK_CITIES_KEY = 'workspace:clockCities';
-  const ZONE_DEFAULT_CITY = { 'America/New_York': '뉴욕', 'Europe/London': '런던', 'Europe/Paris': '파리', 'Asia/Tokyo': '도쿄', 'Asia/Singapore': '싱가포르' };
+  // 모든 시계 프리셋은 같은 지역의 도시에 연결된다(예전에는 LA 등이 빠져 있어 서울 날씨 배경이 그대로 나왔다).
+  const ZONE_DEFAULT_CITY = { 'America/New_York': '뉴욕', 'America/Los_Angeles': '로스앤젤레스', 'Europe/London': '런던', 'Europe/Paris': '파리', 'Asia/Tokyo': '도쿄', 'Asia/Shanghai': '상하이', 'Asia/Singapore': '싱가포르', 'Asia/Dubai': '두바이', 'Australia/Sydney': '시드니', 'Pacific/Auckland': '오클랜드', 'Europe/Berlin': '베를린' };
   function getClockCityMap() {
     try {
       const raw = window.settingsSync.get(CLOCK_CITIES_KEY);
@@ -93,6 +94,7 @@
     return map;
   }
 
+  window.ZONE_DEFAULT_CITY = ZONE_DEFAULT_CITY;
   window.clockCityOptions = clockCityOptions;
   window.resolveClockCity = resolveClockCity;
   window.setClockCity = setClockCity;

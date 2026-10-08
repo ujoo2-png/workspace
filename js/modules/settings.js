@@ -105,6 +105,20 @@
           ]),
         ]),
         el('div', { class: 'nm-card' }, [
+          el('h3', {}, '화면 구성'),
+          el('p', { class: 'text-muted' }, '내비게이션과 홈 화면의 모양을 고릅니다. 기기 간 동기화되며, 내비게이션은 바꾼 뒤 새로고침하면 적용됩니다.'),
+          (() => {
+            const choice = (key, label, options, cur, onPick) => el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:10px; align-items:center' }, [
+              el('strong', { style: 'font-size:13px; min-width:92px' }, label),
+              ...options.map(([val, text]) => el('button', { type: 'button', class: `nm-btn ${cur === val ? 'nm-btn--primary' : ''}`, 'aria-pressed': String(cur === val), onclick: () => { window.settingsSync.set(key, val); onPick(); } }, text)),
+            ]);
+            return el('div', {}, [
+              choice('workspace:navStyle', '내비게이션', [['top', '상단바 (Apple 스타일)'], ['side', '사이드바']], window.getNavStyle(), () => { toast('적용하려고 새로고침합니다.', 'success'); setTimeout(() => location.reload(), 400); }),
+              choice('workspace:homeStyle', '홈 화면', [['bento', '벤토 대시보드'], ['classic', '기본(위젯 목록)']], window.getHomeStyle ? window.getHomeStyle() : 'bento', () => { toast('홈 화면 스타일을 바꿨어요.', 'success'); window.navigate('/settings'); location.reload(); }),
+            ]);
+          })(),
+        ]),
+        el('div', { class: 'nm-card' }, [
           el('h3', {}, '화면 효과'),
           el('p', { class: 'text-muted' }, '홈 화면의 입장 애니메이션·숫자 카운트업·날씨 배경 모션(빗방울/눈/구름)을 켜고 끕니다. 끄면 정지된 화면으로 보입니다. 운영체제의 "동작 줄이기" 설정이 켜져 있으면 이 설정과 관계없이 항상 정지 상태입니다. 기기 간 동기화됩니다.'),
           (() => {

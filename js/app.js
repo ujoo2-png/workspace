@@ -26,6 +26,9 @@
   // 설정 화면의 "커스텀 API 관리"가 메뉴 체크박스 목록을 만들 때 재사용한다.
   window.NAV_ITEMS = NAV_ITEMS;
 
+  // 내비게이션 스타일(기본: 상단바). 설정 화면에서 바꾸고 새로고침하면 적용된다.
+  window.getNavStyle = () => (window.settingsSync.get('workspace:navStyle') === 'side' ? 'side' : 'top');
+
   window.applyTheme(window.settingsSync.get('workspace:theme') || 'auto');
 
   // 다른 기기에서 바꾼 설정이 로그인/새로고침 직후 원격에서 내려오면(settingsSync.load) 테마와
@@ -127,6 +130,10 @@
       el('div', {}, [el('div', { class: 'brand__title' }, '나만의 Work Space'), el('div', { class: 'brand__subtitle' }, window.CONFIG.version)]),
     ]);
 
+    // v7.24.0: 내비게이션 스타일 — 'top'(Apple 스타일 상단바, 기본) | 'side'(기존 사이드바)
+    const navStyle = window.getNavStyle();
+    if (navStyle === 'top') { buildTopShell(); return; }
+    document.body.classList.remove('nav-top');
     const sidebar = el('aside', { class: 'sidebar' }, [
       el('div', { class: 'row row--between' }, [
         brand,
@@ -178,16 +185,130 @@
     }
   }
 
+  // ---- Apple 스타일 상단 navbar (v7.24.0) ----
+  // 반투명 유리(backdrop blur) 고정 바 · 가운데 주요 메뉴 · "더보기" 패널(전체 메뉴 격자) · 오른쪽 검색(⌘K)/알림/사용자 메뉴.
+  // 좁은 화면에서는 메뉴 버튼으로 전체 화면 목록이 열린다. 라우터는 .nav-item[data-path]의 active만 토글하므로 같은 클래스를 쓴다.
+  const PRIMARY_NAV = ['/home', '/schedule', '/projects', '/challenges', '/health', '/knowledge', '/career'];
+  function buildTopShell() {
+    const el = window.el;
+    const appState = window.appState;
+    document.body.classList.add('nav-top');
+    const go = (path) => { closeAll(); window.navigate(path); };
+    const byPath = (p) => NAV_ITEMS.find((i) => i.path === p);
+    const primary = PRIMARY_NAV.map(byPath).filter(Boolean);
+    const more = NAV_ITEMS.filter((i) => !PRIMARY_NAV.includes(i.path));
+    const link = (item) => el('li', { class: 'nav-item applebar__link', dataset: { path: item.path }, onclick: () => go(item.path) }, [
+      el('span', { class: 'applebar__icon', 'aria-hidden': 'true' }, item.icon), el('span', {}, item.label),
+      el('span', { class: 'nav-item__badge hidden', dataset: { role: 'nav-badge', path: item.path } }, '0'),
+    ]);
+
+    const morePanel = el('div', { class: 'applebar__panel', role: 'menu', hidden: true }, [
+      el('div', { class: 'applebar__panel-grid' }, more.map((item) => el('button', { type: 'button', class: 'nav-item applebar__tile', role: 'menuitem', dataset: { path: item.path }, onclick: () => go(item.path) }, [el('span', { class: 'applebar__tile-icon', 'aria-hidden': 'true' }, item.icon), el('span', {}, item.label)]))),
+    ]);
+    const moreBtn = el('button', { type: 'button', class: 'applebar__more', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); togglePanel(morePanel, moreBtn); } }, ['더보기 ', el('span', { class: 'applebar__chev', 'aria-hidden': 'true' }, '⌄')]);
+
+    const userPanel = el('div', { class: 'applebar__panel applebar__panel--user', role: 'menu', hidden: true }, [
+      el('div', { class: 'applebar__user-name' }, appState.user?.name || appState.user?.email || ''),
+      el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:8px' }, window.CONFIG.version),
+      el('button', { type: 'button', class: 'applebar__menu-item nav-item', dataset: { path: '/settings' }, role: 'menuitem', onclick: () => go('/settings') }, '⚙️ 설정'),
+      el('button', { type: 'button', class: 'applebar__menu-item', role: 'menuitem', onclick: () => { closeAll(); logout(); } }, '🚪 로그아웃'),
+    ]);
+    const initial = (appState.user?.name || appState.user?.email || '?').trim().charAt(0).toUpperCase();
+    const userBtn = el('button', { type: 'button', class: 'applebar__avatar', title: appState.user?.email || '', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); togglePanel(userPanel, userBtn); } }, initial);
+    const searchBtn = el('button', { type: 'button', class: 'applebar__icon-btn', title: '빠른 이동 검색 (Ctrl/⌘ + K)', 'aria-label': '빠른 이동 검색', onclick: () => { closeAll(); openQuickFind(); } }, '🔍');
+    const bellBtn = el('button', { type: 'button', class: 'applebar__icon-btn', title: '알림(홈에서 확인)', 'aria-label': '알림', onclick: () => go('/home') }, ['🔔', el('span', { class: 'applebar__bell-badge hidden', dataset: { role: 'bell-badge' } }, '0')]);
+    const burger = el('button', { type: 'button', class: 'applebar__burger', 'aria-label': '메뉴 열기', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); const open = !header.classList.contains('applebar--open'); header.classList.toggle('applebar--open', open); burger.setAttribute('aria-expanded', String(open)); document.body.classList.toggle('applebar-lock', open); } }, [el('span', {}), el('span', {})]);
+
+    const header = el('header', { class: 'applebar', role: 'banner' }, [
+      el('div', { class: 'applebar__inner' }, [
+        el('div', { class: 'applebar__brand', title: '홈으로', onclick: () => go('/home') }, [el('span', { class: 'applebar__logo' }, '⌂'), el('span', { class: 'applebar__brand-text' }, 'Work Space')]),
+        el('nav', { class: 'applebar__nav', 'aria-label': '주요 메뉴' }, [
+          el('ul', { class: 'applebar__list' }, [...primary.map(link), el('li', { class: 'applebar__more-wrap' }, [moreBtn, morePanel])]),
+        ]),
+        el('div', { class: 'applebar__actions' }, [searchBtn, bellBtn, el('div', { class: 'applebar__user-wrap' }, [userBtn, userPanel]), burger]),
+      ]),
+      // 좁은 화면용 전체 메뉴(햄버거)
+      el('div', { class: 'applebar__sheet' }, [el('ul', { class: 'applebar__sheet-list' }, NAV_ITEMS.map(link))]),
+    ]);
+
+    function closeAll() {
+      for (const [panel, btn] of [[morePanel, moreBtn], [userPanel, userBtn]]) { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+      header.classList.remove('applebar--open'); burger.setAttribute('aria-expanded', 'false'); document.body.classList.remove('applebar-lock');
+    }
+    function togglePanel(panel, btn) {
+      const open = panel.hidden;
+      closeAll();
+      panel.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+    }
+    document.addEventListener('click', (e) => { if (!header.contains(e.target)) closeAll(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAll(); });
+    window.addEventListener('scroll', () => header.classList.toggle('applebar--scrolled', window.scrollY > 4), { passive: true });
+
+    async function logout() {
+      if (!window.confirmDialog('로그아웃 하시겠습니까?')) return;
+      await window.getStore().signOut();
+      location.hash = '';
+      location.reload();
+    }
+    const main = el('main', { class: 'main' }, [el('div', { id: 'view-root' })]);
+    const shell = el('div', { class: 'app-shell app-shell--top' }, [main]);
+    app.innerHTML = '';
+    app.append(header, shell);
+    shellEl = shell;
+    expandBtnEl = null;
+  }
+
+  // ---- 빠른 이동 검색(Ctrl/⌘+K): 메뉴 + 일정/프로젝트/Knowledge 제목 ----
+  function openQuickFind() {
+    const el = window.el;
+    const appState = window.appState;
+    window.openModal({
+      title: '빠른 이동',
+      width: '560px',
+      contentBuilder(body, close) {
+        const input = el('input', { class: 'nm-input', placeholder: '메뉴·일정·프로젝트·Knowledge 검색', autofocus: true, 'aria-label': '빠른 이동 검색' });
+        const list = el('div', { class: 'quickfind-list', role: 'listbox' });
+        const entries = () => [
+          ...NAV_ITEMS.map((i) => ({ kind: '메뉴', label: `${i.icon} ${i.label}`, hay: i.label, go: () => window.navigate(i.path) })),
+          ...appState.schedules.filter((x) => !x.done).slice(0, 300).map((x) => ({ kind: '일정', label: `🗓️ ${x.title}`, sub: x.date, hay: `${x.title} ${x.place || ''}`, go: () => window.navigate('/schedule') })),
+          ...appState.projects.filter((x) => !x.deleted_at).map((x) => ({ kind: '프로젝트', label: `📁 ${x.name}`, hay: x.name, go: () => window.navigate('/projects') })),
+          ...(appState.knowledgeDocs || []).slice(0, 300).map((x) => ({ kind: 'Knowledge', label: `📓 ${x.title}`, hay: `${x.title} ${(x.tags || []).join(' ')}`, go: () => window.navigate('/knowledge') })),
+        ];
+        let active = 0; let shown = [];
+        function render() {
+          const q = input.value.trim().toLowerCase();
+          shown = entries().filter((e) => !q || e.hay.toLowerCase().includes(q)).slice(0, 12);
+          active = Math.min(active, Math.max(0, shown.length - 1));
+          list.replaceChildren(...(shown.length ? shown.map((e, i) => el('button', { type: 'button', role: 'option', class: `quickfind-item ${i === active ? 'is-active' : ''}`, onclick: () => { close(); e.go(); } }, [el('span', {}, e.label), el('span', { class: 'text-muted' }, [e.sub ? `${e.sub} · ` : '', e.kind])])) : [el('div', { class: 'text-muted', style: 'padding:10px' }, '결과가 없습니다.')]));
+        }
+        input.addEventListener('input', () => { active = 0; render(); });
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'ArrowDown') { ev.preventDefault(); active = Math.min(shown.length - 1, active + 1); render(); }
+          else if (ev.key === 'ArrowUp') { ev.preventDefault(); active = Math.max(0, active - 1); render(); }
+          else if (ev.key === 'Enter' && shown[active]) { ev.preventDefault(); close(); shown[active].go(); }
+        });
+        body.append(input, list);
+        render();
+        setTimeout(() => input.focus(), 30);
+      },
+    });
+  }
+  window.openQuickFind = openQuickFind;
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && document.querySelector('#view-root')) { e.preventDefault(); openQuickFind(); }
+  });
+
   function updateNavBadge() {
     const unread = window.appState.notifications.filter((n) => !n.is_read).length;
-    const badge = document.querySelector('[data-role="nav-badge"][data-path="/home"]');
-    if (!badge) return;
-    badge.textContent = String(unread);
-    badge.classList.toggle('hidden', unread === 0);
+    for (const badge of document.querySelectorAll('[data-role="nav-badge"][data-path="/home"], [data-role="bell-badge"]')) {
+      badge.textContent = String(unread);
+      badge.classList.toggle('hidden', unread === 0);
+    }
   }
 
   function registerRoutes() {
-    window.registerRoute('/home', window.renderHome);
+    window.registerRoute('/home', window.renderHomeRoute);
     window.registerRoute('/schedule', window.renderSchedule);
     window.registerRoute('/projects', window.renderProjects);
     window.registerRoute('/challenges', window.renderChallenges);

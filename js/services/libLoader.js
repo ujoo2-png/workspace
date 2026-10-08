@@ -27,6 +27,7 @@
         await Promise.all([loadScript('js/vendor/jszip.min.js'), loadScript('js/vendor/exceljs.min.js'), loadScript('js/utils/xmlTree.js')]);
         await loadScript('js/services/formTemplate.js');
         await loadScript('js/services/formEngine.js');
+        await loadScript('js/services/hwpxBridge.js');
         await loadScript('js/modules/careerDocs.js');
       })();
       toolsPromise.catch(() => { toolsPromise = null; });

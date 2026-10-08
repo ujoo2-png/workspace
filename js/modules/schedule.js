@@ -14,7 +14,8 @@
     return el('span', { class: `cat-badge cat-badge--${CAT_KEY[label]}` }, [el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, window.scheduleCategoryEmoji(label)), label]);
   }
   // "N일 후" 빠른 추가 버튼에 쓰는 값(직접 입력도 가능)
-  const OFFSET_PRESETS = [1, 3, 5, 7, 14, 30];
+  const OFFSET_PRESETS_BEFORE = [-14, -7, -3, -1];
+  const OFFSET_PRESETS_AFTER = [1, 3, 5, 7, 14, 30];
   const HIDE_DONE_KEY = 'workspace:schedule:hideDone';
 
   function renderSchedule(root) {
@@ -293,7 +294,7 @@
                 'div',
                 {
                   class: `calendar-cell__item cat-item--${catKey(s.category)} span--${pos} ${dow === 0 ? 'span--rowstart' : ''} ${dow === 6 ? 'span--rowend' : ''} ${s.done ? 'calendar-cell__item--done' : ''}`,
-                  title: `${emoji} [${window.normalizeScheduleCategory(s.category)}] ${s.title} · ${window.scheduleRangeLabel(s)}${s.time ? ' · ' + s.time : ''}${s.place ? ' · 📍' + s.place : ''}${s.offset_days ? ' · ' + s.offset_days + '일 후' : ''}`,
+                  title: `${emoji} [${window.normalizeScheduleCategory(s.category)}] ${s.title} · ${window.scheduleRangeLabel(s)}${s.time ? ' · ' + s.time : ''}${s.place ? ' · 📍' + s.place : ''}${s.offset_days ? ' · ' + window.offsetLabel(s.offset_days) : ''}`,
                   onclick: (e) => { e.stopPropagation(); openScheduleForm(s); },
                 },
                 showTitle ? [el('span', { class: 'cat-emoji', 'aria-hidden': 'true' }, emoji), s.parent_schedule_id ? '↳ ' : '', s.title] : '\u00a0'
@@ -407,10 +408,13 @@
     function repeatBadge(s) {
       if (s.parent_schedule_id) {
         const parent = appState.schedules.find((x) => x.id === s.parent_schedule_id);
-        return el('div', { class: 'repeat-badge', title: parent ? `"${parent.title}" 일정에서 ${s.offset_days}일 뒤로 자동 생성됨` : '자동 생성된 일정' }, `↳ ${s.offset_days || '?'}일 후 일정${parent ? ` · 원본: ${parent.title}` : ''}`);
+        return el('div', { class: 'repeat-badge', title: parent ? `"${parent.title}" 일정에서 ${s.offset_days ? window.offsetLabel(s.offset_days) : ''} 날짜로 자동 생성됨` : '자동 생성된 일정' }, `↳ ${s.offset_days ? window.offsetLabel(s.offset_days) : '?'} 일정${parent ? ` · 원본: ${parent.title}` : ''}`);
       }
       const offs = s.repeat_offsets || [];
-      if (offs.length) return el('div', { class: 'repeat-badge repeat-badge--parent', title: '이 일정을 기준으로 N일 뒤 일정이 자동 생성되어 있습니다' }, `🔁 ${offs.map((n) => `+${n}`).join(' · ')}일 후`);
+      if (offs.length) {
+        const shown = offs.slice(0, 4).map((n) => (n < 0 ? String(n) : `+${n}`)).join(' · ');
+        return el('div', { class: 'repeat-badge repeat-badge--parent', title: `이 일정을 기준으로 ${offs.map(window.offsetLabel).join(', ')} 일정이 자동 생성되어 있습니다` }, `🔁 ${shown}${offs.length > 4 ? ` 외 ${offs.length - 4}건` : ''}일`);
+      }
       return null;
     }
 
@@ -451,7 +455,7 @@
             } catch (e) { toast(`삭제하지 못했습니다: ${e.message || e}`, 'error'); }
           };
           body.append(
-            el('p', {}, `"${s.title}"에서 자동 생성된 일정이 ${kids.length}건 있습니다 (${kids.map((k) => `${k.offset_days}일 후`).join(', ')}).`),
+            el('p', {}, `"${s.title}"에서 자동 생성된 일정이 ${kids.length}건 있습니다 (${kids.map((k) => window.offsetLabel(k.offset_days)).join(', ')}).`),
             el('div', { class: 'stack' }, [
               el('button', { class: 'nm-btn nm-btn--danger', id: 'del-all', onclick: () => run(true) }, `모두 삭제 (이 일정 + ${kids.length}건)`),
               el('button', { class: 'nm-btn', id: 'del-parent-only', onclick: () => run(false) }, `이 일정만 삭제 (${kids.length}건은 독립 일정으로 유지)`),
@@ -473,20 +477,22 @@
       return select;
     }
 
-    // "N일 후 알림/반복" 입력: 칩 목록 + 직접 입력("5, 7" 또는 "5일 후") + 빠른 추가 버튼. 1~365, 최대 10개.
-    // getBaseDate()로 현재 날짜 입력값을 읽어 "→ 10/12(월), 10/14(수)에도 일정이 생깁니다" 미리보기를 보여준다.
+    // 통합 "반복·알림" 입력(v7.24.0): 기준 일정의 며칠 전/후에 일정을 자동으로 만든다.
+    //  · 칩 목록("3일 전", "5일 후") · 직접 입력("3일 전, 5일 후, +7, -1") · 빠른 추가(전/후 버튼)
+    //  · "반복 채우기": 매일/매주/매월 × 횟수 → 같은 칩 목록에 채워 넣는다(예전의 별도 "반복" 기능을 이 입력으로 합쳤다).
+    // getBaseDate()로 현재 시작일을 읽어 "→ 10/5(월), 10/12(월)에도 일정이 만들어집니다" 미리보기를 보여준다. ±1~365일, 최대 60개.
     function offsetsField(initial, getBaseDate, getChildCount) {
       let offsets = window.parseOffsets(initial || []).offsets;
       const chips = el('div', { class: 'offset-chips' });
       const preview = el('div', { class: 'text-muted offset-preview' });
       const msg = el('div', { class: 'offset-msg' });
-      const input = el('input', { class: 'nm-input', id: 'offset-input', placeholder: '예: 5, 7  (며칠 후)', style: 'flex:1; min-width:120px', inputmode: 'numeric', 'aria-label': 'N일 후 직접 입력' });
+      const input = el('input', { class: 'nm-input', id: 'offset-input', placeholder: '예: 3일 전, 5일 후, +7, -1', style: 'flex:1; min-width:120px', 'aria-label': '며칠 전/후 직접 입력' });
       const hidden = el('input', { type: 'hidden', name: 'repeat_offsets' });
       function setOffsets(list, notice) {
         const r = window.parseOffsets(list);
         offsets = r.offsets;
         const notes = [];
-        if (r.invalid.length) notes.push(`1~${window.MAX_OFFSET_DAYS}일만 가능해요: ${r.invalid.join(', ')} 제외`);
+        if (r.invalid.length) notes.push(`±1~${window.MAX_OFFSET_DAYS}일만 가능해요: ${r.invalid.join(', ')} 제외`);
         if (r.truncated) notes.push(`최대 ${window.MAX_REPEAT_OFFSETS}개까지만 저장돼요`);
         msg.textContent = notice || notes.join(' · ');
         render();
@@ -495,41 +501,52 @@
         hidden.value = JSON.stringify(offsets);
         chips.innerHTML = '';
         for (const n of offsets) {
-          chips.append(el('span', { class: 'offset-chip' }, [`${n}일 후`, el('button', { type: 'button', class: 'offset-chip__x', title: `${n}일 후 제거`, 'aria-label': `${n}일 후 제거`, onclick: () => setOffsets(offsets.filter((x) => x !== n)) }, '×')]));
+          const label = window.offsetLabel(n);
+          chips.append(el('span', { class: `offset-chip ${n < 0 ? 'offset-chip--before' : ''}` }, [label, el('button', { type: 'button', class: 'offset-chip__x', title: `${label} 제거`, 'aria-label': `${label} 제거`, onclick: () => setOffsets(offsets.filter((x) => x !== n)) }, '×')]));
         }
         if (!offsets.length) chips.append(el('span', { class: 'text-muted', style: 'font-size:12px' }, '없음 — 아래에서 추가하세요'));
         const base = getBaseDate();
+        const fmt = (n) => { const d = window.shiftIso(base, n); return `${d.slice(5).replace('-', '/')}(${window.weekdayLabel(d)})`; };
         preview.textContent = offsets.length && base
-          ? `→ ${offsets.map((n) => { const d = window.shiftIso(base, n); return `${d.slice(5).replace('-', '/')}(${window.weekdayLabel(d)})`; }).join(', ')} 에도 일정이 만들어집니다`
+          ? `→ ${offsets.length > 8 ? `${offsets.slice(0, 8).map(fmt).join(', ')} 외 ${offsets.length - 8}건` : offsets.map(fmt).join(', ')} 에도 일정이 만들어집니다`
           : '';
-        if (getChildCount() && !offsets.length) preview.textContent = `저장하면 연결된 "N일 후" 일정 ${getChildCount()}건이 삭제됩니다`;
+        if (getChildCount() && !offsets.length) preview.textContent = `저장하면 연결된 자동 생성 일정 ${getChildCount()}건이 삭제됩니다`;
       }
       const addFromInput = () => {
         if (!input.value.trim()) return;
-        setOffsets([...offsets, ...(input.value.match(/\d+(?:\.\d+)?/g) || [])]);
+        setOffsets([...offsets, ...window.parseOffsets(input.value).offsets], null);
+        const r = window.parseOffsets(input.value);
+        if (r.invalid.length) msg.textContent = `±1~${window.MAX_OFFSET_DAYS}일만 가능해요: ${r.invalid.join(', ')} 제외`;
         input.value = '';
       };
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFromInput(); } });
       input.addEventListener('blur', addFromInput);
-      const presets = el('div', { class: 'row wrap', style: 'gap:6px' }, OFFSET_PRESETS.map((n) => el('button', { type: 'button', class: 'nm-btn offset-preset', onclick: () => setOffsets([...offsets, n]) }, `+${n}일`)));
+      const presetBtn = (n) => el('button', { type: 'button', class: `nm-btn offset-preset ${n < 0 ? 'offset-preset--before' : ''}`, onclick: () => setOffsets([...offsets, n]) }, n < 0 ? `${-n}일 전` : `+${n}일`);
+      const presets = el('div', { class: 'row wrap', style: 'gap:6px' }, [...OFFSET_PRESETS_BEFORE.map(presetBtn), ...OFFSET_PRESETS_AFTER.map(presetBtn)]);
+      // 반복 채우기: 매일/매주/매월 × 횟수(원본 포함) → 칩으로 변환
+      const kindSel = el('select', { class: 'nm-select', style: 'width:auto', 'aria-label': '반복 주기' }, [
+        el('option', { value: 'daily' }, '매일'), el('option', { value: 'weekly', selected: true }, '매주'), el('option', { value: 'monthly' }, '매월(30일 간격)'),
+      ]);
+      const countInput = el('input', { class: 'nm-input', type: 'number', min: '2', max: String(window.MAX_REPEAT_OFFSETS + 1), value: '4', style: 'width:72px', 'aria-label': '반복 횟수(원본 포함)' });
+      const fillBtn = el('button', { type: 'button', class: 'nm-btn', onclick: () => {
+        const list = window.repeatToOffsets(kindSel.value, countInput.value);
+        if (!list.length) { msg.textContent = '횟수는 2 이상으로 입력해 주세요.'; return; }
+        setOffsets([...offsets, ...list], `${kindSel.selectedOptions[0].textContent.replace(/\(.*\)/, '')} ${countInput.value}회 반복으로 ${list.length}건을 채웠어요.`);
+      } }, '반복 채우기');
+      const repeatRow = el('div', { class: 'row wrap', style: 'gap:6px; align-items:center; margin-top:2px' }, [el('span', { class: 'text-muted', style: 'font-size:12px' }, '반복으로 채우기'), kindSel, countInput, el('span', { class: 'text-muted', style: 'font-size:12px' }, '회(원본 포함)'), fillBtn]);
       const wrap = el('div', { class: 'nm-field', id: 'offsets-field' }, [
-        el('label', {}, 'N일 후 반복/알림 (선택)'),
+        el('label', {}, '반복·알림 — 며칠 전/후에도 일정 만들기 (선택)'),
         chips,
         el('div', { class: 'row', style: 'gap:6px; margin-top:4px' }, [input, el('button', { type: 'button', class: 'nm-btn', onclick: addFromInput }, '추가')]),
         presets,
+        repeatRow,
         msg,
         preview,
         hidden,
       ]);
       render();
       wrap.refresh = render;
-      wrap.setDisabled = (on, note) => {
-        input.disabled = on;
-        presets.querySelectorAll('button').forEach((b) => { b.disabled = on; });
-        wrap.querySelectorAll('.offset-chip__x').forEach((b) => { b.disabled = on; });
-        msg.textContent = on ? note || '' : '';
-        wrap.style.opacity = on ? '0.55' : '';
-      };
+      wrap.setDisabled = () => {};
       return wrap;
     }
 
@@ -557,10 +574,9 @@
           endInput.addEventListener('input', refreshEnd);
           refreshEnd();
           let offsetsNode = null;
-          let repeatNode = null;
           if (isChild) {
             form.append(el('div', { class: 'link-banner' }, [
-              el('div', {}, `↳ "${parent ? parent.title : '원본 일정'}"에서 ${existing.offset_days}일 뒤로 자동 생성된 일정입니다.`),
+              el('div', {}, `↳ "${parent ? parent.title : '원본 일정'}"에서 ${window.offsetLabel(existing.offset_days)} 날짜로 자동 생성된 일정입니다.`),
               el('label', { class: 'row', style: 'gap:8px; margin-top:6px; cursor:pointer' }, [
                 el('input', { type: 'checkbox', name: 'detach', checked: true }),
                 el('span', {}, '부모와 연결을 끊고 독립 일정으로 수정'),
@@ -582,17 +598,10 @@
             field('메모', el('textarea', { class: 'nm-textarea', name: 'memo' }, existing?.memo || ''))
           );
           if (!isChild) {
-            repeatNode = existing ? null : repeatField();
             offsetsNode = offsetsField(existing?.repeat_offsets, () => dateInput.value, () => childCount);
             dateInput.addEventListener('input', () => offsetsNode.refresh());
-            if (repeatNode) {
-              // 기존 반복(매일/매주/매월 × 횟수)과 "N일 후"는 함께 쓰지 않는다 — 같은 일정을 두 번 만들게 되기 때문.
-              const sel = repeatNode.querySelector('select');
-              sel.addEventListener('change', () => offsetsNode.setDisabled(sel.value !== 'none', '위의 반복 등록(매일/매주/매월)과 "N일 후"는 함께 쓸 수 없어요'));
-              form.append(repeatNode);
-            }
             form.append(offsetsNode);
-            if (childCount) form.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `이 일정을 수정하면 연결된 "N일 후" 일정 ${childCount}건의 제목/날짜/시간/장소/구분도 함께 바뀝니다(완료 여부는 그대로).`));
+            if (childCount) form.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `이 일정을 수정하면 연결된 자동 생성 일정 ${childCount}건의 제목/날짜/시간/장소/구분도 함께 바뀝니다(완료 여부는 그대로).`));
           }
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
           form.append(submitBtn);
@@ -632,36 +641,20 @@
                 close();
                 return;
               }
-              // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
-              // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
-              const repeat = fd.get('repeat') || 'none';
-              const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
-              const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : 0;
+              // 반복(매일/매주/매월)과 "N일 전/후"는 하나의 입력("반복·알림")으로 통합되었다 — 기준 일정 1건 + 연결된 자동 생성 일정들.
               appState.schemaWarning = null;
-              if (repeat === 'none' || stepDays === 0) {
-                const row = await appState.addSchedule(data);
-                const n = (data.repeat_offsets || []).length;
-                const w = warn();
-                toast(w ? `저장했습니다. (${w})` : n ? `저장했습니다. ${n}건의 "N일 후" 일정도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-                submitBtn.style.display = 'none';
-                attachHost.append(
-                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                  el('div', { id: 'new-schedule-attach-box' }),
-                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-                );
-                window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
-              } else {
-                // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
-                // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
-                delete data.repeat_offsets;
-                for (let i = 0; i < count; i++) {
-                  await appState.addSchedule({ ...data, date: window.addDays(data.date, stepDays * i), end_date: data.end_date ? window.addDays(data.end_date, stepDays * i) : null });
-                }
-                const w = warn();
-                toast(w ? `저장했습니다. (${w})` : '일정을 저장했습니다.', 'success');
-                close();
-              }
+              const row = await appState.addSchedule(data);
+              const n = (data.repeat_offsets || []).length;
+              const w = warn();
+              toast(w ? `저장했습니다. (${w})` : n ? `저장했습니다. 연결된 일정 ${n}건도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+              submitBtn.style.display = 'none';
+              attachHost.append(
+                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                el('div', { id: 'new-schedule-attach-box' }),
+                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+              );
+              window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
             } catch (err) {
               toast(`저장하지 못했습니다: ${err.message || err}`, 'error');
             }
@@ -681,20 +674,6 @@
       const select = el('select', { class: 'nm-select', name: 'priority' });
       for (const [value, label] of Object.entries(PRIORITY_LABEL)) select.append(el('option', { value, selected: value === selected || undefined }, label));
       return select;
-    }
-
-    function repeatField() {
-      const repeatSelect = el('select', { class: 'nm-select', name: 'repeat' }, [
-        el('option', { value: 'none' }, '반복 안 함'),
-        el('option', { value: 'daily' }, '매일'),
-        el('option', { value: 'weekly' }, '매주'),
-        el('option', { value: 'monthly' }, '매월(30일 간격)'),
-      ]);
-      const countInput = el('input', { class: 'nm-input', type: 'number', name: 'repeat_count', min: '1', max: '52', value: '1', style: 'width:80px' });
-      return el('div', { class: 'nm-field' }, [
-        el('label', {}, '반복(선택)'),
-        el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [repeatSelect, el('span', { class: 'text-muted', style: 'font-size:12px' }, '× 횟수'), countInput]),
-      ]);
     }
 
     function projectSelect(selectedId) {

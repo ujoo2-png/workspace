@@ -63,8 +63,7 @@
     xlsb: ['.xlsx', 'Excel에서 .xlsx로 저장하세요.'],
     docm: ['.docx', '매크로가 있는 파일은 지원하지 않습니다. 매크로를 뺀 .docx로 저장하세요.'],
     pdf: ['.docx/.xlsx 원본', 'PDF(스캔 포함)는 글자 칸을 찾을 수 없습니다. 원본 Word/Excel 양식 파일을 사용하세요.'],
-    hwp: ['.docx', '한글에서 "다른 이름으로 저장 → Word 문서(*.docx)"를 선택하세요.'],
-    hwpx: ['.docx', '한글에서 "다른 이름으로 저장 → Word 문서(*.docx)"를 선택하세요.'],
+    hwp: ['.hwpx', '구형 .hwp는 직접 읽지 못합니다. 한글에서 "다른 이름으로 저장 → 한글 문서(*.hwpx)"로 저장해 올리세요(또는 .docx로 저장).'],
     odt: ['.docx', '.docx로 저장하세요.'],
     ods: ['.xlsx', '.xlsx로 저장하세요.'],
     csv: ['.xlsx', 'CSV는 서식이 없어 양식으로 쓸 수 없습니다. .xlsx로 저장하세요.'],
@@ -74,8 +73,9 @@
     const ext = String(name || '').split('.').pop().toLowerCase();
     if (ext === 'xlsx') return { ok: true, kind: 'xlsx' };
     if (ext === 'docx') return { ok: true, kind: 'docx' };
+    if (ext === 'hwpx') return { ok: true, kind: 'docx', convert: 'hwpx' };
     if (UNSUPPORTED[ext]) return { ok: false, message: `이 형식은 지원하지 않습니다: .${ext} → ${UNSUPPORTED[ext][0]}로 저장 후 다시 시도해 주세요. ${UNSUPPORTED[ext][1]}` };
-    return { ok: false, message: `이 형식은 지원하지 않습니다: .${ext || '(확장자 없음)'} → Excel(.xlsx) 또는 Word(.docx) 양식만 가져올 수 있습니다.` };
+    return { ok: false, message: `이 형식은 지원하지 않습니다: .${ext || '(확장자 없음)'} → Excel(.xlsx), Word(.docx), 한글(.hwpx) 양식만 가져올 수 있습니다.` };
   }
   const MB = 1024 * 1024;
   async function openZip(bytes, kind) {

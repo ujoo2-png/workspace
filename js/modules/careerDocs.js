@@ -79,9 +79,9 @@
       return el('details', { class: 'cd-help' }, [
         el('summary', {}, '❔ 이 기능은 이렇게 동작해요 (가능한 것 / 한계)'),
         el('div', { class: 'cd-help__body' }, [
-          el('p', {}, '회사/기관이 준 Excel(.xlsx)·Word(.docx) 양식을 올리면, 등록해 둔 학력·자격증·교육이수·가입단체·포상·경력·증명사진과 기본정보를 자동으로 칸에 맞춰 넣어 보여 드립니다. 값을 고친 뒤 임시저장/저장(최종 파일 생성)할 수 있고, 모든 처리는 이 브라우저 안에서만 이루어집니다(파일을 외부로 보내지 않음).'),
+          el('p', {}, '회사/기관이 준 Excel(.xlsx)·Word(.docx)·한글(.hwpx) 양식을 올리면, 등록해 둔 학력·자격증·교육이수·가입단체·포상·경력·증명사진과 기본정보를 자동으로 칸에 맞춰 넣어 보여 드립니다. 값을 고친 뒤 임시저장/저장(최종 파일 생성)할 수 있고, 모든 처리는 이 브라우저 안에서만 이루어집니다(파일을 외부로 보내지 않음).'),
           el('p', {}, [el('strong', {}, '찾는 방법 '), '① {{이름}} · [[학력.1.학교]] 같은 자리표시자 → ② "성 명", "생 년 월 일", "자격증명"처럼 알려진 라벨 옆(오른쪽, 없으면 아래)의 빈 칸 → ③ 헤더에 "기간·학교명·전공"처럼 라벨이 여러 개인 반복 표(빈 행을 순서대로 채우고, 모자라면 행 추가). "사진"/"증명사진" 칸에는 사진을 넣습니다.']),
-          el('p', {}, [el('strong', {}, '한계(정직하게) '), '자동 매칭은 추측(휴리스틱)이라 "자동 매칭 결과"를 꼭 확인·수정하세요. 자유 배치 양식(텍스트 상자·도형 안의 글자, 그림으로 된 양식, 스캔 PDF), 구형 .doc/.xls, 암호 걸린 파일, 매크로(.xlsm)는 지원하지 않습니다(.doc → .docx로 저장 후 다시 시도). 미리보기는 근사치이며 내려받는 파일은 원본 서식을 유지합니다. Excel 수식은 유지되지만 다시 계산하지 않고, 도형/차트는 결과 파일에서 사라질 수 있습니다. 사진은 PNG/JPEG/GIF만 넣을 수 있습니다.']),
+          el('p', {}, [el('strong', {}, '한계(정직하게) '), '자동 매칭은 추측(휴리스틱)이라 "자동 매칭 결과"를 꼭 확인·수정하세요. 자유 배치 양식(텍스트 상자·도형 안의 글자, 그림으로 된 양식, 스캔 PDF), 구형 .doc/.xls/.hwp(한글에서 .hwpx로 저장 후 사용), 암호 걸린 파일, 매크로(.xlsm)는 지원하지 않습니다(.doc → .docx로 저장 후 다시 시도). 미리보기는 근사치이며 내려받는 파일은 원본 서식을 유지합니다. Excel 수식은 유지되지만 다시 계산하지 않고, 도형/차트는 결과 파일에서 사라질 수 있습니다. 사진은 PNG/JPEG/GIF만 넣을 수 있습니다. 한글(.hwpx) 양식은 표와 글자만 Word 형식으로 옮겨 처리하므로 그림·도형·글상자는 빠지고, 결과는 .docx로 나옵니다(한글에서 열어 .hwp/.hwpx로 다시 저장하세요).']),
         ]),
       ]);
     }
@@ -206,7 +206,7 @@
           const fileInput = el('input', { type: 'file', class: 'hidden', id: 'cd-file-input' });
           const drop = el('div', { class: 'attach-dropzone cd-drop' }, [
             el('div', { style: 'font-size:28px' }, '📥'),
-            el('div', {}, 'Excel(.xlsx) 또는 Word(.docx) 양식 파일을 여기로 끌어다 놓으세요'),
+            el('div', {}, 'Excel(.xlsx)·Word(.docx)·한글(.hwpx) 양식 파일을 여기로 끌어다 놓으세요'),
             el('button', { type: 'button', class: 'nm-btn', style: 'margin-top:8px', onclick: () => fileInput.click() }, '파일 선택'),
             el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, '파일은 이 브라우저에서만 처리되며 어디로도 전송되지 않습니다. 최대 10MB.'),
           ]);
@@ -219,6 +219,12 @@
               const chk = FE.checkFileName(name);
               if (!chk.ok) throw new Error(chk.message);
               status.textContent = '⏳ 양식을 분석하는 중…';
+              if (chk.convert === 'hwpx') {
+                // 한글(.hwpx) → .docx로 변환해 같은 엔진으로 처리한다. 결과 .docx는 한글에서 열어 .hwp/.hwpx로 다시 저장할 수 있다.
+                const conv = await window.HwpBridge.hwpxToDocx(bytes);
+                bytes = conv.bytes;
+                name = name.replace(/\.hwpx$/i, '') + '.docx';
+              }
               const { analysis, warnings, stats } = await FE.analyzeTemplate(bytes, chk.kind);
               const title = titleInput.value.trim() || name.replace(/\.[^.]+$/, '');
               close();

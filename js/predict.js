@@ -823,20 +823,34 @@
   }
 
   // ---- 일정: "N일 후" 반복/알림 ----
-  const MAX_REPEAT_OFFSETS = 10;
+  const MAX_REPEAT_OFFSETS = 60; // 7.23까지 10개 → 7.24에서 "매일/매주 반복"을 이 기능으로 통합하면서 60개로 확대
   const MAX_OFFSET_DAYS = 365;
+  /** 0이 아닌 정수 n → "5일 후" / "3일 전". */
+  function offsetLabel(n) { return n < 0 ? `${-n}일 전` : `${n}일 후`; }
   /**
-   * 사용자가 입력한 문자열("5, 7", "5일 후 and 7일 후") 또는 배열에서 "N일 후" 값 목록을 뽑는다.
-   * 1~365의 정수만 받고, 중복은 합치며 오름차순으로 정렬하고 최대 10개까지만 남긴다.
+   * 사용자가 입력한 문자열("5, 7", "3일 전, 5일 후", "+5 -3") 또는 배열에서 "N일 전/후" 값 목록을 뽑는다.
+   * 후 = 양수, 전 = 음수. ±1~365의 정수만 받고, 중복은 합치며 오름차순(전 → 후)으로 정렬하고 최대 60개까지만 남긴다.
+   * 부호도 "전/후"도 없는 숫자는 "후"로 본다(예전 입력 방식과 같음).
    * @returns {{offsets:number[], invalid:string[], truncated:boolean}}
    */
   function parseOffsets(input) {
-    const tokens = Array.isArray(input) ? input.map(String) : (String(input || '').match(/\d+(?:\.\d+)?/g) || []);
+    const tokens = [];
+    if (Array.isArray(input)) {
+      for (const v of input) tokens.push(String(v));
+    } else {
+      const re = /([+\-−]?)\s*(\d+(?:\.\d+)?)\s*(?:일)?\s*(전|후)?/g;
+      let m;
+      const str = String(input || '');
+      while ((m = re.exec(str))) {
+        const neg = m[3] === '전' || (!m[3] && (m[1] === '-' || m[1] === '−'));
+        tokens.push(`${neg ? '-' : ''}${m[2]}`);
+      }
+    }
     const set = new Set();
     const invalid = [];
     for (const t of tokens) {
       const n = Number(t);
-      if (!Number.isInteger(n) || n < 1 || n > MAX_OFFSET_DAYS) invalid.push(String(t));
+      if (!Number.isInteger(n) || n === 0 || Math.abs(n) > MAX_OFFSET_DAYS) invalid.push(String(t));
       else set.add(n);
     }
     let offsets = Array.from(set).sort((a, b) => a - b);
@@ -844,8 +858,20 @@
     if (truncated) offsets = offsets.slice(0, MAX_REPEAT_OFFSETS);
     return { offsets, invalid, truncated };
   }
+  /**
+   * "매일/매주/매월(30일) × 횟수"(원본 포함 횟수)를 "N일 후" 목록으로 바꾼다 — 예전의 별도 반복 기능을 이 기능으로 통합하기 위한 변환.
+   * 매주 × 4 → [7, 14, 21]. 횟수 1이면 [].
+   */
+  function repeatToOffsets(kind, count) {
+    const step = kind === 'daily' ? 1 : kind === 'weekly' ? 7 : kind === 'monthly' ? 30 : 0;
+    const n = Math.min(MAX_REPEAT_OFFSETS + 1, Math.max(1, Math.floor(Number(count) || 1)));
+    if (!step) return [];
+    const out = [];
+    for (let i = 1; i < n; i++) if (step * i <= MAX_OFFSET_DAYS) out.push(step * i);
+    return out;
+  }
   function offsetDate(baseIso, n) { return shiftIso(baseIso, n); }
-  function childScheduleTitle(title, n) { return `${title} (${n}일 후)`; }
+  function childScheduleTitle(title, n) { return `${title} (${offsetLabel(n)})`; }
   const SCHEDULE_SYNC_FIELDS = ['title', 'date', 'end_date', 'time', 'place', 'category', 'priority', 'project_id', 'tags', 'memo'];
 
   /** 부모 일정에서 "N일 후" 자식 일정 한 건의 필드를 만든다(완료 여부·중요 표시는 물려주지 않는다). */
@@ -1009,6 +1035,8 @@
   globalThis.MAX_REPEAT_OFFSETS = MAX_REPEAT_OFFSETS;
   globalThis.MAX_OFFSET_DAYS = MAX_OFFSET_DAYS;
   globalThis.parseOffsets = parseOffsets;
+  globalThis.offsetLabel = offsetLabel;
+  globalThis.repeatToOffsets = repeatToOffsets;
   globalThis.offsetDate = offsetDate;
   globalThis.childScheduleTitle = childScheduleTitle;
   globalThis.childScheduleFields = childScheduleFields;
