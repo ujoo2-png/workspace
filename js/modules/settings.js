@@ -113,7 +113,7 @@
               ...options.map(([val, text]) => el('button', { type: 'button', class: `nm-btn ${cur === val ? 'nm-btn--primary' : ''}`, 'aria-pressed': String(cur === val), onclick: () => { window.settingsSync.set(key, val); onPick(); } }, text)),
             ]);
             return el('div', {}, [
-              choice('workspace:navStyle', '내비게이션', [['top', '상단바 (Apple 스타일)'], ['side', '사이드바']], window.getNavStyle(), () => { toast('적용하려고 새로고침합니다.', 'success'); setTimeout(() => location.reload(), 400); }),
+              choice('workspace:navStyle', '내비게이션', [['both', '사이드바 + 상단바'], ['top', '상단바만 (Apple 스타일)'], ['side', '사이드바만']], window.getNavStyle(), () => { toast('적용하려고 새로고침합니다.', 'success'); setTimeout(() => location.reload(), 400); }),
               choice('workspace:homeStyle', '홈 화면', [['bento', '벤토 대시보드'], ['classic', '기본(위젯 목록)']], window.getHomeStyle ? window.getHomeStyle() : 'bento', () => { toast('홈 화면 스타일을 바꿨어요.', 'success'); window.navigate('/settings'); location.reload(); }),
             ]);
           })(),

@@ -27,7 +27,8 @@
   window.NAV_ITEMS = NAV_ITEMS;
 
   // 내비게이션 스타일(기본: 상단바). 설정 화면에서 바꾸고 새로고침하면 적용된다.
-  window.getNavStyle = () => (window.settingsSync.get('workspace:navStyle') === 'side' ? 'side' : 'top');
+  // 'both'(기본: 좌측 사이드바 + 상단바) | 'top'(상단바만) | 'side'(사이드바만)
+  window.getNavStyle = () => { const v = window.settingsSync.get('workspace:navStyle'); return v === 'side' || v === 'top' ? v : 'both'; };
 
   window.applyTheme(window.settingsSync.get('workspace:theme') || 'auto');
 
@@ -134,6 +135,7 @@
     const navStyle = window.getNavStyle();
     if (navStyle === 'top') { buildTopShell(); return; }
     document.body.classList.remove('nav-top');
+    document.body.classList.toggle('nav-both', navStyle === 'both');
     const sidebar = el('aside', { class: 'sidebar' }, [
       el('div', { class: 'row row--between' }, [
         brand,
@@ -166,6 +168,7 @@
     ]);
     const main = el('main', { class: 'main' }, [topbar, el('div', { id: 'view-root' })]);
     shell.append(sidebar, main);
+    if (navStyle === 'both') app.append(makeApplebar());
     app.append(expandBtn, shell);
     shellEl = shell;
     expandBtnEl = expandBtn;
@@ -189,23 +192,15 @@
   // 반투명 유리(backdrop blur) 고정 바 · 가운데 주요 메뉴 · "더보기" 패널(전체 메뉴 격자) · 오른쪽 검색(⌘K)/알림/사용자 메뉴.
   // 좁은 화면에서는 메뉴 버튼으로 전체 화면 목록이 열린다. 라우터는 .nav-item[data-path]의 active만 토글하므로 같은 클래스를 쓴다.
   const PRIMARY_NAV = ['/home', '/schedule', '/projects', '/challenges', '/health', '/knowledge', '/career'];
-  function buildTopShell() {
+  function makeApplebar() {
     const el = window.el;
     const appState = window.appState;
-    document.body.classList.add('nav-top');
     const go = (path) => { closeAll(); window.navigate(path); };
     const byPath = (p) => NAV_ITEMS.find((i) => i.path === p);
-    const primary = PRIMARY_NAV.map(byPath).filter(Boolean);
-    const more = NAV_ITEMS.filter((i) => !PRIMARY_NAV.includes(i.path));
     const link = (item) => el('li', { class: 'nav-item applebar__link', dataset: { path: item.path }, onclick: () => go(item.path) }, [
       el('span', { class: 'applebar__icon', 'aria-hidden': 'true' }, item.icon), el('span', {}, item.label),
       el('span', { class: 'nav-item__badge hidden', dataset: { role: 'nav-badge', path: item.path } }, '0'),
     ]);
-
-    const morePanel = el('div', { class: 'applebar__panel', role: 'menu', hidden: true }, [
-      el('div', { class: 'applebar__panel-grid' }, more.map((item) => el('button', { type: 'button', class: 'nav-item applebar__tile', role: 'menuitem', dataset: { path: item.path }, onclick: () => go(item.path) }, [el('span', { class: 'applebar__tile-icon', 'aria-hidden': 'true' }, item.icon), el('span', {}, item.label)]))),
-    ]);
-    const moreBtn = el('button', { type: 'button', class: 'applebar__more', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); togglePanel(morePanel, moreBtn); } }, ['더보기 ', el('span', { class: 'applebar__chev', 'aria-hidden': 'true' }, '⌄')]);
 
     const userPanel = el('div', { class: 'applebar__panel applebar__panel--user', role: 'menu', hidden: true }, [
       el('div', { class: 'applebar__user-name' }, appState.user?.name || appState.user?.email || ''),
@@ -223,7 +218,7 @@
       el('div', { class: 'applebar__inner' }, [
         el('div', { class: 'applebar__brand', title: '홈으로', onclick: () => go('/home') }, [el('span', { class: 'applebar__logo' }, '⌂'), el('span', { class: 'applebar__brand-text' }, 'Work Space')]),
         el('nav', { class: 'applebar__nav', 'aria-label': '주요 메뉴' }, [
-          el('ul', { class: 'applebar__list' }, [...primary.map(link), el('li', { class: 'applebar__more-wrap' }, [moreBtn, morePanel])]),
+          el('ul', { class: 'applebar__list' }, NAV_ITEMS.map(link)), // v7.25.1: '더보기' 없이 모든 메뉴를 바로 보여준다
         ]),
         el('div', { class: 'applebar__actions' }, [searchBtn, bellBtn, el('div', { class: 'applebar__user-wrap' }, [userBtn, userPanel]), burger]),
       ]),
@@ -232,7 +227,7 @@
     ]);
 
     function closeAll() {
-      for (const [panel, btn] of [[morePanel, moreBtn], [userPanel, userBtn]]) { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+      for (const [panel, btn] of [[userPanel, userBtn]]) { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
       header.classList.remove('applebar--open'); burger.setAttribute('aria-expanded', 'false'); document.body.classList.remove('applebar-lock');
     }
     function togglePanel(panel, btn) {
@@ -251,6 +246,14 @@
       location.hash = '';
       location.reload();
     }
+    return header;
+  }
+
+  function buildTopShell() {
+    const el = window.el;
+    document.body.classList.add('nav-top');
+    document.body.classList.remove('nav-both');
+    const header = makeApplebar();
     const main = el('main', { class: 'main' }, [el('div', { id: 'view-root' })]);
     const shell = el('div', { class: 'app-shell app-shell--top' }, [main]);
     app.innerHTML = '';
@@ -267,7 +270,7 @@
       title: '빠른 이동',
       width: '560px',
       contentBuilder(body, close) {
-        const input = el('input', { class: 'nm-input', placeholder: '메뉴·일정·프로젝트·Knowledge 검색', autofocus: true, 'aria-label': '빠른 이동 검색' });
+        const input = el('input', { class: 'nm-input', placeholder: '메뉴·일정·프로젝트 검색  ·  "+내일 3시 회의"로 일정 바로 추가', autofocus: true, 'aria-label': '빠른 이동 검색' });
         const list = el('div', { class: 'quickfind-list', role: 'listbox' });
         const entries = () => [
           ...NAV_ITEMS.map((i) => ({ kind: '메뉴', label: `${i.icon} ${i.label}`, hay: i.label, go: () => window.navigate(i.path) })),
@@ -277,8 +280,14 @@
         ];
         let active = 0; let shown = [];
         function render() {
-          const q = input.value.trim().toLowerCase();
+          const raw = input.value.trim();
+          const q = raw.toLowerCase();
           shown = entries().filter((e) => !q || e.hay.toLowerCase().includes(q)).slice(0, 12);
+          // v7.25.0: "+내일 오후 3시 회의" / "일정 모레 14:30 병원" → 바로 일정 등록
+          if (/^[+＋]|^일정\s/.test(raw) && window.parseQuickSchedule) {
+            const p = window.parseQuickSchedule(raw, window.todayISO());
+            if (p) shown = [{ kind: '새 일정', label: `➕ 일정 추가: ${p.title}`, sub: `${p.date}${p.time ? ` ${p.time}` : ''}`, go: async () => { try { await appState.addSchedule({ title: p.title, date: p.date, time: p.time || null }); window.toast(`일정을 추가했어요 (${p.date}${p.time ? ` ${p.time}` : ''})`, 'success'); } catch (err) { window.toast(err.message || '일정 추가 실패', 'error'); } } }, ...shown].slice(0, 12);
+          }
           active = Math.min(active, Math.max(0, shown.length - 1));
           list.replaceChildren(...(shown.length ? shown.map((e, i) => el('button', { type: 'button', role: 'option', class: `quickfind-item ${i === active ? 'is-active' : ''}`, onclick: () => { close(); e.go(); } }, [el('span', {}, e.label), el('span', { class: 'text-muted' }, [e.sub ? `${e.sub} · ` : '', e.kind])])) : [el('div', { class: 'text-muted', style: 'padding:10px' }, '결과가 없습니다.')]));
         }

@@ -870,6 +870,44 @@
     for (let i = 1; i < n; i++) if (step * i <= MAX_OFFSET_DAYS) out.push(step * i);
     return out;
   }
+
+  // v7.25.0 빠른 일정 입력: "내일 오후 3시 팀 회의", "+모레 14:30 병원", "10/20 시험", "다음주 금요일 발표".
+  // 날짜 표현(오늘/내일/모레/글피/N일 후/M/D/M월 D일/다음주 X요일/X요일)과 시간(오전·오후 N시[M분], HH:MM)을 떼어 내고 나머지를 제목으로 쓴다.
+  function parseQuickSchedule(text, todayIso) {
+    let t = String(text || '').replace(/^\s*[+＋]\s*/, '').replace(/^일정\s*(추가)?\s*/, '').trim();
+    if (!t) return null;
+    let date = null; let time = null;
+    const take = (re, fn) => { const m = re.exec(t); if (m) { fn(m); t = (t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length)).trim(); return true; } return false; };
+    const wd = '일월화수목금토';
+    take(/(다음\s*주|이번\s*주|담주)?\s*([일월화수목금토])요일/, (m) => {
+      const target = wd.indexOf(m[2]); // 0=일
+      const cur = isoWeekday(todayIso) % 7; // 0=일
+      let diff = (target - cur + 7) % 7;
+      // 다음 주 = 다음 월요일부터 시작하는 주(일요일은 그 주의 마지막 날로 본다)
+      if (/다음|담주/.test(m[1] || '')) diff = (8 - (cur === 0 ? 7 : cur)) + (target === 0 ? 7 : target) - 1;
+      date = shiftIso(todayIso, diff);
+    }) ||
+    take(/(\d{1,3})\s*일\s*(후|뒤)/, (m) => { date = shiftIso(todayIso, Number(m[1])); }) ||
+    take(/(\d{1,3})\s*일\s*전/, (m) => { date = shiftIso(todayIso, -Number(m[1])); }) ||
+    take(/글피/, () => { date = shiftIso(todayIso, 3); }) ||
+    take(/모레/, () => { date = shiftIso(todayIso, 2); }) ||
+    take(/내일/, () => { date = shiftIso(todayIso, 1); }) ||
+    take(/오늘/, () => { date = todayIso; }) ||
+    take(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/, (m) => { date = `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`; }) ||
+    take(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/, (m) => { date = null; date = `${todayIso.slice(0, 4)}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`; }) ||
+    take(/(?<![\d:])(\d{1,2})\/(\d{1,2})(?![\d:])/, (m) => { date = `${todayIso.slice(0, 4)}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`; });
+    if (date && date < todayIso && /^\d{4}-/.test(date) && !/\d{4}[-./]/.test(text)) { const y = Number(date.slice(0, 4)) + 1; date = `${y}${date.slice(4)}`; }
+    const hhmm = (h, mi) => `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+    take(/(오전|오후|아침|저녁|밤)?\s*(\d{1,2})\s*시\s*(?:(\d{1,2})\s*분|반)?/, (m) => {
+      let h = Number(m[2]); const mi = m[3] ? Number(m[3]) : (/반/.test(m[0]) ? 30 : 0);
+      if (/오후|저녁|밤/.test(m[1] || '') && h < 12) h += 12;
+      if (/오전|아침/.test(m[1] || '') && h === 12) h = 0;
+      if (h <= 23 && mi <= 59) time = hhmm(h, mi);
+    }) || take(/(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)/, (m) => { time = hhmm(Number(m[1]), Number(m[2])); });
+    const title = t.replace(/\s+/g, ' ').trim();
+    if (!title) return null;
+    return { title, date: date || todayIso, time };
+  }
   function offsetDate(baseIso, n) { return shiftIso(baseIso, n); }
   function childScheduleTitle(title, n) { return `${title} (${offsetLabel(n)})`; }
   const SCHEDULE_SYNC_FIELDS = ['title', 'date', 'end_date', 'time', 'place', 'category', 'priority', 'project_id', 'tags', 'memo'];
@@ -1015,6 +1053,7 @@
 
   globalThis.isoDayNum = isoDayNum;
   globalThis.shiftIso = shiftIso;
+  globalThis.parseQuickSchedule = parseQuickSchedule;
   globalThis.isoDiff = isoDiff;
   globalThis.isoWeekday = isoWeekday;
   globalThis.isLeapYear = isLeapYear;

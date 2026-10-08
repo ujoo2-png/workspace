@@ -378,12 +378,26 @@
       const btnDraft = el('button', { class: 'nm-btn cd-save-draft', onclick: () => persist({ final: false }) }, '💾 임시저장');
       const btnFinal = el('button', { class: 'nm-btn nm-btn--primary cd-save-final', onclick: () => persist({ final: true }) }, '✅ 저장 (최종본 만들기)');
       const btnDl = el('button', { class: 'nm-btn cd-download-now', title: '지금 화면의 값으로 파일을 만들어 받습니다(저장하지 않음)', onclick: () => downloadNow() }, '⬇ 지금 상태 받기');
+      const btnHwpx = el('button', { class: 'nm-btn cd-download-hwpx hidden', title: '한글(.hwpx) 양식으로 올린 문서를 같은 .hwpx 파일로 받습니다(표 안의 값만 되씀)', onclick: () => downloadHwpx() }, '⬇ 한글(.hwpx)로 받기');
+      async function detectHwpx() {
+        try { if (S.bytes && S.kind === 'docx' && window.JSZip) btnHwpx.classList.toggle('hidden', !(await window.JSZip.loadAsync(S.bytes)).file('hwpx/original.hwpx')); } catch { /* 무시 */ }
+      }
+      async function downloadHwpx() {
+        btnHwpx.disabled = true;
+        try {
+          const res = await FE.fillTemplate(S.kind, S.bytes, S.mapping, S.values, { photos: await collectPhotos() });
+          const out = await window.HwpBridge.docxToHwpx(res.bytes);
+          downloadBytes(out.bytes, `${safeName(S.title)}_${ymd()}.hwpx`, 'application/hwp+zip');
+          toast(`한글 파일로 받았습니다(${out.changed}칸 채움).${out.skipped.length ? ` ⚠ ${out.skipped.join(' / ')}` : ''} 사진은 .docx로 받아야 들어갑니다.`, out.skipped.length ? 'info' : 'success');
+        } catch (e) { toast(`한글 파일 만들기 실패: ${e.message || e}`, 'error'); } finally { btnHwpx.disabled = false; }
+      }
       topbar.append(
         el('button', { class: 'nm-btn cd-back', onclick: () => requestClose() }, '← 목록'),
         el('div', { class: 'cd-title-wrap' }, [window.nmField('문서 제목', titleInput, { required: true })]),
         el('div', { class: 'cd-top-meta' }, [el('span', { class: 'cd-kind' }, `${KIND_ICON[S.kind]} ${S.name}`), badge, statusLine]),
-        el('div', { class: 'cd-top-actions' }, [btnDraft, btnFinal, btnDl]),
+        el('div', { class: 'cd-top-actions' }, [btnDraft, btnFinal, btnDl, btnHwpx]),
       );
+      detectHwpx();
       function updateStatusLine() {
         badge.className = `cd-badge cd-badge--${S.status}`;
         badge.textContent = STATUS_LABEL[S.status];
@@ -405,9 +419,13 @@
             const chk = FE.checkFileName(f.name);
             if (!chk.ok) { toast(chk.message, 'error'); return; }
             if (chk.kind !== S.kind) { toast(`이 문서는 .${S.kind} 양식입니다. 같은 종류의 파일을 올려 주세요.`, 'error'); return; }
-            S.bytes = new Uint8Array(await f.arrayBuffer());
-            S.templateFile = f;
-            S.name = f.name;
+            let rb = new Uint8Array(await f.arrayBuffer());
+            let rf = f;
+            if (chk.convert === 'hwpx') { rb = (await window.HwpBridge.hwpxToDocx(rb)).bytes; rf = new File([rb], f.name.replace(/\.hwpx$/i, '') + '.docx', { type: FE.mimeOf('docx') }); }
+            S.bytes = rb;
+            S.templateFile = rf;
+            S.name = rf.name;
+            detectHwpx();
             drawBanners();
             schedulePreview(true);
             setTouched();

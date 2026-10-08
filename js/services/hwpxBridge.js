@@ -57,7 +57,8 @@
     return out;
   }
 
-  function tableXml(tbl) {
+  // 표의 칸 배치(병합 포함). 변환(tableXml)과 되쓰기(docxToHwpx)가 같은 좌표계를 쓰도록 한 곳에서 계산한다.
+  function tableGrid(tbl) {
     const trs = childrenByLocal(tbl, 'tr');
     const cells = [];
     let maxC = 0; let maxR = trs.length;
@@ -74,13 +75,27 @@
         maxC = Math.max(maxC, c + cs); maxR = Math.max(maxR, r + rs);
       }
     });
-    if (!cells.length) return '';
     const grid = Array.from({ length: maxR }, () => Array(maxC).fill(null));
     for (const cell of cells) {
       for (let dr = 0; dr < cell.rs; dr++) for (let dc = 0; dc < cell.cs; dc++) {
         if (grid[cell.r + dr] && cell.c + dc < maxC) grid[cell.r + dr][cell.c + dc] = { cell, dr, dc };
       }
     }
+    return { cells, maxR, maxC, grid };
+  }
+  // 문서 순서의 "맨 바깥" 표(문단 안에 있고 다른 표 안에 들어 있지 않은 것)
+  function topTables(container) {
+    const out = [];
+    for (const p of childrenByLocal(container, 'p')) {
+      const all = descByLocal(p, 'tbl');
+      for (const tb of all) if (!all.some((o) => o !== tb && XT.descendants(o, null).includes(tb))) out.push(tb);
+    }
+    return out;
+  }
+
+  function tableXml(tbl) {
+    const { cells, maxR, maxC, grid } = tableGrid(tbl);
+    if (!cells.length) return '';
     let rows = '';
     for (let r = 0; r < maxR; r++) {
       let tcs = '';
@@ -124,14 +139,76 @@
       body += containerXml(top, false);
     }
     const out = new JSZip();
-    out.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    out.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="hwpx" ContentType="application/octet-stream"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
     out.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
     out.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`);
+    out.file('hwpx/original.hwpx', u8); // 채운 뒤 .hwpx로 되돌려 받기 위해 원본을 함께 보관(이 브라우저/내 저장소 안에서만)
     const docx = await out.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     return { bytes: docx, stats: { tables, paragraphs } };
   }
 
-  const api = { HwpError, hwpxToDocx };
+  function setCellText(tc, text) {
+    const sub = firstByLocal(tc, 'subList') || tc;
+    const ps = childrenByLocal(sub, 'p');
+    const first = ps[0];
+    if (!first) return false;
+    const runs = childrenByLocal(first, 'run');
+    let run = runs.find((r) => !descByLocal(r, 'tbl').length) || null;
+    if (!run) { run = XT.el(first.name.replace(/p$/, 'run'), {}, []); first.children.push(run); first.self = false; }
+    for (const t of childrenByLocal(run, 't')) XT.remove(run, t);
+    const tName = run.name.replace(/run$/, 't');
+    const kids = [];
+    String(text).split('\n').forEach((ln, i) => {
+      if (i > 0) kids.push(XT.el(tName.replace(/t$/, 'lineBreak'), {}, []));
+      if (ln) kids.push({ t: 'text', raw: XT.escText(ln) });
+    });
+    const tEl = XT.el(tName, {}, kids); tEl.self = !kids.length;
+    run.children.push(tEl); run.self = false;
+    for (const extra of ps.slice(1)) for (const r of childrenByLocal(extra, 'run')) for (const t of childrenByLocal(r, 't')) { t.children = []; t.self = true; }
+    return true;
+  }
+
+  /** 채워진 .docx(hwpxToDocx 결과를 채운 것) → 원본 .hwpx에 바뀐 칸 글자만 되써서 .hwpx 바이트로. */
+  async function docxToHwpx(filledDocx) {
+    const JSZip = globalThis.JSZip; const FT = globalThis.FormTemplate;
+    const dz = await JSZip.loadAsync(filledDocx instanceof Uint8Array ? filledDocx : new Uint8Array(filledDocx));
+    const orig = dz.file('hwpx/original.hwpx');
+    if (!orig) throw new HwpError('이 문서에는 원본 한글(.hwpx) 정보가 없습니다. .docx로 받아 한글에서 열어 저장하세요.');
+    const origBytes = await orig.async('uint8array');
+    const before = await hwpxToDocx(origBytes);
+    const modelOf = async (zip) => FT.buildDocxModel([{ name: 'word/document.xml', root: XT.parse(await zip.file('word/document.xml').async('string')) }]);
+    const mBefore = await modelOf(await JSZip.loadAsync(before.bytes));
+    const mAfter = await modelOf(dz);
+    const hz = await JSZip.loadAsync(origBytes);
+    const names = Object.keys(hz.files).filter((n) => /^Contents\/section\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.match(/(\d+)\.xml$/)[1], 10) - parseInt(b.match(/(\d+)\.xml$/)[1], 10));
+    const roots = []; const tbls = [];
+    for (const n of names) {
+      const root = XT.parse(await hz.file(n).async('string'));
+      roots.push([n, root]);
+      const top = root.children.find((c) => XT.isEl(c));
+      if (top) tbls.push(...topTables(top));
+    }
+    let changed = 0; const skipped = [];
+    mBefore.tables.forEach((tb, i) => {
+      const ta = mAfter.tables[i]; const hw = tbls[i];
+      if (!ta || !hw) return;
+      const { grid } = tableGrid(hw);
+      if (ta.nrows > tb.nrows) skipped.push(`표${i + 1}: 추가된 행 ${ta.nrows - tb.nrows}개는 .hwpx에 넣지 못했습니다(.docx로 받으면 포함)`);
+      for (let r = 0; r < Math.min(tb.nrows, ta.nrows); r++) for (let c = 0; c < tb.ncols; c++) {
+        const b = tb.rows[r][c]; const a = ta.rows[r] && ta.rows[r][c];
+        if (!b || !a || b.covered || a.covered) continue;
+        if ((b.text || '') === (a.text || '')) continue;
+        const g = grid[r] && grid[r][c];
+        if (g && g.dr === 0 && g.dc === 0 && setCellText(g.cell.tc, a.text || '')) changed++;
+      }
+    });
+    for (const [n, root] of roots) hz.file(n, XT.serialize(root));
+    if (hz.file('mimetype')) hz.file('mimetype', await hz.file('mimetype').async('string'), { compression: 'STORE' });
+    const bytes = await hz.generateAsync({ type: 'uint8array', compression: 'DEFLATE', mimeType: 'application/hwp+zip' });
+    return { bytes, changed, skipped };
+  }
+
+  const api = { HwpError, hwpxToDocx, docxToHwpx };
   globalThis.HwpBridge = api;
   if (typeof window !== 'undefined') window.HwpBridge = api;
 })();

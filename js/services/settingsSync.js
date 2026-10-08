@@ -26,7 +26,7 @@
     'workspace:clockTimezones',
     'workspace:sidebarCollapsed',
     'workspace:navStyle', // v7.24.0 — 내비게이션 스타일 'top'(기본)/'side'
-    'workspace:homeStyle', // v7.24.0 — 홈 화면 스타일 'classic'/'bento'
+    'workspace:homeStyle', 'workspace:bentoLayout', // v7.24.0 — 홈 화면 스타일 'classic'/'bento'
     'workspace:theme',
     'workspace:schedule:hideDone',
     'workspace:health:weeklyGoal',
