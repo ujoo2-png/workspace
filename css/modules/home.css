@@ -63,3 +63,17 @@
   .weather-grid { grid-template-columns: repeat(2, 1fr); }
   .clock-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---- v7.24.0: 주간예보 가로 배치 ---- */
+.wx-week { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scroll-snap-type: x proximity; }
+.wx-day {
+  flex: 1 0 84px; min-width: 84px; scroll-snap-align: start; text-align: center; padding: 10px 6px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 3px; align-items: center;
+}
+.wx-day--today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.wx-day__wd { font-weight: 800; font-size: 13px; }
+.wx-day__date { font-size: 11px; color: var(--text-muted); }
+.wx-day__icon { font-size: 26px; line-height: 1.2; margin: 2px 0; }
+.wx-day__desc { font-size: 11px; color: var(--text-muted); min-height: 28px; display: flex; align-items: center; }
+.wx-day__temp { font-size: 13px; font-variant-numeric: tabular-nums; }
+.wx-day__pop, .wx-day__precip { font-size: 11px; font-weight: 700; }

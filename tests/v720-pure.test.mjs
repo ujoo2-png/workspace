@@ -56,15 +56,15 @@ test('parseOffsets: "5, 7" / "5일 후 and 7일 후" / 배열', () => {
   assert.deepEqual(g.parseOffsets(null).offsets, []);
 });
 
-test('parseOffsets: 범위(1~365)·소수·0은 invalid, 10개 초과는 잘라낸다', () => {
+test('parseOffsets: 범위(±1~365)·소수·0은 invalid, 60개 초과는 잘라낸다', () => {
   const r = g.parseOffsets('0, 366, 1.5, 3');
   assert.deepEqual(r.offsets, [3]);
   assert.deepEqual(r.invalid.sort(), ['0', '1.5', '366'].sort());
   assert.deepEqual(g.parseOffsets('365').offsets, [365]);
-  const many = g.parseOffsets('1,2,3,4,5,6,7,8,9,10,11,12');
-  assert.equal(many.offsets.length, 10);
+  const many = g.parseOffsets(Array.from({ length: 70 }, (_, i) => i + 1).join(','));
+  assert.equal(many.offsets.length, 60);
   assert.equal(many.truncated, true);
-  assert.deepEqual(many.offsets, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.deepEqual(many.offsets.slice(0, 3), [1, 2, 3]);
 });
 
 // ---------------- 자식 일정 필드 / 계획(멱등) ----------------

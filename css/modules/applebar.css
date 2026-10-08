@@ -1,0 +1,90 @@
+/* ---- v7.24.0: Apple 스타일 상단 navbar (반투명 유리 · 고정 · 얇은 구분선) ---- */
+:root { --applebar-h: 52px; --applebar-bg: rgba(255, 255, 255, 0.72); --applebar-line: rgba(0, 0, 0, 0.08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { --applebar-bg: rgba(28, 31, 39, 0.72); --applebar-line: rgba(255, 255, 255, 0.1); } }
+:root[data-theme='dark'] { --applebar-bg: rgba(28, 31, 39, 0.72); --applebar-line: rgba(255, 255, 255, 0.1); }
+
+.applebar {
+  position: sticky; top: 0; z-index: 70; height: var(--applebar-h);
+  background: var(--applebar-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--applebar-line);
+  transition: box-shadow 0.2s ease;
+}
+.applebar--scrolled { box-shadow: 0 1px 12px rgba(0, 0, 0, 0.06); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .applebar { background: var(--surface); } }
+.applebar__inner { height: 100%; max-width: 1680px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; }
+.applebar__brand { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.applebar__logo { width: 26px; height: 26px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+.applebar__nav { justify-self: center; min-width: 0; }
+.applebar__list { display: flex; align-items: center; gap: 2px; list-style: none; margin: 0; padding: 0; }
+.applebar__link, .applebar__more {
+  position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px; border-radius: 980px; border: 0; background: transparent;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--text); opacity: 0.72; cursor: pointer; white-space: nowrap; transition: opacity 0.15s ease, background 0.15s ease;
+}
+.applebar__link:hover, .applebar__more:hover, .applebar__more[aria-expanded='true'] { opacity: 1; background: rgba(127, 127, 127, 0.12); }
+.applebar__link.nav-item--active { opacity: 1; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+.applebar__icon { font-size: 14px; }
+.applebar__link .nav-item__badge { margin-left: 2px; }
+.applebar__chev { font-size: 11px; transform: translateY(-1px); }
+.applebar__more-wrap { position: relative; }
+.applebar__panel {
+  position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); min-width: 360px; padding: 12px; border-radius: 18px; z-index: 80;
+  background: var(--applebar-bg); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
+  border: 1px solid var(--applebar-line); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+.applebar__panel[hidden] { display: none; }
+.applebar__panel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.applebar__tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; border-radius: 12px; border: 0; background: transparent; font: inherit; font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; }
+.applebar__tile:hover { background: rgba(127, 127, 127, 0.12); }
+.applebar__tile.nav-item--active { background: var(--accent-soft); color: var(--accent); }
+.applebar__tile-icon { font-size: 22px; }
+.applebar__actions { display: flex; align-items: center; gap: 4px; }
+.applebar__icon-btn, .applebar__avatar { position: relative; border: 0; background: transparent; cursor: pointer; font-size: 15px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: var(--text); opacity: 0.8; }
+.applebar__icon-btn:hover, .applebar__avatar:hover { background: rgba(127, 127, 127, 0.14); opacity: 1; }
+.applebar__avatar { background: var(--accent); color: var(--accent-contrast); font-size: 13px; font-weight: 700; opacity: 1; width: 30px; height: 30px; margin-left: 4px; }
+.applebar__avatar:hover { background: var(--accent-hover); }
+.applebar__bell-badge { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+.applebar__user-wrap { position: relative; }
+.applebar__panel--user { left: auto; right: 0; transform: none; min-width: 220px; }
+.applebar__user-name { font-weight: 700; font-size: 14px; word-break: break-all; }
+.applebar__menu-item { display: block; width: 100%; text-align: left; padding: 9px 10px; border-radius: 10px; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; }
+.applebar__menu-item:hover { background: rgba(127, 127, 127, 0.12); }
+.applebar__burger { display: none; width: 34px; height: 34px; border: 0; background: transparent; cursor: pointer; position: relative; }
+.applebar__burger span { position: absolute; left: 9px; right: 9px; height: 1.5px; background: var(--text); transition: transform 0.25s ease, top 0.25s ease; }
+.applebar__burger span:nth-child(1) { top: 13px; }
+.applebar__burger span:nth-child(2) { top: 20px; }
+.applebar--open .applebar__burger span:nth-child(1) { top: 16px; transform: rotate(45deg); }
+.applebar--open .applebar__burger span:nth-child(2) { top: 16px; transform: rotate(-45deg); }
+.applebar__sheet { display: none; }
+
+/* 상단바 모드: 사이드바/기존 상단 사용자 영역이 없으므로 본문이 전체 폭을 쓴다 */
+.app-shell--top { grid-template-columns: minmax(0, 1fr); min-height: calc(100vh - var(--applebar-h)); }
+body.nav-top .main { padding-top: 22px; }
+
+/* 빠른 이동 */
+.quickfind-list { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; max-height: 50vh; overflow: auto; }
+.quickfind-item { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 9px 12px; border-radius: 10px; border: 0; background: transparent; font: inherit; font-size: 14px; color: var(--text); cursor: pointer; text-align: left; }
+.quickfind-item.is-active, .quickfind-item:hover { background: var(--accent-soft); }
+
+@media (max-width: 1100px) {
+  .applebar__link .applebar__icon { display: none; }
+  .applebar__link { padding: 6px 8px; }
+}
+@media (max-width: 920px) {
+  .applebar__inner { padding: 0 14px; grid-template-columns: 1fr auto; }
+  .applebar__nav { display: none; }
+  .applebar__burger { display: block; }
+  .applebar__sheet {
+    display: block; position: fixed; left: 0; right: 0; top: var(--applebar-h); bottom: 0; padding: 12px 20px 28px; overflow: auto;
+    background: var(--applebar-bg); -webkit-backdrop-filter: saturate(180%) blur(30px); backdrop-filter: saturate(180%) blur(30px);
+    opacity: 0; visibility: hidden; transform: translateY(-8px); transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+  }
+  .applebar--open .applebar__sheet { opacity: 1; visibility: visible; transform: none; }
+  .applebar__sheet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .applebar__sheet .applebar__link { display: flex; width: 100%; padding: 14px 4px; border-radius: 0; font-size: 20px; font-weight: 600; opacity: 1; border-bottom: 1px solid var(--applebar-line); background: transparent; }
+  .applebar__sheet .applebar__link .applebar__icon { display: inline; font-size: 20px; }
+  .applebar__sheet .applebar__link.nav-item--active { color: var(--accent); }
+  body.applebar-lock { overflow: hidden; }
+  .applebar__panel--user { right: -8px; }
+}
+@media (prefers-reduced-motion: reduce) { .applebar__sheet, .applebar__burger span { transition: none; } }
