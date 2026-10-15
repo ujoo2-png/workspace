@@ -1,4 +1,4 @@
-# 나만의 Work Space (v7.26.0)
+# 나만의 Work Space (v7.27.0)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
@@ -6,10 +6,14 @@ HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
 
+v7.27.0 — **Refero(유료) → 무료 디자인 레퍼런스로 대체**:
+- 연동 메뉴의 "🎨 디자인 레퍼런스": ① Openverse·Wikimedia Commons 이미지 검색(키 불필요) ② Are.na 공개 채널 불러오기 ③ Dribbble/Behance/Pinterest/Mobbin/Land-book 등 12개 갤러리 검색 바로가기 ④ 내 보드(주소·메모·태그 저장, 사이트는 스크린샷 미리보기, 기기 간 동기화, 최대 200개).
+- Refero 토큰 입력과 `api/refero.js` 서버 중계는 삭제(키 보관·외부 중계 없음). 이미지 파일은 저장하지 않고 http(s) 주소만 저장.
+
 v7.26.0 — **Supabase 사용량 대시보드 · WBS 개선 · Refero 연결**:
 - 📈 사용량 메뉴(`/usage`): DB·Storage·Egress·MAU·Log·Realtime·Edge 지표를 무료 한도 대비로 표시, 카드 클릭 시 메뉴/테이블별 사용처 확인. DB·Storage·MAU는 서버 측정(`0027_usage_stats.sql`), Egress는 이 브라우저 기준 추정, Log/Realtime/Edge는 직접 입력.
 - WBS: 이름/날짜 경계선 드래그로 너비 조절(더블클릭 초기화), ⠿ 핸들 드래그로 대/중/소 순서·계층 변경, 체크 선택 단계(하위 포함)·전체 복사/붙여넣기(위치·진행률 초기화·날짜 옵션, 다른 프로젝트로도 가능).
-- Refero: 연동 메뉴에서 토큰 입력 후 레퍼런스 검색(`api/refero.js` 프록시, Vercel 배포에서만 동작, 토큰은 브라우저에만 저장).
+- (v7.27.0에서 Refero 연결은 무료 "디자인 레퍼런스"로 대체됨)
 - 통합 마이그레이션 파일명이 `supabase/combined/all_migrations_0001_to_0027.sql`로 변경됨 — SQL Editor에서 다시 실행 필요.
 
 v7.25.2 — **상단 navbar·벤토 홈 제거, v7.23 홈/사이드바 복원(개선 기능은 유지)**:
