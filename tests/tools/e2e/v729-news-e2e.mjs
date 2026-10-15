@@ -1,0 +1,28 @@
+import { serve, launch, login } from './harness.mjs';
+const [root, port] = process.argv.slice(2);
+const server = await serve(root, Number(port));
+const browser = await launch();
+const base = `http://localhost:${port}`;
+const errors = []; let fails = 0;
+const expect = (n, c, d = '') => { if (!c) fails++; console.log(c ? 'ok  ' : 'FAIL', n, c ? '' : d); };
+const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
+page.on('pageerror', (e) => errors.push(e.message));
+await page.route('**/api.open-meteo.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+await login(page, base);
+await page.click('.nav-item[data-path="/briefing"]'); await page.waitForTimeout(400);
+expect('빈 상태 안내', /수집된 항목이 없습니다/.test(await page.locator('#view-root').innerText()));
+await page.evaluate(async () => {
+  const s = window.appState; const now = new Date().toISOString();
+  const id = 'tp1';
+  s.briefingTopics = [{ id, name: '무역', search_terms: ['수출'], priority: 2, active: true }];
+  s.briefingItems = [{ id: 'x1', topic_id: id, title: '"수출" 규제 & 변화', link: 'https://a.com/1', summary: '요약', published_at: now, is_read: false }];
+});
+await page.click('.nav-item[data-path="/briefing"]'); await page.waitForTimeout(400);
+const txt = await page.locator('#view-root').innerText();
+expect('뉴스레터 표시', /일일 브리핑/.test(txt) && /오늘의 핵심/.test(txt), txt.slice(0, 200));
+expect('따옴표 정상', txt.includes('"수출" 규제 & 변화') && !txt.includes('&quot;'));
+expect('KPI 4개', (await page.locator('.nl-kpi').count()) === 4);
+await page.click('text=브리핑 목록'); await page.waitForTimeout(200);
+expect('목록 제목 정상', (await page.locator('#view-root').innerText()).includes('"수출" 규제 & 변화'));
+expect('JS 오류 없음', errors.length === 0, errors.join('|'));
+await browser.close(); server.close?.(); process.exit(fails ? 1 : 0);
