@@ -23,6 +23,7 @@
     'workspace:publicData:enabled',
     'workspace:tmdbApiKey',
     'workspace:homeWidgetOrder',
+    'workspace:openmaic', // v7.28.0 — OpenMAIC 주소·수업 링크(키 없음)
     'workspace:refboard', // v7.27.0 — 디자인 레퍼런스 보드(URL·메모·태그만, 이미지 파일 없음)
     'workspace:usage:manual', // v7.26.0 — 사용량 화면의 직접 입력값/한도(egress는 이 브라우저에서만 추정하므로 동기화하지 않는다)
     'workspace:clockTimezones',

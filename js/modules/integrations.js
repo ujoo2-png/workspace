@@ -26,6 +26,7 @@
       );
 
       container.append(refCard());
+      container.append(openmaicCard());
 
       const list = el('div', { class: 'item-list' });
       for (const p of PROVIDERS) {
@@ -183,6 +184,61 @@
       el('h3', {}, '🎨 디자인 레퍼런스'),
       el('p', { class: 'text-muted', style: 'font-size:12.5px; margin:4px 0 10px' }, '유료 Refero 대신 무료 소스를 모았어요. 로그인·API 키·서버 중계 없이 이 브라우저에서 바로 동작하고, 저장하는 건 주소·메모·태그뿐이에요(기기 간 동기화).'),
       tabRow, body, status,
+    ]);
+  }
+
+  // ---- OpenMAIC(AI 교실) 바로가기 카드 (v7.28.0) ----
+  // OpenMAIC은 Next.js 앱이라 이 앱 안에 넣을 수 없다. 대신 주소(공개 데모 또는 내가 배포한 주소)를 저장해 두고
+  // 새 탭으로 열며, 만든 수업 링크를 모아 둔다. 주소·링크만 저장(키/토큰은 저장하지 않음), 기기 간 동기화.
+  const MAIC_KEY = 'workspace:openmaic';
+  const MAIC_DEFAULT = 'https://open.maic.chat';
+  function maicGet() {
+    try { const v = JSON.parse(window.settingsSync.get(MAIC_KEY) || 'null') || {}; const R = window.RefService;
+      return { url: R.safeUrl(v.url) || MAIC_DEFAULT, links: (Array.isArray(v.links) ? v.links : []).filter((l) => l && l.id && R.safeUrl(l.url)).slice(0, 30) };
+    } catch { return { url: MAIC_DEFAULT, links: [] }; }
+  }
+  function maicSet(m) { window.settingsSync.set(MAIC_KEY, JSON.stringify({ url: m.url, links: m.links.slice(0, 30) })); }
+  function openmaicCard() {
+    const R = window.RefService;
+    const status = el('div', { class: 'text-muted', id: 'maic-status', style: 'font-size:12.5px; min-height:18px; margin-top:6px' });
+    const body = el('div', {});
+    const say = (t, err) => { status.textContent = t; status.style.color = err ? 'var(--danger)' : ''; };
+    function draw() {
+      const m = maicGet(); body.innerHTML = '';
+      const url = el('input', { class: 'nm-input', id: 'maic-url', value: m.url, 'aria-label': 'OpenMAIC 주소', style: 'flex:1; min-width:220px' });
+      body.append(el('div', { class: 'row wrap', style: 'gap:6px' }, [
+        url,
+        el('button', { type: 'button', class: 'nm-btn', id: 'maic-save', onclick: () => { const u = R.safeUrl(url.value); if (!u) { say('http(s)로 시작하는 주소를 입력해 주세요.', true); return; } maicSet({ ...maicGet(), url: u }); say('주소를 저장했어요.'); draw(); } }, '주소 저장'),
+        el('a', { class: 'nm-btn nm-btn--primary', id: 'maic-open', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, 'OpenMAIC 열기 ↗'),
+      ]));
+      const t = el('input', { class: 'nm-input', id: 'maic-title', placeholder: '수업 이름', 'aria-label': '수업 이름', style: 'width:170px' });
+      const u2 = el('input', { class: 'nm-input', id: 'maic-link', placeholder: '만든 수업 링크 (https://…)', 'aria-label': '수업 링크', style: 'flex:1; min-width:200px' });
+      body.append(el('div', { class: 'row wrap', style: 'gap:6px; margin-top:10px' }, [t, u2, el('button', { type: 'button', class: 'nm-btn', id: 'maic-add', onclick: () => {
+        const lu = R.safeUrl(u2.value); if (!lu) { say('수업 링크는 http(s) 주소여야 해요.', true); return; }
+        const cur = maicGet(); if (cur.links.length >= 30) { say('수업 링크는 최대 30개예요.', true); return; }
+        if (cur.links.some((l) => l.url === lu)) { say('이미 있는 링크예요.'); return; }
+        const title = String(t.value || '').replace(/<[^>]*>/g, '').trim().slice(0, 80) || lu;
+        maicSet({ ...cur, links: [{ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, title, url: lu }, ...cur.links] }); say('저장했어요.'); draw();
+      } }, '링크 저장')]));
+      if (m.links.length) body.append(el('div', { class: 'stack', style: 'gap:4px; margin-top:8px' }, m.links.map((l) => el('div', { class: 'row', style: 'gap:8px; justify-content:space-between' }, [
+        el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.title),
+        el('button', { type: 'button', class: 'nm-btn', 'data-maic-del': l.id, 'aria-label': '삭제', onclick: () => { const c = maicGet(); maicSet({ ...c, links: c.links.filter((x) => x.id !== l.id) }); draw(); } }, '✕'),
+      ]))));
+      body.append(el('details', { style: 'margin-top:10px; font-size:12.5px' }, [
+        el('summary', {}, '무료로 직접 배포하는 방법 (내 주소 만들기)'),
+        el('ol', { style: 'margin:6px 0 0 18px; line-height:1.7' }, [
+          el('li', {}, ['GitHub에서 ', el('a', { href: 'https://github.com/THU-MAIC/OpenMAIC', target: '_blank', rel: 'noopener noreferrer' }, 'THU-MAIC/OpenMAIC'), '를 Fork (MIT 라이선스).']),
+          el('li', {}, 'LLM 키가 하나 필요해요. 무료로 시작하려면 Google AI Studio의 Gemini 무료 키(한도 있음)나, 내 PC의 Ollama(키 불필요)를 쓰세요.'),
+          el('li', {}, 'Vercel 무료 플랜에서 Fork를 Import → 환경변수에 키 등록(.env.example 참고, 예: GOOGLE_API_KEY) → Deploy. 또는 PC에서 pnpm install → pnpm dev.'),
+          el('li', {}, '생긴 주소를 위 칸에 저장하세요. 키는 이 앱에 넣지 마세요(배포한 서버 환경변수에만).'),
+        ]),
+      ]));
+    }
+    draw();
+    return el('div', { class: 'nm-card', id: 'maic-card', style: 'margin-bottom:16px' }, [
+      el('h3', {}, '🎓 OpenMAIC — AI 교실'),
+      el('p', { class: 'text-muted', style: 'font-size:12.5px; margin:4px 0 10px' }, '주제나 문서를 넣으면 AI 선생님·반 친구가 슬라이드·퀴즈·실습으로 수업을 만들어 주는 오픈소스(MIT)예요. 별도 앱이라 이 화면에 넣지 않고 바로가기와 수업 링크 보관함으로 연결했어요.'),
+      body, status,
     ]);
   }
 

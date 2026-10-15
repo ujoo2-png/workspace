@@ -250,6 +250,7 @@
       el('div', {}, [
         el('h3', { style: 'margin:0' }, '작업 분해(WBS) · 간트차트'),
         el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px' }, '줄을 하나 입력하고 Enter — 대/중/소와 번호(1, 1.1, 1.1.1)는 들여쓰기 깊이로 자동으로 정해져요.'),
+        el('div', { class: 'g2-tip', id: 'wbs-tip' }, '💡 ⠿·번호·대/중/소 배지를 끌어 순서 변경 · 이름/날짜 사이 세로선(⋮)을 끌어 이름 칸 너비 조절 · 체크 후 복사/붙여넣기(체크 없으면 전체)'),
       ]),
       rows.length ? el('div', { class: 'row wrap', style: 'gap:6px' }, [
         el('span', { class: 'nm-badge', id: 'wbs-overall' }, `전체 진행률 ${overall}%`),
@@ -524,9 +525,17 @@
     chk.addEventListener('click', (e) => e.stopPropagation());
     chk.addEventListener('change', () => { if (chk.checked) checked.add(it.id); else checked.delete(it.id); const n = document.getElementById('wbs-checked-n'); if (n) n.textContent = `${checked.size}개 선택`; else rerender(); });
     row.append(chk);
-    const grip = el('span', { class: 'g2-grip', draggable: pending ? undefined : 'true', title: '끌어서 순서·단계 변경 (줄의 위쪽=앞, 아래쪽=뒤, 가운데=하위로)', 'aria-label': `${it.name} 이동 손잡이` }, '⠿');
-    grip.addEventListener('dragstart', (e) => { view.dragId = it.id; try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setDragImage(row, 20, 12); } catch { /* 무시 */ } row.classList.add('g2-lrow--drag'); });
-    grip.addEventListener('dragend', () => { view.dragId = null; row.classList.remove('g2-lrow--drag'); document.querySelectorAll('.g2-drop-before,.g2-drop-after,.g2-drop-inside').forEach((n) => n.classList.remove('g2-drop-before', 'g2-drop-after', 'g2-drop-inside')); });
+    const grip = el('span', { class: 'g2-grip', title: '끌어서 순서·단계 변경 (줄의 위쪽=앞, 아래쪽=뒤, 가운데=하위로)', 'aria-label': `${it.name} 이동 손잡이` }, '⠿');
+    const clearAllMarks = () => document.querySelectorAll('.g2-drop-before,.g2-drop-after,.g2-drop-inside').forEach((n) => n.classList.remove('g2-drop-before', 'g2-drop-after', 'g2-drop-inside'));
+    // v7.28.1: ⠿ 손잡이뿐 아니라 번호·대/중/소 배지를 잡고 끌어도 순서가 바뀜
+    const makeDraggable = (node2) => {
+      if (pending) return node2;
+      node2.setAttribute('draggable', 'true'); node2.classList.add('g2-dragsrc');
+      node2.addEventListener('dragstart', (e) => { view.dragId = it.id; try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setDragImage(row, 20, 12); } catch { /* 무시 */ } row.classList.add('g2-lrow--drag'); });
+      node2.addEventListener('dragend', () => { view.dragId = null; row.classList.remove('g2-lrow--drag'); clearAllMarks(); });
+      return node2;
+    };
+    makeDraggable(grip);
     row.append(grip);
     const zoneOf = (e) => { const r = row.getBoundingClientRect(); const y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'inside'; };
     const clearMarks = () => row.classList.remove('g2-drop-before', 'g2-drop-after', 'g2-drop-inside');
@@ -547,8 +556,8 @@
     row.append(it.hasChildren
       ? el('button', { type: 'button', class: 'g2-chev', title: it.collapsed ? '펼치기' : '접기', 'aria-expanded': String(!it.collapsed), 'aria-label': `${it.name} ${it.collapsed ? '펼치기' : '접기'}`, onclick: (e) => { e.stopPropagation(); if (collapsed.has(it.id)) collapsed.delete(it.id); else collapsed.add(it.id); rerender(); } }, it.collapsed ? '▸' : '▾')
       : el('span', { class: 'g2-chev g2-chev--none' }));
-    row.append(el('span', { class: 'g2-num' }, it.number));
-    row.append(el('span', { class: `g2-lvl g2-lvl--${it.levelIndex}`, title: `${it.level}분류(L${it.depth + 1})` }, it.level));
+    row.append(makeDraggable(el('span', { class: 'g2-num', title: '끌어서 순서·단계 변경' }, it.number)));
+    row.append(makeDraggable(el('span', { class: `g2-lvl g2-lvl--${it.levelIndex}`, title: `${it.level}분류(L${it.depth + 1}) — 끌어서 순서·단계 변경` }, it.level)));
     const input = el('input', { class: 'g2-name', 'data-id': it.id, value: node.name, disabled: pending ? true : undefined, 'aria-label': `${it.number} 이름`, spellcheck: 'false' });
     let original = node.name;
     input.addEventListener('focus', () => { original = input.value; });
