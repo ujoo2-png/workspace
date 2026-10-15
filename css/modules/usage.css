@@ -23,7 +23,16 @@
 .usage-days { display: flex; align-items: flex-end; gap: 6px; height: 88px; } .usage-day { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; } .usage-day__bar { width: 100%; max-width: 22px; background: var(--accent); border-radius: 4px 4px 0 0; } .usage-day__l { font-size: 10px; color: var(--text-muted); }
 @media (max-width: 520px) { .usage-kv { grid-template-columns: 1fr; } }
 
-/* Refero 결과 */
-.refero-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.refero-grid img { width: 100%; height: 130px; object-fit: cover; border-radius: var(--radius-md); border: 1px solid var(--border); display: block; }
-.refero-text { white-space: pre-wrap; word-break: break-word; font-size: 12px; padding: 10px; border-radius: var(--radius-md); background: var(--surface-2); max-height: 260px; overflow: auto; margin-top: 8px; }
+/* 디자인 레퍼런스 (v7.27.0) */
+.ref-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.ref-item { position: relative; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.ref-item img { width: 100%; height: 125px; object-fit: cover; border-radius: var(--radius-md); border: 1px solid var(--border); display: block; background: var(--surface-2); }
+.ref-noimg { height: 125px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: var(--surface-2); font-size: 24px; }
+.ref-pin { position: absolute; top: 6px; right: 6px; padding: 2px 7px; min-width: 0; font-size: 12px; opacity: .92; }
+.ref-item figcaption { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.ref-cap { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-by { color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-note { font-size: 11.5px; padding: 3px 6px; }
+.ref-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.ref-link { display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; border-radius: var(--radius-md); background: var(--surface-2); text-decoration: none; color: inherit; font-size: 12.5px; }
+.ref-link:hover, .ref-link:focus-visible { outline: 2px solid var(--accent); }

@@ -66,21 +66,26 @@ await page.click('[data-metric=logQuery] .usage-edit'); await page.waitForSelect
 await page.fill('#usage-val', '0.5GB'); await page.fill('#usage-lim', '2GB'); await page.click('#usage-save'); await page.waitForTimeout(300);
 expect('로그 조회 0.5GB/2GB 25%', /25%/.test(await page.locator('[data-metric=logQuery]').innerText()), await page.locator('[data-metric=logQuery]').innerText());
 expect('설정 동기화 키 저장', (await page.evaluate(() => window.settingsSync.get('workspace:usage:manual'))).includes('logQuery'));
-// Refero 카드(프록시는 가짜 응답)
-await page.route('**/api/refero', async (r) => {
-  const b = JSON.parse(r.request().postData() || '{}'); const tok = r.request().headers()['x-refero-token'];
-  if (tok !== 'tok-abcdefgh') return r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: '토큰이 올바르지 않거나 만료되었습니다' }) });
-  const result = b.action === 'tools' ? { tools: [{ name: 'search_screens', inputSchema: { properties: { query: {} } } }] } : { content: [{ type: 'text', text: `결과 ${b.args.query} https://example.com/a.png` }] };
-  r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, result }) });
-});
-await page.evaluate(() => { location.hash = '#/integrations'; }); await page.waitForSelector('#refero-card');
-await page.fill('#refero-token', 'bad-token-xx'); await page.click('#refero-save'); await page.click('#refero-test'); await page.waitForTimeout(400);
-expect('잘못된 토큰 → 오류 표시', /토큰이 올바르지 않/.test(await page.locator('#refero-status').innerText()));
-await page.fill('#refero-token', 'tok-abcdefgh'); await page.click('#refero-save'); await page.click('#refero-test'); await page.waitForTimeout(400);
-expect('연결됨 + 도구 목록', /연결됨/.test(await page.locator('#refero-status').innerText()) && /search_screens/.test(await page.locator('#refero-results').innerText()));
-await page.fill('#refero-q', '대시보드'); await page.click('#refero-go'); await page.waitForTimeout(500);
-expect('검색 결과(이미지/텍스트)', (await page.locator('#refero-results img').count()) === 1 && /결과 대시보드/.test(await page.locator('#refero-results').innerText()));
-expect('토큰은 DB 동기화 키가 아님', !(await page.evaluate(() => window.settingsSync.SYNCED_KEYS.includes('workspace:refero:token'))));
+// 디자인 레퍼런스 카드(v7.27.0, 외부 API는 가짜 응답)
+await page.route('https://api.openverse.org/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ results: [{ id: 'o1', title: 'Dash UI', thumbnail: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', foreign_landing_url: 'https://example.com/o1', creator: 'kim', license: 'by' }, { id: 'o2', title: 'Dash2', thumbnail: 'https://example.com/t2.png', foreign_landing_url: 'https://example.com/o2' }] }) }));
+await page.route('https://example.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64') }));
+await page.route('https://image.thum.io/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64') }));
+await page.evaluate(() => { location.hash = '#/integrations'; }); await page.waitForSelector('#ref-card');
+expect('Refero 토큰 입력칸 없음(키 불필요)', (await page.locator('#refero-token').count()) === 0);
+await page.fill('#ref-q', 'dashboard'); await page.click('#ref-go'); await page.waitForSelector('#ref-results .ref-item');
+expect('Openverse 결과(data: 썸네일은 제외돼 1개)', (await page.locator('#ref-results .ref-item').count()) === 1, String(await page.locator('#ref-results .ref-item').count()));
+await page.click('#ref-results .ref-item .ref-pin'); await page.waitForTimeout(200);
+expect('📌 저장 → 보드 동기화 키', (await page.evaluate(() => window.settingsSync.get('workspace:refboard'))).includes('Dash2'));
+await page.click('[data-tab=gallery]'); await page.fill('#ref-gq', '로그인');
+expect('갤러리 링크 12개, 모두 https·새 탭', (await page.locator('#ref-glinks a').count()) === 12 && (await page.locator('#ref-glinks a[target=_blank][rel*=noopener]').count()) === 12);
+await page.click('[data-tab=board]'); await page.waitForSelector('#ref-add-url');
+await page.fill('#ref-add-url', 'javascript:alert(1)'); await page.click('#ref-add');
+expect('위험 주소 거부', /http/.test(await page.locator('#ref-status').innerText()));
+await page.fill('#ref-add-url', 'https://example.com/site'); await page.fill('#ref-add-tags', 'saas ui'); await page.click('#ref-add'); await page.waitForTimeout(200);
+expect('보드에 2개(검색 저장 + 직접 추가)', (await page.locator('#ref-body .ref-item').count()) === 2);
+await page.click('#ref-body [data-del]'); await page.waitForTimeout(150);
+expect('삭제 후 1개', (await page.locator('#ref-body .ref-item').count()) === 1);
+expect('Are.na 탭 UI', (await page.click('[data-tab=arena]'), (await page.locator('#ref-arena').count()) === 1));
 
 expect('콘솔 오류 없음', errors.length === 0, errors.join('\n'));
 await browser.close(); server.close?.();
