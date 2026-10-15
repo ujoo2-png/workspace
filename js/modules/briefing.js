@@ -8,7 +8,7 @@
   function renderBriefing(root) {
     const container = el('div', {});
     root.append(container);
-    let tab = 'items'; // items | topics | sources
+    let tab = 'news'; // news | items | topics | sources
     let collecting = false;
 
     function draw() {
@@ -29,13 +29,15 @@
 
       container.append(
         el('div', { class: 'row wrap', style: 'margin-bottom:14px' }, [
+          tabBtn('news', '📰 뉴스레터'),
           tabBtn('items', '브리핑 목록'),
           tabBtn('topics', `관심주제 (${appState.briefingTopics.length}/10)`),
           tabBtn('sources', '피드 소스'),
         ])
       );
 
-      if (tab === 'items') drawItems();
+      if (tab === 'news') drawNews();
+      else if (tab === 'items') drawItems();
       else if (tab === 'topics') drawTopics();
       else drawSources();
     }
@@ -69,6 +71,25 @@
       }
     }
 
+    function drawNews() {
+      const model = window.buildNewsletterModel(appState.briefingItems, { topics: appState.briefingTopics, sources: appState.feedSources, schedules: appState.schedules });
+      const html = window.newsletterToHtml(model);
+      if (!appState.briefingItems.length) {
+        container.append(el('div', { class: 'empty-state' }, '아직 수집된 항목이 없습니다. 관심주제를 등록하고 "지금 가져오기"를 누르면 뉴스레터가 만들어집니다.'));
+        return;
+      }
+      container.append(el('div', { class: 'row wrap', style: 'margin-bottom:10px; gap:8px' }, [
+        el('button', { class: 'nm-btn', onclick: () => window.print() }, '🖨 인쇄/PDF'),
+        el('button', { class: 'nm-btn', onclick: async () => {
+          let css = ''; try { css = await (await fetch('css/modules/newsletter.css')).text(); } catch { /* 스타일 없이 저장 */ }
+          const doc = `<!doctype html><meta charset="utf-8"><title>일일 브리핑</title><style>body{font-family:sans-serif;background:#f4f4f4;padding:16px;color:#14213D}.nl{background:#fff}${css}</style>${html}`;
+          const a = el('a', { href: URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' })), download: `briefing-${new Date().toLocaleDateString('sv-SE')}.html` });
+          document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        } }, '⬇ HTML 저장'),
+      ]));
+      container.append(el('div', { html }));
+    }
+
     function drawItems() {
       const topicById = (id) => appState.briefingTopics.find((t) => t.id === id);
       const hitsOf = (it) => window.priorityHits(it, topicById(it.topic_id));
@@ -97,14 +118,14 @@
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'item-row__title' }, [
                 hitsOf(item).length ? el('span', { class: 'nm-badge nm-badge--warning', title: `우선 검색어: ${hitsOf(item).join(', ')}`, style: 'margin-right:6px' }, '⭐ 우선') : null,
-                el('a', { href: item.link, target: '_blank', rel: 'noopener', onclick: () => !item.is_read && appState.markBriefingItemRead(item.id) }, escapeHtml(item.title)),
+                el('a', { href: item.link, target: '_blank', rel: 'noopener', onclick: () => !item.is_read && appState.markBriefingItemRead(item.id) }, item.title),
               ]),
               el(
                 'div',
                 { class: 'item-row__meta' },
-                `${topic ? '#' + escapeHtml(topic.name) + ' · ' : ''}${source ? escapeHtml(source.name) : escapeHtml(window.deriveSourceLabel(item))}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
+                `${topic ? '#' + topic.name + ' · ' : ''}${source ? source.name : window.deriveSourceLabel(item)}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
               ),
-              item.summary ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, escapeHtml(item.summary)) : null,
+              item.summary ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, item.summary) : null,
             ]),
             !item.is_read ? el('button', { class: 'nm-btn nm-btn--icon', title: '읽음 처리', onclick: () => appState.markBriefingItemRead(item.id) }, '✓') : null,
             el('button', { class: 'nm-btn nm-btn--icon', title: 'Knowledge에 스크랩', onclick: () => scrapToKnowledge(item, topic) }, '📌'),
@@ -127,7 +148,7 @@
         list.append(
           el('div', { class: 'item-row' }, [
             el('div', { class: 'item-row__main' }, [
-              el('div', { class: 'item-row__title' }, `${escapeHtml(t.name)} ${t.active === false ? '(비활성)' : ''}`),
+              el('div', { class: 'item-row__title' }, `${t.name} ${t.active === false ? '(비활성)' : ''}`),
               el('div', { class: 'item-row__meta' }, [
                 (t.site_urls || []).length ? `사이트: ${t.site_urls.join(', ')}` : '',
                 (t.search_terms || []).length ? `검색어: ${t.search_terms.join(', ')}` : '',
@@ -160,11 +181,11 @@
           el('div', { class: 'item-row' }, [
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'row wrap', style: 'gap:6px; align-items:center' }, [
-                el('div', { class: 'item-row__title' }, `${escapeHtml(s.name)} ${s.enabled === false ? '(비활성)' : ''}`),
+                el('div', { class: 'item-row__title' }, `${s.name} ${s.enabled === false ? '(비활성)' : ''}`),
                 el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS'),
                 el('span', { class: `nm-badge ${status.cls}` }, status.label),
               ]),
-              el('div', { class: 'item-row__meta' }, `${escapeHtml(endpointPreview)}${s.last_run_at ? ' · 마지막 수집 ' + s.last_run_at.slice(0, 16).replace('T', ' ') : ''}`),
+              el('div', { class: 'item-row__meta' }, `${endpointPreview}${s.last_run_at ? ' · 마지막 수집 ' + s.last_run_at.slice(0, 16).replace('T', ' ') : ''}`),
             ]),
             el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openSourceForm(s) }, '✎'),
             el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeSource(s) }, '🗑'),

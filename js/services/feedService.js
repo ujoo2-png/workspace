@@ -5,18 +5,75 @@
 // 실패해도(네트워크 차단 등) 조용히 에러를 던져 호출부에서 토스트로만 알린다.
 // 일반 <script>로 로드된다.
 (function () {
-  async function fetchFeedItems(feedUrl) {
+  // ---- v7.29.0: 표시 깨짐(&quot; &nbsp; 등) 수정 + RSS 변환 서비스 장애 대비 대체 경로 ----
+  const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', middot: '·', ndash: '–', mdash: '—', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”' };
+  /** HTML 엔티티(&quot; &#39; &#x27; &nbsp; …)를 글자로 되돌린다. 모르는 이름은 그대로 둔다. */
+  function decodeEntities(str) {
+    return String(str == null ? '' : str).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, g) => {
+      if (g[0] === '#') { const n = g[1].toLowerCase() === 'x' ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m; }
+      const v = NAMED[g.toLowerCase()]; return v === undefined ? m : v;
+    });
+  }
+  const plain = (html) => decodeEntities(String(html || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  /** 요약이 제목의 반복(구글 뉴스 RSS: "제목  매체명")이면 빈 값으로. 아니면 300자로 자른다. */
+  function cleanSummary(title, desc) {
+    const t = plain(title); const d = plain(desc);
+    if (!d) return '';
+    const core = t.replace(/\s[-–—]\s[^-–—]{2,30}$/, '');
+    if (core && d.replace(/\s+/g, '').startsWith(core.replace(/\s+/g, '').slice(0, Math.max(10, Math.floor(core.length * 0.8))))) return '';
+    return d.slice(0, 300);
+  }
+  const httpOnly = (u) => { try { const x = new URL(String(u || '').trim()); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
+  function normItem(it) {
+    const title = plain(it.title) || '(제목 없음)';
+    return { title, link: httpOnly(it.link), publishedAt: it.pubDate || null, summary: cleanSummary(it.title, it.description) };
+  }
+
+  /** RSS 2.0 / Atom 문자열 → 항목 목록(DOM 없이 동작해 Node 테스트 가능). */
+  function parseRssXml(xml) {
+    const text = String(xml || '');
+    const blocks = text.match(/<item[\s>][\s\S]*?<\/item>|<entry[\s>][\s\S]*?<\/entry>/gi) || [];
+    const unwrap = (v) => String(v || '').replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, '$1');
+    const tag = (blk, name) => { const m = blk.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i')); return m ? unwrap(m[1]) : ''; };
+    return blocks.map((blk) => {
+      let link = tag(blk, 'link');
+      if (!link || !/^\s*https?:/i.test(link)) { const h = blk.match(/<link[^>]*href=["']([^"']+)["']/i); if (h) link = h[1]; }
+      return normItem({ title: tag(blk, 'title'), link: decodeEntities(link).trim(), pubDate: tag(blk, 'pubDate') || tag(blk, 'updated') || tag(blk, 'published') || null, description: tag(blk, 'description') || tag(blk, 'summary') || tag(blk, 'content') });
+    }).filter((x) => x.link);
+  }
+
+  async function viaRss2Json(feedUrl) {
     const api = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`;
     const res = await fetch(api, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error('피드 서버 응답 오류');
     const data = await res.json();
     if (data.status !== 'ok') throw new Error(data.message || '피드 형식을 읽을 수 없습니다.');
-    return (data.items || []).map((it) => ({
-      title: it.title || '(제목 없음)',
-      link: it.link,
-      publishedAt: it.pubDate || null,
-      summary: (it.description || '').replace(/<[^>]+>/g, '').slice(0, 300),
-    }));
+    return (data.items || []).map(normItem).filter((x) => x.link);
+  }
+  // 대체 경로: 공개 CORS 중계로 원문 RSS를 받아 직접 해석한다(서비스 상태에 따라 동작하지 않을 수 있음).
+  const FALLBACK_PROXIES = [
+    (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  ];
+  async function viaProxies(feedUrl) {
+    let lastErr = null;
+    for (const mk of FALLBACK_PROXIES) {
+      try {
+        const res = await fetch(mk(feedUrl), { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(`중계 응답 오류(${res.status})`);
+        const items = parseRssXml(await res.text());
+        if (items.length) return items;
+        throw new Error('RSS 항목을 찾지 못했습니다.');
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error('대체 경로도 실패했습니다.');
+  }
+  async function fetchFeedItems(feedUrl) {
+    try { return await viaRss2Json(feedUrl); }
+    catch (e1) {
+      try { return await viaProxies(feedUrl); }
+      catch (e2) { throw new Error(`${e1.message} (대체 경로: ${e2.message})`); }
+    }
   }
 
   // 포함 키워드 중 하나라도 매치 + 제외 키워드는 전부 없어야 함. 포함 키워드가 없으면 전부 통과.
@@ -171,6 +228,7 @@
 
   Object.assign(window, { MAX_TOPIC_FEEDS, splitList, parseSiteInput, googleNewsFeedUrl, buildTopicFeeds, itemHasExcluded, priorityHits, deriveSourceLabel, parseBriefingSpec, briefingSpecToText });
   window.fetchFeedItems = fetchFeedItems;
+  Object.assign(window, { decodeEntities, cleanSummary, parseRssXml });
   window.itemMatchesTopic = itemMatchesTopic;
   window.simpleHash = simpleHash;
   window.parseKeywords = parseKeywords;
