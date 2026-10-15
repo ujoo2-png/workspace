@@ -250,7 +250,7 @@
       el('div', {}, [
         el('h3', { style: 'margin:0' }, '작업 분해(WBS) · 간트차트'),
         el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px' }, '줄을 하나 입력하고 Enter — 대/중/소와 번호(1, 1.1, 1.1.1)는 들여쓰기 깊이로 자동으로 정해져요.'),
-        el('div', { class: 'g2-tip', id: 'wbs-tip' }, '💡 ⠿·번호·대/중/소 배지를 끌어 순서 변경 · 이름/날짜 사이 세로선(⋮)을 끌어 이름 칸 너비 조절 · 체크 후 복사/붙여넣기(체크 없으면 전체)'),
+        el('div', { class: 'g2-hint', id: 'wbs-tip' }, '💡 ⠿·번호·대/중/소 배지를 끌어 순서 변경 · 이름/날짜 사이 세로선(⋮)을 끌어 이름 칸 너비 조절 · 체크 후 복사/붙여넣기(체크 없으면 전체)'),
       ]),
       rows.length ? el('div', { class: 'row wrap', style: 'gap:6px' }, [
         el('span', { class: 'nm-badge', id: 'wbs-overall' }, `전체 진행률 ${overall}%`),
