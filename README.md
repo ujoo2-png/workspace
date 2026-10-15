@@ -1,10 +1,18 @@
-# 나만의 Work Space (v7.27.0)
+# 나만의 Work Space (v7.28.1)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
 개발계획서 v3.2의 전체 메뉴(일정·프로젝트·프로그램·챌린저·관심주제 브리핑·문화생활·차량관리·Health·Devlog·
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
+
+v7.28.1 — **WBS 조작이 눈에 잘 띄도록 개선**:
+- 이름/날짜 사이 조절선에 ⋮ 표시와 안내선을 항상 보이게 함(끌어서 너비 조절, 더블클릭 초기화).
+- ⠿ 손잡이뿐 아니라 번호·대/중/소 배지를 잡고 끌어도 순서·단계가 바뀜. WBS 상단에 조작 안내 문구 추가.
+
+v7.28.0 — **OpenMAIC(AI 교실) 바로가기**:
+- Integrations 상단 "🎓 OpenMAIC" 카드: 주소 저장(기본 공개 데모 open.maic.chat 또는 내가 배포한 주소) → 새 탭 열기, 만든 수업 링크 보관(최대 30개, 기기 간 동기화), 무료 자체 배포 안내. 주소·링크만 저장하고 API 키는 저장하지 않음.
+- OpenMAIC은 Next.js 앱이라 이 화면 안에 임베드하지 않음(임베드 지원 여부 미확인).
 
 v7.27.0 — **Refero(유료) → 무료 디자인 레퍼런스로 대체**:
 - 연동 메뉴의 "🎨 디자인 레퍼런스": ① Openverse·Wikimedia Commons 이미지 검색(키 불필요) ② Are.na 공개 채널 불러오기 ③ Dribbble/Behance/Pinterest/Mobbin/Land-book 등 12개 갤러리 검색 바로가기 ④ 내 보드(주소·메모·태그 저장, 사이트는 스크린샷 미리보기, 기기 간 동기화, 최대 200개).
