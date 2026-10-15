@@ -60,6 +60,12 @@ await page.locator('.g2-lrow:has(input[value="2학기"]) .g2-grip').dragTo(page.
 await page.waitForTimeout(500);
 const lv = await page.evaluate(() => { const st = window.appState.projectStages; const t = st.find((x) => x.name === '2학기'); const par = st.find((x) => x.id === t.parent_id); return par && par.name.slice(0, 3); });
 expect('가운데에 놓으면 하위로', lv === '1학기', String(lv));
+// v7.28.1: 대/중/소 배지를 잡고 끌어도 순서 변경 + 조절선이 항상 보임
+await page.locator('.g2-lrow:has(input[value="1강"]) .g2-lvl').dragTo(page.locator('.g2-lrow:has(input[value="2강"])'), { targetPosition: { x: 80, y: 30 } });
+await page.waitForTimeout(500);
+nm = await names();
+expect('배지를 끌어도 1강이 2강 뒤로', nm.indexOf('1강') > nm.indexOf('2강'), JSON.stringify(nm));
+expect('조절선 안내와 ⋮ 표시', (await page.locator('#wbs-tip').count()) === 1 && (await page.evaluate(() => getComputedStyle(document.querySelector('.g2-corner .g2-resizer'), '::before').content)).includes('⋮'));
 await page.screenshot({ path: path.join(SHOTS, 'wbs-drag.png') });
 
 // 2.3 일부 복사/붙여넣기

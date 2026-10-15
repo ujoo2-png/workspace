@@ -87,6 +87,20 @@ await page.click('#ref-body [data-del]'); await page.waitForTimeout(150);
 expect('삭제 후 1개', (await page.locator('#ref-body .ref-item').count()) === 1);
 expect('Are.na 탭 UI', (await page.click('[data-tab=arena]'), (await page.locator('#ref-arena').count()) === 1));
 
+// OpenMAIC 카드(v7.28.0)
+await page.click('[data-tab=board]').catch(() => {});
+await page.waitForSelector('#maic-card');
+expect('OpenMAIC 기본 주소 + 새 탭 링크', /^https:\/\/open\.maic\.chat\/?$/.test(await page.getAttribute('#maic-open', 'href')) && (await page.getAttribute('#maic-open', 'target')) === '_blank');
+await page.fill('#maic-url', 'javascript:alert(1)'); await page.click('#maic-save');
+expect('위험 주소 거부', /http/.test(await page.locator('#maic-status').innerText()));
+await page.fill('#maic-url', 'https://my-maic.vercel.app'); await page.click('#maic-save');
+expect('내 주소로 변경', /^https:\/\/my-maic\.vercel\.app\/?$/.test(await page.getAttribute('#maic-open', 'href')));
+await page.fill('#maic-title', '<b>물리</b> 1강'); await page.fill('#maic-link', 'https://my-maic.vercel.app/classroom/abc'); await page.click('#maic-add');
+expect('수업 링크 저장(태그 제거)', /물리 1강/.test(await page.locator('#maic-card').innerText()) && !/<b>/.test(await page.locator('#maic-card').innerText()));
+await page.click('[data-maic-del]'); await page.waitForTimeout(150);
+expect('수업 링크 삭제', !/물리 1강/.test(await page.locator('#maic-card').innerText()));
+expect('동기화 키 저장(키/토큰 없음)', (await page.evaluate(() => window.settingsSync.get('workspace:openmaic'))).includes('my-maic'));
+
 expect('콘솔 오류 없음', errors.length === 0, errors.join('\n'));
 await browser.close(); server.close?.();
 console.log(fails ? `${fails} FAIL` : 'ALL OK');
