@@ -25,7 +25,7 @@
         el('p', { class: 'text-muted', style: 'margin-bottom:16px' }, '외부 서비스 연동은 현재 준비 중입니다. 연동 우선순위를 미리 표시해두면 고도화 시 참고합니다.')
       );
 
-      container.append(referoCard());
+      container.append(refCard());
 
       const list = el('div', { class: 'item-list' });
       for (const p of PROVIDERS) {
@@ -59,51 +59,130 @@
     return () => appState.removeEventListener('change', draw);
   }
 
-  // ---- Refero(디자인 레퍼런스) 연결 카드 (v7.26.0) ----
-  function referoCard() {
-    const R = window.ReferoService;
-    const status = el('div', { class: 'text-muted', id: 'refero-status', style: 'font-size:12.5px; min-height:18px' });
-    const results = el('div', { id: 'refero-results', style: 'margin-top:10px' });
-    const tokenIn = el('input', { class: 'nm-input', id: 'refero-token', type: 'password', autocomplete: 'off', placeholder: R.getToken() ? '저장됨 (바꾸려면 새 토큰 입력)' : 'Refero 토큰(Bearer)', 'aria-label': 'Refero 토큰' });
+  // ---- 디자인 레퍼런스 카드 (v7.27.0, Refero 대체 · 전부 무료/키 불필요) ----
+  function refCard() {
+    const R = window.RefService;
+    const state = { tab: 'search', src: 'openverse', page: 1, lastQ: '', last: [] };
+    const status = el('div', { class: 'text-muted', id: 'ref-status', style: 'font-size:12.5px; min-height:18px; margin-top:8px' });
+    const body = el('div', { id: 'ref-body', style: 'margin-top:8px' });
     const setStatus = (t, err) => { status.textContent = t; status.style.color = err ? 'var(--danger)' : ''; };
-    const saveBtn = el('button', { type: 'button', class: 'nm-btn', id: 'refero-save', onclick: () => {
-      const v = tokenIn.value.trim();
-      if (!v) { setStatus('토큰을 입력해 주세요.', true); return; }
-      R.setToken(v); tokenIn.value = ''; tokenIn.placeholder = '저장됨 (바꾸려면 새 토큰 입력)'; setStatus('이 브라우저에 저장했어요(서버/DB에는 저장하지 않아요).');
-    } }, '저장');
-    const delBtn = el('button', { type: 'button', class: 'nm-btn', id: 'refero-del', onclick: () => { R.setToken(''); tokenIn.placeholder = 'Refero 토큰(Bearer)'; setStatus('토큰을 지웠어요.'); results.innerHTML = ''; } }, '지우기');
-    const testBtn = el('button', { type: 'button', class: 'nm-btn', id: 'refero-test', onclick: async () => {
-      testBtn.disabled = true; setStatus('연결 확인 중…'); results.innerHTML = '';
-      try {
-        const tools = await R.listTools();
-        setStatus(`✅ 연결됨 — 도구 ${tools.length}개`);
-        results.append(el('div', { class: 'row wrap', style: 'gap:6px' }, tools.map((t) => el('span', { class: 'nm-badge', title: t.description || '' }, t.name))));
-      } catch (e) { setStatus(`⚠️ ${e.message}`, true); }
-      testBtn.disabled = false;
-    } }, '연결 테스트');
-    const q = el('input', { class: 'nm-input', id: 'refero-q', placeholder: '찾을 화면/디자인 (예: 대시보드 사이드바, onboarding, 요금제 페이지)', 'aria-label': 'Refero 검색어', style: 'flex:1; min-width:200px' });
-    const go = async () => {
-      const text = q.value.trim(); if (!text) return;
-      setStatus('검색 중…'); results.innerHTML = '';
-      try {
-        const r = await R.search(text);
-        setStatus(`"${text}" — ${r.tool} 결과`);
-        if (r.images.length) results.append(el('div', { class: 'refero-grid' }, r.images.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener noreferrer' }, el('img', { src: u, alt: '레퍼런스 이미지', loading: 'lazy', referrerpolicy: 'no-referrer' })))));
-        if (r.links.length) results.append(el('div', { class: 'stack', style: 'gap:4px; margin-top:8px; font-size:12.5px' }, r.links.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener noreferrer' }, u))));
-        if (r.texts.length) results.append(el('pre', { class: 'refero-text' }, r.texts.join('\n\n').slice(0, 6000)));
-        if (!r.images.length && !r.links.length && !r.texts.length) results.append(el('div', { class: 'text-muted' }, '결과가 없어요.'));
-      } catch (e) { setStatus(`⚠️ ${e.message}`, true); }
-    };
-    q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
-    return el('div', { class: 'nm-card', id: 'refero-card', style: 'margin-bottom:16px' }, [
-      el('h3', {}, '🎨 Refero — 디자인 레퍼런스'),
-      el('p', { class: 'text-muted', style: 'font-size:12.5px; margin:4px 0 10px' }, [
-        'Refero의 실제 서비스/앱 화면 레퍼런스를 여기서 바로 검색해요. Refero 유료 플랜(Pro/Team/Lifetime)의 토큰이 필요하고, Vercel에 배포된 주소에서만 동작해요(/api/refero 프록시 사용). ',
-        el('a', { href: 'https://doc.refero.design/mcp/getting-started', target: '_blank', rel: 'noopener noreferrer' }, '설정 방법'),
-      ]),
-      el('div', { class: 'row wrap', style: 'gap:6px; margin-bottom:8px' }, [tokenIn, saveBtn, testBtn, delBtn]),
-      el('div', { class: 'row wrap', style: 'gap:6px' }, [q, el('button', { type: 'button', class: 'nm-btn nm-btn--primary', id: 'refero-go', onclick: go }, '검색')]),
-      status, results,
+    const tabs = [['search', '🔎 검색'], ['arena', '🗂 Are.na 채널'], ['gallery', '🧭 갤러리 바로가기'], ['board', '📌 내 보드']];
+    const tabRow = el('div', { class: 'row wrap', style: 'gap:6px' });
+
+    function thumb(it, opts = {}) {
+      const saved = R.getBoard().some((b) => b.link === it.link || (b.img && b.img === it.thumb));
+      const pin = el('button', { type: 'button', class: 'nm-btn ref-pin', title: '내 보드에 저장', 'aria-label': '내 보드에 저장', 'data-pin': it.key || '', onclick: (e) => {
+        e.preventDefault();
+        try { const r = R.addToBoard({ title: it.title, img: it.thumb, link: it.link, tags: opts.tags || '' }); pin.textContent = '✓'; setStatus(r.added ? '내 보드에 저장했어요.' : '이미 보드에 있어요.'); } catch (er) { setStatus(er.message, true); }
+      } }, saved ? '✓' : '📌');
+      return el('figure', { class: 'ref-item' }, [
+        el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer', title: it.title }, el('img', { src: it.thumb, alt: it.title, loading: 'lazy', referrerpolicy: 'no-referrer' })),
+        pin,
+        el('figcaption', {}, [el('span', { class: 'ref-cap' }, it.title), it.by || it.license ? el('span', { class: 'ref-by' }, [it.by, it.license].filter(Boolean).join(' · ')) : null]),
+      ]);
+    }
+    const grid = (items, tags) => el('div', { class: 'ref-grid' }, items.map((it) => thumb(it, { tags })));
+
+    function drawSearch() {
+      const q = el('input', { class: 'nm-input', id: 'ref-q', value: state.lastQ, placeholder: '찾을 디자인 (예: dashboard ui, login screen, pricing page)', 'aria-label': '레퍼런스 검색어', style: 'flex:1; min-width:200px' });
+      const sel = el('select', { class: 'nm-select', id: 'ref-src', 'aria-label': '검색 소스', onchange: (e) => { state.src = e.target.value; } }, [
+        el('option', { value: 'openverse' }, 'Openverse (사진·일러스트)'), el('option', { value: 'commons' }, 'Wikimedia Commons'),
+      ]);
+      sel.value = state.src;
+      const out = el('div', { id: 'ref-results' });
+      const more = el('button', { type: 'button', class: 'nm-btn', id: 'ref-more', style: 'display:none; margin-top:8px', onclick: () => run(state.page + 1) }, '더 보기');
+      async function run(page) {
+        const text = q.value.trim(); if (!text) return;
+        if (page === 1) { out.innerHTML = ''; state.lastQ = text; }
+        state.page = page; setStatus('검색 중…');
+        try {
+          const items = await (state.src === 'commons' ? R.searchCommons(text, page) : R.searchOpenverse(text, page));
+          if (page === 1 && !items.length) { setStatus('결과가 없어요. 영어 키워드나 갤러리 바로가기를 써 보세요.'); more.style.display = 'none'; return; }
+          out.append(grid(items)); setStatus(`"${text}" — ${out.querySelectorAll('.ref-item').length}개`); more.style.display = items.length >= 24 ? '' : 'none';
+        } catch (e) { setStatus(`⚠️ ${e.message}`, true); }
+      }
+      q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) run(1); });
+      body.append(
+        el('div', { class: 'row wrap', style: 'gap:6px' }, [q, sel, el('button', { type: 'button', class: 'nm-btn nm-btn--primary', id: 'ref-go', onclick: () => run(1) }, '검색')]),
+        el('p', { class: 'text-muted', style: 'font-size:12px; margin:6px 0' }, 'Openverse/Commons는 사진·일러스트 중심이라 앱 화면은 적어요. 실제 서비스 화면은 "갤러리 바로가기"가 더 잘 나와요.'),
+        out, more,
+      );
+    }
+
+    function drawArena() {
+      const inp = el('input', { class: 'nm-input', id: 'ref-arena', placeholder: 'Are.na 채널 주소 (예: https://www.are.na/사용자/채널-이름)', 'aria-label': 'Are.na 채널 주소', style: 'flex:1; min-width:240px' });
+      const out = el('div', {});
+      const go = async () => {
+        out.innerHTML = ''; setStatus('불러오는 중…');
+        try { const r = await R.arenaChannel(inp.value); setStatus(`"${r.title}" — ${r.items.length}개 (전체 ${r.total}개 중)`); out.append(r.items.length ? grid(r.items, 'arena') : el('div', { class: 'text-muted' }, '이미지가 없는 채널이에요.')); }
+        catch (e) { setStatus(`⚠️ ${e.message}`, true); }
+      };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
+      body.append(
+        el('div', { class: 'row wrap', style: 'gap:6px' }, [inp, el('button', { type: 'button', class: 'nm-btn nm-btn--primary', id: 'ref-arena-go', onclick: go }, '불러오기')]),
+        el('p', { class: 'text-muted', style: 'font-size:12px; margin:6px 0' }, [
+          '디자이너들이 모아 둔 공개 채널을 그대로 볼 수 있어요(로그인·키 불필요). 채널은 ',
+          el('a', { href: 'https://www.are.na/search', target: '_blank', rel: 'noopener noreferrer' }, 'are.na'), '에서 "ui", "dashboard" 등으로 찾아 주소를 붙여 넣으세요.',
+        ]), out,
+      );
+    }
+
+    function drawGallery() {
+      const q = el('input', { class: 'nm-input', id: 'ref-gq', value: state.lastQ, placeholder: '키워드 (예: dashboard, onboarding, calendar)', 'aria-label': '갤러리 검색어', style: 'flex:1; min-width:200px' });
+      const out = el('div', { class: 'ref-links', id: 'ref-glinks' });
+      const draw = () => {
+        out.innerHTML = ''; const text = q.value.trim(); state.lastQ = text;
+        if (!text) { out.append(el('div', { class: 'text-muted' }, '키워드를 입력하면 각 갤러리의 검색 결과 링크가 만들어져요.')); return; }
+        R.galleryLinks(text).forEach((g) => out.append(el('a', { class: 'ref-link', href: g.url, target: '_blank', rel: 'noopener noreferrer' }, [el('b', {}, g.name), el('span', { class: 'text-muted' }, g.note)])));
+      };
+      q.addEventListener('input', draw);
+      body.append(el('div', { class: 'row wrap', style: 'gap:6px' }, [q]), el('p', { class: 'text-muted', style: 'font-size:12px; margin:6px 0' }, '각 사이트는 새 탭에서 열려요(이 앱은 키워드만 사용하고 아무것도 보내지 않아요). 마음에 드는 화면은 "내 보드"에 주소로 저장하세요.'), out);
+      draw();
+    }
+
+    function drawBoard() {
+      const all = R.getBoard();
+      const tagFilter = state.tag || '';
+      const list = tagFilter ? all.filter((b) => b.tags.includes(tagFilter)) : all;
+      const url = el('input', { class: 'nm-input', id: 'ref-add-url', placeholder: '저장할 사이트 또는 이미지 주소 (https://…)', 'aria-label': '저장할 주소', style: 'flex:1; min-width:220px' });
+      const ttl = el('input', { class: 'nm-input', id: 'ref-add-title', placeholder: '제목(선택)', 'aria-label': '제목', style: 'width:160px' });
+      const tag = el('input', { class: 'nm-input', id: 'ref-add-tags', placeholder: '태그(쉼표/공백)', 'aria-label': '태그', style: 'width:150px' });
+      const add = () => {
+        const u = R.safeUrl(url.value); if (!u) { setStatus('http(s)로 시작하는 주소를 입력해 주세요.', true); return; }
+        const isImg = /\.(png|jpe?g|gif|webp|avif|svg)(\?|#|$)/i.test(new URL(u).pathname + new URL(u).search);
+        try { const r = R.addToBoard({ title: ttl.value, link: u, img: isImg ? u : R.screenshotUrl(u), tags: tag.value }); setStatus(r.added ? '보드에 저장했어요.' : '이미 보드에 있어요.'); redraw(); } catch (e) { setStatus(e.message, true); }
+      };
+      body.append(el('div', { class: 'row wrap', style: 'gap:6px' }, [url, ttl, tag, el('button', { type: 'button', class: 'nm-btn nm-btn--primary', id: 'ref-add', onclick: add }, '저장')]));
+      const tags = [...new Set(all.flatMap((b) => b.tags))];
+      if (tags.length) body.append(el('div', { class: 'row wrap', style: 'gap:6px; margin-top:8px' }, [
+        el('button', { type: 'button', class: `nm-btn${tagFilter ? '' : ' nm-btn--primary'}`, onclick: () => { state.tag = ''; redraw(); } }, '전체'),
+        ...tags.map((t) => el('button', { type: 'button', class: `nm-btn${tagFilter === t ? ' nm-btn--primary' : ''}`, onclick: () => { state.tag = t; redraw(); } }, `#${t}`)),
+      ]));
+      if (!list.length) { body.append(el('div', { class: 'text-muted', style: 'margin-top:10px' }, all.length ? '이 태그의 항목이 없어요.' : '아직 저장한 레퍼런스가 없어요. 검색 결과의 📌 또는 위 입력칸으로 추가해 보세요.')); return; }
+      body.append(el('div', { class: 'ref-grid', style: 'margin-top:10px' }, list.map((b) => {
+        const imgSrc = R.safeUrl(b.img);
+        const del = el('button', { type: 'button', class: 'nm-btn ref-pin', title: '삭제', 'aria-label': '삭제', 'data-del': b.id, onclick: () => { R.removeFromBoard(b.id); redraw(); } }, '✕');
+        const meta = el('input', { class: 'nm-input ref-note', value: [...b.tags.map((t) => `#${t}`), b.note].filter(Boolean).join(' '), placeholder: '#태그 메모', 'aria-label': '태그와 메모', onchange: (e) => {
+          const raw = e.target.value; const tg = raw.match(/#[^\s#]+/g) || []; R.updateBoard(b.id, { tags: tg.join(' ').replace(/#/g, ' '), note: raw.replace(/#[^\s#]+/g, '').trim() }); setStatus('저장했어요.');
+        } });
+        return el('figure', { class: 'ref-item' }, [
+          el('a', { href: b.link, target: '_blank', rel: 'noopener noreferrer', title: b.title }, imgSrc ? el('img', { src: imgSrc, alt: b.title, loading: 'lazy', referrerpolicy: 'no-referrer' }) : el('div', { class: 'ref-noimg' }, '🔗')),
+          del, el('figcaption', {}, [el('span', { class: 'ref-cap' }, b.title), meta]),
+        ]);
+      })));
+    }
+
+    function redraw() {
+      tabRow.innerHTML = '';
+      tabs.forEach(([k, label]) => tabRow.append(el('button', { type: 'button', class: `nm-btn${state.tab === k ? ' nm-btn--primary' : ''}`, 'data-tab': k, onclick: () => { state.tab = k; setStatus(''); redraw(); } }, label)));
+      body.innerHTML = '';
+      ({ search: drawSearch, arena: drawArena, gallery: drawGallery, board: drawBoard })[state.tab]();
+    }
+    redraw();
+    return el('div', { class: 'nm-card', id: 'ref-card', style: 'margin-bottom:16px' }, [
+      el('h3', {}, '🎨 디자인 레퍼런스'),
+      el('p', { class: 'text-muted', style: 'font-size:12.5px; margin:4px 0 10px' }, '유료 Refero 대신 무료 소스를 모았어요. 로그인·API 키·서버 중계 없이 이 브라우저에서 바로 동작하고, 저장하는 건 주소·메모·태그뿐이에요(기기 간 동기화).'),
+      tabRow, body, status,
     ]);
   }
 
