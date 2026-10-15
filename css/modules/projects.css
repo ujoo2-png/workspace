@@ -135,4 +135,4 @@ body.g2-resizing { cursor: col-resize; user-select: none; }
 .g2-grip { opacity: 0.85; font-size: 16px; width: 16px; }
 .g2-dragsrc { cursor: grab; }
 .g2-num.g2-dragsrc, .g2-lvl.g2-dragsrc { user-select: none; }
-.g2-tip { font-size: 12px; margin: 6px 0 10px; padding: 6px 10px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--text); }
+.g2-hint { font-size: 12px; margin: 6px 0 10px; padding: 6px 10px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--text); }

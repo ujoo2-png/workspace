@@ -65,6 +65,8 @@ await page.locator('.g2-lrow:has(input[value="1강"]) .g2-lvl').dragTo(page.loca
 await page.waitForTimeout(500);
 nm = await names();
 expect('배지를 끌어도 1강이 2강 뒤로', nm.indexOf('1강') > nm.indexOf('2강'), JSON.stringify(nm));
+const hintBox = await page.evaluate(() => { const h = document.querySelector('#wbs-tip'); const t = document.querySelector('.g2-toolbar, .g2-tools') || h.parentElement.parentElement.nextElementSibling; const a = h.getBoundingClientRect(); const b = t.getBoundingClientRect(); return { pos: getComputedStyle(h).position, overlap: a.bottom > b.top + 1 && a.top < b.bottom - 1 }; });
+expect('안내문이 도구줄과 겹치지 않음(static)', hintBox.pos === 'static' && !hintBox.overlap, JSON.stringify(hintBox));
 expect('조절선 안내와 ⋮ 표시', (await page.locator('#wbs-tip').count()) === 1 && (await page.evaluate(() => getComputedStyle(document.querySelector('.g2-corner .g2-resizer'), '::before').content)).includes('⋮'));
 await page.screenshot({ path: path.join(SHOTS, 'wbs-drag.png') });
 
