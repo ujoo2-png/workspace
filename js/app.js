@@ -19,6 +19,7 @@
     { path: '/automation', label: 'Automation', icon: '🤖' },
     { path: '/integrations', label: 'Integrations', icon: '🔗' },
     { path: '/analytics', label: '리포트', icon: '📊' },
+    { path: '/usage', label: '사용량', icon: '📈' },
     { path: '/programs', label: '프로그램', icon: '🧩' },
     { path: '/settings', label: '설정', icon: '⚙️' },
   ];
@@ -248,6 +249,7 @@
     window.registerRoute('/career', window.renderCareer);
     window.registerRoute('/automation', window.renderAutomation);
     window.registerRoute('/integrations', window.renderIntegrations);
+    window.registerRoute('/usage', window.renderUsage);
     window.registerRoute('/analytics', window.renderAnalytics);
     window.registerRoute('/programs', window.renderPrograms);
     window.registerRoute('/settings', window.renderSettings);

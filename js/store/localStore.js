@@ -215,6 +215,8 @@
       return this.db[name];
     }
 
+    async usageStats() { return null; } // 로컬 모드에는 서버가 없다
+
     async list(table, { where, orderBy, ascending = true, columns } = {}) {
       let rows = this._table(table).filter((r) => !r.deleted_at);
       if (where) {

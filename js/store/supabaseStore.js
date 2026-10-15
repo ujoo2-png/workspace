@@ -178,6 +178,17 @@
 
     // ---- 데이터 CRUD (RLS가 user_id를 강제하므로 여기서는 그대로 전달) ----
     // columns: 'a,b,c' — 큰 컬럼(첨부파일 base64 본문 등)을 빼고 가볍게 읽을 때 쓴다(기본 '*').
+    // v7.26.0: 사용량 화면용 서버 통계(0027 마이그레이션의 app_usage_stats RPC). 함수가 없으면 안내 오류.
+    async usageStats() {
+      const client = await this._ensureClient();
+      const { data, error } = await client.rpc('app_usage_stats');
+      if (error) {
+        if (/app_usage_stats|42883|PGRST202|schema cache/i.test(`${error.code || ''} ${error.message || ''}`)) throw new Error('사용량 함수(0027)가 아직 없어요. Supabase SQL Editor에서 supabase/combined/all_migrations_0001_to_0027.sql을 실행해 주세요.');
+        throw error;
+      }
+      return data;
+    }
+
     async list(table, { where, orderBy, ascending = true, columns } = {}) {
       const client = await this._ensureClient();
       let q = client.from(table).select(columns || '*');

@@ -46,9 +46,9 @@
   const STAGE_NEW_COLS = ['parent_id', 'progress', 'is_milestone', 'depends_on', 'baseline_start', 'baseline_end', 'legacy_group', 'memo'];
   const BRIEFING_TOPIC_NEW_COLS = ['search_terms', 'priority_keywords', 'site_urls'];
   const CHALLENGE_NEW_COLS = ['freq_type', 'freq_days', 'freq_times'];
-  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0026.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
   // 첨부 목록용 메타 컬럼(본문 data 제외) + 본문 메모리 캐시 상한(LRU)
   const ATTACH_META_COLS = 'id,user_id,owner_table,owner_id,name,mime_type,size,created_at';
   const ATTACH_CACHE_MAX_CHARS = 60 * 1024 * 1024;
@@ -1226,6 +1226,46 @@
         level.forEach(({ i }, k) => idByIndex.set(i, created[k].id));
       }
       return plan.length;
+    }
+    /**
+     * v7.26.0: 복사해 둔 WBS 일부(clip = WBS.planStageClip 결과)를 이 프로젝트에 붙여넣는다.
+     * parentId가 있으면 그 하위 끝에, afterId가 있으면 그 항목 바로 다음 형제로, 둘 다 없으면 최상위 끝에 붙인다.
+     * 선행 작업(의존)은 묶음 안에서 서로 걸린 것만 유지한다. @returns {number} 만든 항목 수
+     */
+    async pasteProjectStages(projectId, clip, opts = {}) {
+      const W = window.WBS;
+      if (!clip || !clip.items || !clip.items.length) return 0;
+      const applied = W.applyClipOptions(clip.items, opts);
+      const rows = this.projectStages.filter((r) => r.project_id === projectId && !String(r.id).startsWith(TMP_PREFIX));
+      const tree = W.buildTree(rows);
+      let parentId = opts.parentId || null;
+      let start;
+      const rootCount = applied.items.filter((x) => !x.parentKey).length;
+      if (opts.afterId && tree.byId.has(opts.afterId)) {
+        const ref = tree.byId.get(opts.afterId);
+        parentId = ref.parent_id || null;
+        start = (Number(ref.seq) || 0) + 1;
+        const bump = rows.filter((r) => (r.parent_id || null) === parentId && r.id !== ref.id && (Number(r.seq) || 0) >= start).map((r) => ({ id: r.id, patch: { seq: (Number(r.seq) || 0) + rootCount } }));
+        if (bump.length) await this.updateProjectStages(bump);
+      } else start = this._nextStageSeq(projectId, parentId);
+      const baseDepth = parentId ? W.depthOf(tree, parentId) + 1 : 0;
+      if (baseDepth + clip.height > W.MAX_WBS_DEPTH) throw new Error(`최대 ${W.MAX_WBS_DEPTH}단계(대·중·소·세)를 넘어서 그 위치에는 붙여넣을 수 없어요.`);
+      const idByKey = new Map();
+      const counters = new Map();
+      const maxDepth = Math.max(...applied.items.map((x) => x.depth));
+      for (let d = 0; d <= maxDepth; d++) {
+        const level = applied.items.filter((x) => x.depth === d);
+        const payloads = level.map((x) => {
+          const pk = x.parentKey || null;
+          const n = counters.get(pk) || 0; counters.set(pk, n + 1);
+          return { ...x.fields, seq: pk ? n : start + n, parent_id: pk ? idByKey.get(pk) || null : parentId };
+        });
+        const created = await this.addProjectStagesBulk(projectId, payloads);
+        level.forEach((x, i) => idByKey.set(x.key, created[i].id));
+      }
+      const depPatches = applied.items.filter((x) => x.deps.length).map((x) => ({ id: idByKey.get(x.key), patch: { depends_on: x.deps.map((dd) => W.formatDep(idByKey.get(dd.key), dd.type)).filter((v) => !String(v).startsWith('undefined')) } }));
+      if (depPatches.length) await this.updateProjectStages(depPatches);
+      return applied.items.length;
     }
     /** 예전 중분류(group_name) 단계를 트리로 옮긴다(0024 SQL과 같은 규칙, 이미 옮긴 것은 건너뜀). 실패하면 한 번만 시도하고 포기한다. @returns {number} 옮긴 항목 수 */
     async migrateLegacyStages() {

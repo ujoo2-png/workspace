@@ -7,7 +7,6 @@
   const { appState, el, toast, confirmDialog, todayISO } = window;
   const W = window.WBS;
   const NS = 'http://www.w3.org/2000/svg';
-  const LABEL_W = 300;
   const ZOOMS = [['day', '일'], ['week', '주'], ['month', '월']];
   const STATUS_LABEL = { todo: '대기', in_progress: '진행 중', done: '완료', overdue: '지연' };
   const DEP_LABEL = { FS: '종료→시작 (FS)', SS: '시작→시작 (SS)', FF: '종료→종료 (FF)', SF: '시작→종료 (SF)' };
@@ -22,6 +21,16 @@
     baseline: lsGet('baseline', '1') === '1',
     collapsed: new Map(), selected: new Map(), scroll: new Map(), focusId: null, quickFocus: false, parentFor: new Map(),
   };
+  // v7.26.0: 이름 칸 너비(이름과 간트 사이 경계선을 끌어 조절, 이 브라우저에 저장)
+  const LABEL_MIN = 200, LABEL_MAX = 720, LABEL_DEFAULT = 300;
+  const clampLabel = (n) => Math.min(LABEL_MAX, Math.max(LABEL_MIN, Math.round(Number(n) || LABEL_DEFAULT)));
+  let LABEL_W = clampLabel(lsGet('labelW', String(LABEL_DEFAULT)));
+  view.checked = new Map(); // 프로젝트별 체크(복사 대상) 항목
+  view.dragId = null;
+  const CLIP_KEY = 'workspace:wbs:clip';
+  const getClip = () => { try { const v = JSON.parse(localStorage.getItem(CLIP_KEY) || 'null'); return v && Array.isArray(v.items) && v.items.length ? v : null; } catch { return null; } };
+  const setClip = (v) => { try { localStorage.setItem(CLIP_KEY, JSON.stringify(v)); } catch { /* 용량 초과 등 — 메모리에만 */ } view.clipMem = v; };
+  const clipNow = () => getClip() || view.clipMem || null;
   const setOf = (map, pid) => { if (!map.has(pid)) map.set(pid, new Set()); return map.get(pid); };
 
   // ---------- SVG 도우미 ----------
@@ -265,6 +274,8 @@
         if (collapsed.size) collapsed.clear(); else for (const r of tree.order) if (r.hasChildren) collapsed.add(r.node.id);
         rerender();
       }, { id: 'wbs-collapse-all' }),
+      tbtn('📋 복사', () => copySelection(), { id: 'wbs-copy', title: '체크한 항목(없으면 선택한 항목, 그것도 없으면 전체 WBS)을 하위 단계까지 복사' }),
+      tbtn(clipNow() ? `📥 붙여넣기 (${clipNow().items.length})` : '📥 붙여넣기', () => openPasteForm(), { id: 'wbs-paste', title: '복사해 둔 단계를 이 프로젝트(또는 다른 프로젝트)에 붙여넣기' }),
       el('span', { class: 'wbs-tb-spacer' }),
       tbtn('📌 기준선 저장', async () => {
         if (!rows.length) return;
@@ -274,6 +285,75 @@
       tbtn('🖼 PNG', async () => { try { await exportPng(p, L, P); } catch (e) { toast(`PNG 저장 실패: ${e.message || e}`, 'error'); } }, { id: 'wbs-png', title: '간트차트를 이미지로 저장' }),
       tbtn('🖨 인쇄', () => printGantt(p, L, P), { id: 'wbs-print' }),
     ]));
+
+    // ----- v7.26.0: 일부 단계 복사 / 붙여넣기 -----
+    const checked = setOf(view.checked, p.id);
+    for (const id of [...checked]) if (!tree.byId.has(id)) checked.delete(id);
+    function copySelection() {
+      let ids; let what;
+      if (checked.size) { ids = [...checked]; what = `체크한 ${checked.size}개`; }
+      else if (selectedId) { ids = [selectedId]; what = `"${tree.byId.get(selectedId).name}"`; }
+      else { ids = tree.order.map((r) => r.node.id); what = '전체 WBS'; }
+      const clip = W.planStageClip(rows, ids);
+      if (!clip.items.length) { toast('복사할 항목이 없어요.', 'info'); return; }
+      setClip({ ...clip, from: p.name, at: new Date().toISOString() });
+      // 들여쓴 목록 텍스트도 시스템 클립보드에 넣어, 빠른 추가 입력창이나 메모장에 그대로 붙여넣을 수 있게 한다.
+      const text = clip.items.map((x) => `${'  '.repeat(x.depth)}${x.fields.name}`).join('\n');
+      try { navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {}); } catch { /* 무시 */ }
+      toast(`${what}에서 ${clip.items.length}개 항목(하위 포함)을 복사했어요. 다른 프로젝트에서도 붙여넣을 수 있어요.`, 'success');
+      rerender();
+    }
+    function openPasteForm() {
+      const clip = clipNow();
+      if (!clip) { toast('먼저 복사할 항목을 체크하고 [📋 복사]를 눌러 주세요.', 'info'); return; }
+      window.openModal({
+        title: '복사한 단계 붙여넣기',
+        contentBuilder(body, close) {
+          const target = selectedId ? tree.byId.get(selectedId) : null;
+          const nm = (t) => (t.name.length > 16 ? `${t.name.slice(0, 15)}…` : t.name);
+          const where = el('select', { class: 'nm-select', id: 'wbs-paste-where' }, [
+            target ? el('option', { value: 'inside', selected: true }, `"${nm(target)}"의 하위 끝에`) : null,
+            target ? el('option', { value: 'after' }, `"${nm(target)}" 바로 다음에(같은 단계)`) : null,
+            el('option', { value: 'top', selected: !target || undefined }, '최상위(대분류) 끝에'),
+          ]);
+          const reset = el('input', { type: 'checkbox', id: 'wbs-paste-reset', checked: true });
+          const dateSel = el('select', { class: 'nm-select', id: 'wbs-paste-date' }, [
+            el('option', { value: 'clear', selected: true }, '날짜 비우기 (붙여넣은 뒤 새로 입력)'),
+            el('option', { value: 'shift' }, '새 시작일 기준으로 이동 (간격 유지)'),
+            el('option', { value: 'keep' }, '날짜 그대로'),
+          ]);
+          const base = el('input', { class: 'nm-input', type: 'date', id: 'wbs-paste-base', value: todayISO() });
+          const baseRow = el('div', { class: 'nm-field', style: 'display:none' }, [el('label', {}, '새 시작일'), base]);
+          dateSel.addEventListener('change', () => { baseRow.style.display = dateSel.value === 'shift' ? '' : 'none'; });
+          const preview = el('div', { class: 'wbs-paste-preview' }, clip.items.slice(0, 12).map((x) => el('div', { style: `padding-left:${x.depth * 14}px` }, `${x.depth === 0 ? '■' : '└'} ${x.fields.name}`)));
+          if (clip.items.length > 12) preview.append(el('div', { class: 'text-muted' }, `… 외 ${clip.items.length - 12}개`));
+          const go = el('button', { type: 'button', class: 'nm-btn nm-btn--primary', id: 'wbs-paste-go', style: 'width:100%' }, '붙여넣기');
+          go.addEventListener('click', async () => {
+            go.disabled = true; go.textContent = '붙여넣는 중…';
+            try {
+              const opts = { resetProgress: reset.checked, dateMode: dateSel.value, shiftBase: base.value || null };
+              if (where.value === 'inside' && target) opts.parentId = target.id;
+              if (where.value === 'after' && target) opts.afterId = target.id;
+              if (opts.parentId) collapsed.delete(opts.parentId);
+              const n = await appState.pasteProjectStages(p.id, clip, opts);
+              toast(`${n}개 항목을 붙여넣었어요.`, 'success');
+              close();
+              appState.emit('change', { table: 'project_stages', ui: true });
+            } catch (e) { go.disabled = false; go.textContent = '붙여넣기'; toast(`붙여넣지 못했습니다: ${e.message || e}`, 'error'); }
+          });
+          const cb = (input, text) => el('label', { class: 'row', style: 'gap:8px; cursor:pointer' }, [input, el('span', {}, text)]);
+          body.append(el('div', { class: 'stack' }, [
+            el('div', { class: 'text-muted', style: 'font-size:12px' }, `"${clip.from || '다른 프로젝트'}"에서 복사한 ${clip.items.length}개 항목(대·중·소 구조·순서·선행 작업 포함)`),
+            preview,
+            el('div', { class: 'nm-field' }, [el('label', {}, '붙여넣을 위치'), where]),
+            cb(reset, '상태·진행률·실제 완료일 초기화 (새로 시작)'),
+            el('div', { class: 'nm-field' }, [el('label', {}, '날짜'), dateSel]), baseRow,
+            go,
+            el('button', { type: 'button', class: 'nm-btn', onclick: () => { try { localStorage.removeItem(CLIP_KEY); } catch { /* 무시 */ } view.clipMem = null; close(); rerender(); } }, '복사해 둔 내용 지우기'),
+          ]));
+        },
+      });
+    }
 
     // ----- 빠른 추가 -----
     card.append(quickAdd(p, tree, selectedId, collapsed));
@@ -292,14 +372,30 @@
     // ----- 간트: 왼쪽 개요(HTML, 고정) + 오른쪽 SVG(가로 스크롤) -----
     const scroller = el('div', { class: 'g2-scroll', tabindex: '0', 'aria-label': '간트차트(좌우로 스크롤)' });
     const inner = el('div', { class: 'g2-inner', style: `grid-template-columns:${LABEL_W}px ${L.width}px` });
-    const corner = el('div', { class: 'g2-corner', style: `height:${L.headerH}px` }, [el('span', {}, '작업 (WBS)'), el('span', { class: 'g2-corner__hint' }, '이름 클릭=편집 · Tab 들여쓰기 · Enter 다음 줄')]);
+    const allChk = el('input', { type: 'checkbox', class: 'g2-chk', id: 'wbs-check-all', title: '전체 선택/해제(복사용)', 'aria-label': '전체 선택', checked: (checked.size && checked.size === tree.order.length) || undefined });
+    allChk.addEventListener('change', () => { checked.clear(); if (allChk.checked) for (const r of tree.order) checked.add(r.node.id); rerender(); });
+    const corner = el('div', { class: 'g2-corner', style: `height:${L.headerH}px` }, [el('span', { class: 'row', style: 'gap:6px' }, [allChk, '작업 (WBS)', checked.size ? el('span', { class: 'nm-badge', id: 'wbs-checked-n' }, `${checked.size}개 선택`) : null]), el('span', { class: 'g2-corner__hint' }, '이름 클릭=편집 · ⠿ 끌어서 순서 변경 · 경계선 끌어 너비 조절')]);
+    function makeResizer() {
+      const h = el('div', { class: 'g2-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': '이름 칸 너비 조절', title: '끌어서 이름 칸 너비 조절 (더블클릭: 기본값)', tabindex: '0' });
+      const apply = (w) => { LABEL_W = clampLabel(w); inner.style.gridTemplateColumns = `${LABEL_W}px ${L.width}px`; };
+      let drag0 = null;
+      h.addEventListener('pointerdown', (e) => { drag0 = { x: e.clientX, w: LABEL_W }; try { h.setPointerCapture(e.pointerId); } catch { /* 무시 */ } document.body.classList.add('g2-resizing'); e.preventDefault(); e.stopPropagation(); });
+      h.addEventListener('pointermove', (e) => { if (drag0) apply(drag0.w + (e.clientX - drag0.x)); });
+      const end = () => { if (!drag0) return; drag0 = null; document.body.classList.remove('g2-resizing'); lsSet('labelW', String(LABEL_W)); };
+      h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+      h.addEventListener('dblclick', () => { apply(LABEL_DEFAULT); lsSet('labelW', String(LABEL_W)); });
+      h.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); apply(LABEL_W + (e.key === 'ArrowRight' ? 20 : -20)); lsSet('labelW', String(LABEL_W)); } });
+      return h;
+    }
+    corner.append(makeResizer());
     const headHost = el('div', { class: 'g2-head', style: `height:${L.headerH}px` });
     headHost.append(drawHeader(L, P));
     const left = el('div', { class: 'g2-left' });
+    left.append(makeResizer());
     const { svg: bodySvg, bars } = drawBody(L, P, { selectedId, showCritical: view.critical });
     const bodyHost = el('div', { class: 'g2-body' });
     bodyHost.append(bodySvg);
-    L.items.forEach((it) => left.append(leftRow(p, tree, it, selectedId, collapsed, rerender, select, rows)));
+    L.items.forEach((it) => left.append(leftRow(p, tree, it, selectedId, collapsed, rerender, select, rows, checked)));
     inner.append(corner, headHost, left, bodyHost);
     scroller.append(inner);
 
@@ -419,10 +515,34 @@
   }
 
   // ---------- 왼쪽 개요 한 줄 ----------
-  function leftRow(p, tree, it, selectedId, collapsed, rerender, select, rows) {
+  function leftRow(p, tree, it, selectedId, collapsed, rerender, select, rows, checked) {
     const node = tree.byId.get(it.id);
     const pending = !!node._pending || String(node.id).startsWith('tmp-');
     const row = el('div', { class: `g2-lrow${selectedId === it.id ? ' g2-lrow--sel' : ''}${it.hasChildren ? ' g2-lrow--parent' : ''}`, 'data-id': it.id, style: `height:${W.ROW_H}px`, onclick: (e) => { if (e.target.closest('button,input')) return; select(it.id); } });
+    // v7.26.0: 복사용 체크 + 끌어서 순서 변경 손잡이
+    const chk = el('input', { type: 'checkbox', class: 'g2-chk', 'data-id': it.id, 'aria-label': `${it.number} 선택(복사용)`, checked: checked.has(it.id) || undefined, disabled: pending ? true : undefined });
+    chk.addEventListener('click', (e) => e.stopPropagation());
+    chk.addEventListener('change', () => { if (chk.checked) checked.add(it.id); else checked.delete(it.id); const n = document.getElementById('wbs-checked-n'); if (n) n.textContent = `${checked.size}개 선택`; else rerender(); });
+    row.append(chk);
+    const grip = el('span', { class: 'g2-grip', draggable: pending ? undefined : 'true', title: '끌어서 순서·단계 변경 (줄의 위쪽=앞, 아래쪽=뒤, 가운데=하위로)', 'aria-label': `${it.name} 이동 손잡이` }, '⠿');
+    grip.addEventListener('dragstart', (e) => { view.dragId = it.id; try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setDragImage(row, 20, 12); } catch { /* 무시 */ } row.classList.add('g2-lrow--drag'); });
+    grip.addEventListener('dragend', () => { view.dragId = null; row.classList.remove('g2-lrow--drag'); document.querySelectorAll('.g2-drop-before,.g2-drop-after,.g2-drop-inside').forEach((n) => n.classList.remove('g2-drop-before', 'g2-drop-after', 'g2-drop-inside')); });
+    row.append(grip);
+    const zoneOf = (e) => { const r = row.getBoundingClientRect(); const y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'inside'; };
+    const clearMarks = () => row.classList.remove('g2-drop-before', 'g2-drop-after', 'g2-drop-inside');
+    row.addEventListener('dragover', (e) => { if (!view.dragId || view.dragId === it.id) return; e.preventDefault(); const z = zoneOf(e); clearMarks(); row.classList.add(`g2-drop-${z}`); });
+    row.addEventListener('dragleave', clearMarks);
+    row.addEventListener('drop', async (e) => {
+      e.preventDefault(); const z = zoneOf(e); clearMarks();
+      const id = view.dragId; view.dragId = null;
+      if (!id || id === it.id) return;
+      const r = W.moveTo(rows, id, it.id, z);
+      if (!r.ok) { toast({ self: '자기 자신이나 자기 하위로는 옮길 수 없어요.', max_depth: `최대 ${W.MAX_WBS_DEPTH}단계(대·중·소·세)까지만 만들 수 있어요.` }[r.reason] || '옮길 수 없어요.', 'info'); return; }
+      if (!r.patches.length) return;
+      if (z === 'inside') collapsed.delete(it.id);
+      view.selected.set(p.id, id);
+      try { await appState.updateProjectStages(r.patches); } catch (err) { toast(`저장하지 못했습니다: ${err.message || err}`, 'error'); }
+    });
     row.append(el('span', { class: 'g2-indent', style: `width:${it.depth * 14}px` }));
     row.append(it.hasChildren
       ? el('button', { type: 'button', class: 'g2-chev', title: it.collapsed ? '펼치기' : '접기', 'aria-expanded': String(!it.collapsed), 'aria-label': `${it.name} ${it.collapsed ? '펼치기' : '접기'}`, onclick: (e) => { e.stopPropagation(); if (collapsed.has(it.id)) collapsed.delete(it.id); else collapsed.add(it.id); rerender(); } }, it.collapsed ? '▸' : '▾')
