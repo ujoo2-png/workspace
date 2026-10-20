@@ -16,13 +16,12 @@
   <link rel="stylesheet" href="css/modules/chartkit.css" />
   <link rel="stylesheet" href="css/modules/challenges.css" />
   <link rel="stylesheet" href="css/modules/projects.css" />
-  <link rel="stylesheet" href="css/modules/usage.css" />
-  <link rel="stylesheet" href="css/modules/newsletter.css" />
   <link rel="stylesheet" href="css/modules/schedule.css" />
   <link rel="stylesheet" href="css/modules/playlist.css" />
   <link rel="stylesheet" href="css/modules/health.css" />
   <link rel="stylesheet" href="css/modules/programs.css" />
   <link rel="stylesheet" href="css/modules/career.css" />
+  <link rel="stylesheet" href="css/modules/stocks.css" />
 </head>
 <body>
   <div id="app"></div>
@@ -44,7 +43,6 @@
   <script src="js/utils/attachLogic.js"></script>
   <script src="js/utils/chartLogic.js"></script>
   <script src="js/utils/briefingMd.js"></script>
-  <script src="js/utils/newsletter.js"></script>
   <script src="js/utils/secretCrypto.js"></script>
   <script src="js/utils/careerLogic.js"></script>
   <script src="js/predict.js"></script>
@@ -54,15 +52,20 @@
   <script src="js/store/supabaseStore.js"></script>
   <script src="js/store/index.js"></script>
   <script src="js/services/settingsSync.js"></script>
-  <script src="js/services/usageService.js"></script>
-  <script src="js/services/refService.js"></script>
   <script src="js/state.js"></script>
   <script src="js/router.js"></script>
   <script src="js/services/sessionGuard.js"></script>
   <script src="js/services/automationService.js"></script>
   <script src="js/services/weatherTheme.js"></script>
   <script src="js/services/briefingService.js"></script>
+  <!-- v7.24.0: RSS/Atom 원본 XML을 직접 파싱하기 위해 무손실 XML 파서를 feedService보다 먼저 로드한다 -->
+  <script src="js/utils/xmlTree.js"></script>
   <script src="js/services/feedService.js"></script>
+  <!-- v7.24.0: 증권 손익 계산(순수 함수)과 KIS 시세 서비스 -->
+  <script src="js/utils/stockCalc.js"></script>
+  <script src="js/services/stockService.js"></script>
+  <!-- v7.24.0: 로그인 직후 브리핑 자동 수집(하루 1회) -->
+  <script src="js/services/briefingAutoCollect.js"></script>
   <script src="js/services/tmdbService.js"></script>
   <script src="js/services/clockService.js"></script>
   <script src="js/services/publicDataService.js"></script>
@@ -86,6 +89,8 @@
   <script src="js/modules/challenges.js"></script>
   <script src="js/modules/playlist.js"></script>
   <script src="js/modules/vehicles.js"></script>
+  <!-- v7.24.0: 증권 -->
+  <script src="js/modules/stocks.js"></script>
   <script src="js/modules/health.js"></script>
   <script src="js/modules/briefing.js"></script>
   <script src="js/modules/devlog.js"></script>
@@ -93,7 +98,6 @@
   <script src="js/modules/career.js"></script>
   <script src="js/modules/automation.js"></script>
   <script src="js/modules/integrations.js"></script>
-  <script src="js/modules/usage.js"></script>
   <script src="js/modules/analytics.js"></script>
   <script src="js/components/chartKit.js"></script>
   <script src="js/modules/programs.js"></script>
