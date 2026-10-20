@@ -115,6 +115,18 @@
           window.HomeFx.prefersReduced() ? el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, 'ℹ️ 이 기기는 "동작 줄이기"가 켜져 있어 효과가 항상 꺼져 있습니다.') : null,
         ]),
         el('div', { class: 'nm-card' }, [
+          el('h3', {}, '관심주제 브리핑'),
+          el('p', { class: 'text-muted' }, '로그인할 때마다 하루 한 번, 등록된 관심주제·피드 소스에서 새 글을 자동으로 모아 옵니다(새 글이 있으면 알림과 로그인 브리핑에 요약). 기기 간 동기화됩니다.'),
+          (() => {
+            const cb = el('input', { type: 'checkbox', id: 'briefing-auto-toggle', checked: window.isAutoCollectEnabled() || undefined });
+            cb.addEventListener('change', () => {
+              window.setAutoCollectEnabled(cb.checked);
+              toast(cb.checked ? '로그인 시 브리핑 자동 수집을 켰습니다.' : '브리핑 자동 수집을 껐습니다.', 'success');
+            });
+            return el('label', { class: 'row', style: 'gap:8px; align-items:center; cursor:pointer' }, [cb, el('span', {}, '로그인 시 자동 수집(하루 1회)')]);
+          })(),
+        ]),
+        el('div', { class: 'nm-card' }, [
           el('h3', {}, '데이터 내보내기'),
           el('p', { class: 'text-muted' }, '전체 백업(JSON)이나 항목별 CSV로 내보낼 수 있습니다. Health 등 민감한 데이터는 내보내기 전에 한 번 더 확인합니다.'),
           el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:10px' }, [
@@ -480,6 +492,21 @@
         },
       }, '저장 및 연결 테스트');
 
+      // v7.24.0: 증권 실시간 시세(한국투자증권 KIS) 키/시크릿/환경.
+      const kisKeyInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appkey', placeholder: 'KIS AppKey', value: window.getKisAppKey() });
+      const kisSecretInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appsecret', placeholder: 'KIS AppSecret', value: window.getKisAppSecret() });
+      const kisEnvSel = el('select', { class: 'nm-select', name: 'kis_env' });
+      kisEnvSel.append(el('option', { value: 'real', selected: window.getKisEnv() === 'real' || undefined }, '실전투자(real)'));
+      kisEnvSel.append(el('option', { value: 'mock', selected: window.getKisEnv() === 'mock' || undefined }, '모의투자(mock)'));
+      const saveKisBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: () => {
+          window.setKisCredentials({ appkey: kisKeyInput.value, appsecret: kisSecretInput.value, env: kisEnvSel.value });
+          toast(window.hasKisKey() ? 'KIS 키를 저장했습니다. 증권 화면에서 시세를 조회할 수 있습니다.' : 'KIS 키를 삭제했습니다.', window.hasKisKey() ? 'success' : 'info');
+        },
+      }, '저장');
+
       return el('div', { class: 'nm-card' }, [
         el('h3', {}, '공공데이터포털 연동'),
         el('p', { class: 'text-muted', style: 'font-size:12px' }, '공공데이터포털·오피넷·KOPIS에서 무료로 발급받은 서비스 키를 등록하면 공휴일 자동 등록, 전국 평균 유가 비교, 공연·전시 검색 기능을 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.'),
@@ -513,6 +540,16 @@
           ]),
           el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kopisInput, saveKopisBtn]),
           kopisToggle,
+        ]),
+        el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
+          el('strong', { style: 'font-size:13px' }, '한국투자증권(KIS) — 증권 실시간 시세 v7.24.0'),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+            '활용신청: ',
+            el('a', { href: 'https://apiportal.koreainvestment.com/', target: '_blank', rel: 'noopener' }, '한국투자증권 API 포털'),
+            ' 에서 앱키(AppKey)와 앱시크릿(AppSecret)을 발급받으세요. 시크릿은 이 브라우저에만 저장되고, 실제 조회는 Vercel 서버리스 프록시(/api/kis-proxy)를 거쳐 안전하게 호출됩니다.',
+          ]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kisKeyInput, kisSecretInput]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [kisEnvSel, saveKisBtn]),
         ]),
       ]);
     }

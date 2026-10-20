@@ -15,6 +15,19 @@
     return todayISO(d);
   }
 
+  // "매년 반복"용: 같은 월·일을 유지한 채 연도만 n년 올린다.
+  // 365일 더하기와 달리 윤년/월말에 어긋나지 않는다. 예) 2024-03-01 → 2025-03-01.
+  // 윤년 2/29처럼 대상 연도에 같은 날짜가 없으면 그 달의 마지막 날(2/28)로 보정한다.
+  function shiftYear(iso, years) {
+    if (!iso) return iso;
+    const [y, m, day] = iso.split('-').map(Number);
+    const targetYear = y + (years || 0);
+    const lastDay = new Date(targetYear, m, 0).getDate(); // m월의 마지막 날 (1-based m 그대로 사용)
+    const d = Math.min(day, lastDay);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${targetYear}-${pad(m)}-${pad(d)}`;
+  }
+
   // 날짜 문자열(YYYY-MM-DD) 사이의 정수 일수 차이 (b - a)
   function diffDays(aISO, bISO) {
     const a = new Date(aISO + 'T00:00:00');
@@ -48,6 +61,7 @@
 
   globalThis.todayISO = todayISO;
   globalThis.addDays = addDays;
+  globalThis.shiftYear = shiftYear;
   globalThis.diffDays = diffDays;
   globalThis.isPast = isPast;
   globalThis.isWithin = isWithin;

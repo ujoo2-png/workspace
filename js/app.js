@@ -12,6 +12,7 @@
     { path: '/briefing', label: '관심주제', icon: '📰' },
     { path: '/playlist', label: '문화생활', icon: '🎬' },
     { path: '/vehicles', label: '차량관리', icon: '🚗' },
+    { path: '/stocks', label: '증권', icon: '📈' },
     { path: '/health', label: 'Health', icon: '💪' },
     { path: '/devlog', label: 'Devlog', icon: '🛠️' },
     { path: '/knowledge', label: 'Knowledge', icon: '📓' },
@@ -19,14 +20,12 @@
     { path: '/automation', label: 'Automation', icon: '🤖' },
     { path: '/integrations', label: 'Integrations', icon: '🔗' },
     { path: '/analytics', label: '리포트', icon: '📊' },
-    { path: '/usage', label: '사용량', icon: '📈' },
     { path: '/programs', label: '프로그램', icon: '🧩' },
     { path: '/settings', label: '설정', icon: '⚙️' },
   ];
 
   // 설정 화면의 "커스텀 API 관리"가 메뉴 체크박스 목록을 만들 때 재사용한다.
   window.NAV_ITEMS = NAV_ITEMS;
-
 
   window.applyTheme(window.settingsSync.get('workspace:theme') || 'auto');
 
@@ -79,6 +78,14 @@
       console.warn('자동화 규칙 실행 실패(계속 진행):', e);
     }
 
+    // v7.24.0(아이디어 1): 로그인 직후 브리핑 자동 수집(하루 1회). 실패해도 앱 진입을 막지 않는다.
+    let briefingAuto = { ran: false, newCount: 0 };
+    try {
+      briefingAuto = await window.autoCollectBriefing();
+    } catch (e) {
+      console.warn('브리핑 자동 수집 건너뜀(계속 진행):', e);
+    }
+
     registerRoutes();
     window.startRouter();
     if (window.startMedReminder) window.startMedReminder(); // 복약 시간 알림(앱이 열려 있을 때만)
@@ -101,6 +108,7 @@
         projects: appState.projects,
         progressByProject: appState.progressByProject,
         newAlerts,
+        briefingNewCount: briefingAuto.ran ? briefingAuto.newCount : null,
         weather,
       });
       window.showLoginBriefing(briefing);
@@ -155,7 +163,6 @@
     const topbar = el('div', { class: 'topbar' }, [
       el('div', {}),
       el('div', { class: 'topbar__right' }, [
-        el('button', { class: 'nm-btn nm-btn--icon', title: '빠른 이동 · 일정 추가 (Ctrl/⌘ + K)', 'aria-label': '빠른 이동 검색', onclick: () => openQuickFind() }, '🔍'),
         el('span', { class: 'topbar__user' }, appState.user?.name || appState.user?.email || ''),
         el('button', { class: 'nm-btn nm-btn--danger', title: '로그아웃', onclick: logout }, '🚪 로그아웃'),
       ]),
@@ -181,58 +188,12 @@
     }
   }
 
-  // ---- 빠른 이동 검색(Ctrl/⌘+K): 메뉴 + 일정/프로젝트/Knowledge 제목 ----
-  function openQuickFind() {
-    const el = window.el;
-    const appState = window.appState;
-    window.openModal({
-      title: '빠른 이동',
-      width: '560px',
-      contentBuilder(body, close) {
-        const input = el('input', { class: 'nm-input', placeholder: '메뉴·일정·프로젝트 검색  ·  "+내일 3시 회의"로 일정 바로 추가', autofocus: true, 'aria-label': '빠른 이동 검색' });
-        const list = el('div', { class: 'quickfind-list', role: 'listbox' });
-        const entries = () => [
-          ...NAV_ITEMS.map((i) => ({ kind: '메뉴', label: `${i.icon} ${i.label}`, hay: i.label, go: () => window.navigate(i.path) })),
-          ...appState.schedules.filter((x) => !x.done).slice(0, 300).map((x) => ({ kind: '일정', label: `🗓️ ${x.title}`, sub: x.date, hay: `${x.title} ${x.place || ''}`, go: () => window.navigate('/schedule') })),
-          ...appState.projects.filter((x) => !x.deleted_at).map((x) => ({ kind: '프로젝트', label: `📁 ${x.name}`, hay: x.name, go: () => window.navigate('/projects') })),
-          ...(appState.knowledgeDocs || []).slice(0, 300).map((x) => ({ kind: 'Knowledge', label: `📓 ${x.title}`, hay: `${x.title} ${(x.tags || []).join(' ')}`, go: () => window.navigate('/knowledge') })),
-        ];
-        let active = 0; let shown = [];
-        function render() {
-          const raw = input.value.trim();
-          const q = raw.toLowerCase();
-          shown = entries().filter((e) => !q || e.hay.toLowerCase().includes(q)).slice(0, 12);
-          // v7.25.0: "+내일 오후 3시 회의" / "일정 모레 14:30 병원" → 바로 일정 등록
-          if (/^[+＋]|^일정\s/.test(raw) && window.parseQuickSchedule) {
-            const p = window.parseQuickSchedule(raw, window.todayISO());
-            if (p) shown = [{ kind: '새 일정', label: `➕ 일정 추가: ${p.title}`, sub: `${p.date}${p.time ? ` ${p.time}` : ''}`, go: async () => { try { await appState.addSchedule({ title: p.title, date: p.date, time: p.time || null }); window.toast(`일정을 추가했어요 (${p.date}${p.time ? ` ${p.time}` : ''})`, 'success'); } catch (err) { window.toast(err.message || '일정 추가 실패', 'error'); } } }, ...shown].slice(0, 12);
-          }
-          active = Math.min(active, Math.max(0, shown.length - 1));
-          list.replaceChildren(...(shown.length ? shown.map((e, i) => el('button', { type: 'button', role: 'option', class: `quickfind-item ${i === active ? 'is-active' : ''}`, onclick: () => { close(); e.go(); } }, [el('span', {}, e.label), el('span', { class: 'text-muted' }, [e.sub ? `${e.sub} · ` : '', e.kind])])) : [el('div', { class: 'text-muted', style: 'padding:10px' }, '결과가 없습니다.')]));
-        }
-        input.addEventListener('input', () => { active = 0; render(); });
-        input.addEventListener('keydown', (ev) => {
-          if (ev.key === 'ArrowDown') { ev.preventDefault(); active = Math.min(shown.length - 1, active + 1); render(); }
-          else if (ev.key === 'ArrowUp') { ev.preventDefault(); active = Math.max(0, active - 1); render(); }
-          else if (ev.key === 'Enter' && shown[active]) { ev.preventDefault(); close(); shown[active].go(); }
-        });
-        body.append(input, list);
-        render();
-        setTimeout(() => input.focus(), 30);
-      },
-    });
-  }
-  window.openQuickFind = openQuickFind;
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && document.querySelector('#view-root')) { e.preventDefault(); openQuickFind(); }
-  });
-
   function updateNavBadge() {
     const unread = window.appState.notifications.filter((n) => !n.is_read).length;
-    for (const badge of document.querySelectorAll('[data-role="nav-badge"][data-path="/home"]')) {
-      badge.textContent = String(unread);
-      badge.classList.toggle('hidden', unread === 0);
-    }
+    const badge = document.querySelector('[data-role="nav-badge"][data-path="/home"]');
+    if (!badge) return;
+    badge.textContent = String(unread);
+    badge.classList.toggle('hidden', unread === 0);
   }
 
   function registerRoutes() {
@@ -243,13 +204,13 @@
     window.registerRoute('/briefing', window.renderBriefing);
     window.registerRoute('/playlist', window.renderPlaylist);
     window.registerRoute('/vehicles', window.renderVehicles);
+    window.registerRoute('/stocks', window.renderStocks);
     window.registerRoute('/health', window.renderHealth);
     window.registerRoute('/devlog', window.renderDevlog);
     window.registerRoute('/knowledge', window.renderKnowledge);
     window.registerRoute('/career', window.renderCareer);
     window.registerRoute('/automation', window.renderAutomation);
     window.registerRoute('/integrations', window.renderIntegrations);
-    window.registerRoute('/usage', window.renderUsage);
     window.registerRoute('/analytics', window.renderAnalytics);
     window.registerRoute('/programs', window.renderPrograms);
     window.registerRoute('/settings', window.renderSettings);

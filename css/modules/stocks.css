@@ -1,0 +1,44 @@
+/* 증권(Stocks) 화면 (v7.24.0) */
+.stock-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.stock-summary__tile { display: grid; gap: 4px; }
+.stock-summary__value { font-size: 18px; font-weight: 700; }
+
+.stock-account__title { font-size: 15px; font-weight: 700; }
+
+.stock-pnl--gain { color: var(--critical, #d33); }
+.stock-pnl--loss { color: var(--info, #2563eb); }
+.stock-pnl--flat { color: var(--text-muted); }
+
+/* 보유 종목 표 — 좁은 화면에서도 무너지지 않게 grid로 그린다. */
+.stock-holdings { display: grid; gap: 4px; }
+.stock-holdings__head,
+.stock-holdings__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.6fr) 70px 100px 100px 110px 130px 96px;
+  gap: 8px;
+  align-items: center;
+}
+.stock-holdings__head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  padding: 0 6px 4px;
+}
+.stock-holdings__row {
+  padding: 8px 6px;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface);
+  box-shadow: var(--shadow-pressed);
+}
+.stock-holdings__name { font-weight: 700; }
+@media (max-width: 720px) {
+  .stock-holdings__head { display: none; }
+  .stock-holdings__row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
+  .stock-holdings__row > div:first-child { grid-column: 1 / -1; }
+}

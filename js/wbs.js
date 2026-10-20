@@ -596,87 +596,10 @@
     return { project: proj, stages: out, shiftDays };
   }
 
-  // ---- v7.26.0: 끌어서 순서 변경 / 일부 단계 복사·붙여넣기 ----
-  /**
-   * 노드를 targetId의 앞/뒤/하위로 옮기는 변경(patch) 목록. pos: 'before' | 'after' | 'inside'(마지막 자식).
-   * 자기 자신/자기 하위로는 옮길 수 없고, 최대 깊이를 넘는 이동은 거부한다. 변경이 없으면 patches가 비어 있다.
-   */
-  function moveTo(rows, id, targetId, pos) {
-    const tree = buildTree(rows);
-    const node = tree.byId.get(id); const target = tree.byId.get(targetId);
-    if (!node || !target) return { ok: false, reason: 'not_found' };
-    if (id === targetId || descendantIds(tree, id).includes(targetId)) return { ok: false, reason: 'self' };
-    const newParent = pos === 'inside' ? targetId : (tree.parentOf.get(targetId) ?? null);
-    const baseDepth = newParent ? depthOf(tree, newParent) + 1 : 0;
-    if (baseDepth + subtreeHeight(tree, id) + 1 > MAX_WBS_DEPTH) return { ok: false, reason: 'max_depth' };
-    const oldParent = tree.parentOf.get(id) ?? null;
-    const sibs = (tree.children.get(newParent) || []).map((n) => n.id).filter((x) => x !== id);
-    let at = sibs.length;
-    if (pos !== 'inside') { const ti = sibs.indexOf(targetId); at = pos === 'before' ? ti : ti + 1; }
-    sibs.splice(at, 0, id);
-    const patches = [];
-    sibs.forEach((sid, seq) => {
-      const cur = tree.byId.get(sid);
-      const patch = {};
-      if (seqOf(cur) !== seq) patch.seq = seq;
-      if (sid === id && oldParent !== newParent) { patch.parent_id = newParent; patch.seq = seq; }
-      if (Object.keys(patch).length) patches.push({ id: sid, patch });
-    });
-    if (oldParent !== newParent) {
-      (tree.children.get(oldParent) || []).map((n) => n.id).filter((x) => x !== id).forEach((sid, seq) => {
-        if (seqOf(tree.byId.get(sid)) !== seq) patches.push({ id: sid, patch: { seq } });
-      });
-    }
-    return { ok: true, patches: dedupePatches(patches) };
-  }
-
-  /** 선택한 항목들(하위 포함)을 붙여넣기용 묶음으로. 부모와 자식이 함께 선택돼도 한 번만 담는다. 날짜/진행률은 원본 그대로(붙여넣을 때 옵션 적용). */
-  function planStageClip(rows, ids) {
-    const tree = buildTree(rows);
-    const set = new Set((ids || []).filter((x) => tree.byId.has(x)));
-    const tops = new Set([...set].filter((x) => { let p = tree.parentOf.get(x); while (p) { if (set.has(p)) return false; p = tree.parentOf.get(p); } return true; }));
-    const keep = new Set();
-    for (const t of tops) { keep.add(t); for (const d of descendantIds(tree, t)) keep.add(d); }
-    const items = [];
-    const topDepth = new Map();
-    for (const row of tree.order) {
-      const r = row.node;
-      if (!keep.has(r.id)) continue;
-      const isTop = tops.has(r.id);
-      const depth = isTop ? 0 : (topDepth.get(row.parentId) ?? 0) + 1;
-      topDepth.set(r.id, depth);
-      items.push({
-        key: r.id, parentKey: isTop ? null : row.parentId, depth,
-        fields: { name: r.name, start_date: r.start_date || null, target_date: r.target_date || null, is_milestone: !!r.is_milestone, memo: r.memo || null, status: r.status || 'todo', progress: Number(r.progress) || 0, actual_start_date: r.actual_start_date || null, actual_completion_date: r.actual_completion_date || null },
-        deps: (r.depends_on || []).map(parseDep).filter((d) => keep.has(d.id)).map((d) => ({ key: d.id, type: d.type })),
-      });
-    }
-    const height = items.length ? Math.max(...items.map((x) => x.depth)) + 1 : 0;
-    return { items, height };
-  }
-
-  /** 붙여넣기 옵션 적용. dateMode: clear | keep | shift(가장 이른 날짜가 shiftBase가 되도록 이동). @returns {{items, shiftDays}} */
-  function applyClipOptions(items, { resetProgress = true, dateMode = 'clear', shiftBase = null } = {}) {
-    const dates = items.flatMap((x) => [x.fields.start_date, x.fields.target_date]).filter(Boolean).sort();
-    let shiftDays = null;
-    if (dateMode === 'shift' && shiftBase && dates.length) shiftDays = globalThis.isoDiff(dates[0], shiftBase);
-    const mapDate = (d) => (!d || dateMode === 'clear' ? null : shiftDays !== null ? globalThis.shiftIso(d, shiftDays) : d);
-    return {
-      shiftDays,
-      items: items.map((x) => ({ ...x, fields: {
-        ...x.fields,
-        start_date: mapDate(x.fields.start_date), target_date: mapDate(x.fields.target_date),
-        status: resetProgress ? 'todo' : x.fields.status, progress: resetProgress ? 0 : x.fields.progress,
-        actual_start_date: resetProgress ? null : mapDate(x.fields.actual_start_date),
-        actual_completion_date: resetProgress ? null : mapDate(x.fields.actual_completion_date),
-      } })),
-    };
-  }
-
   globalThis.WBS = {
     LEVEL_LABELS, MAX_WBS_DEPTH, levelLabel, buildTree, visibleRows, descendantIds, subtreeHeight, depthOf,
     durationDays, rollupDates, rollupProgress, computeRollup, effectiveStatus, progressToStatus, leafProgress,
-    DEP_TYPES, parseDep, formatDep, criticalPath, wouldCreateCycle, moveNode, moveTo, planStageClip, applyClipOptions, parseOutline, outlineToRows,
+    DEP_TYPES, parseDep, formatDep, criticalPath, wouldCreateCycle, moveNode, parseOutline, outlineToRows,
     planLegacyStageMigration, planProjectCopy, dragDates, snapshotBaseline, baselineVariance, ZOOM_PX, ganttRange, ganttTicks, layoutGantt, ROW_H, HEADER_H,
   };
 })();

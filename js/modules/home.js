@@ -13,6 +13,7 @@
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
     recent: '🕘 최근 본 항목', programs: '🧩 내 프로그램', knowledge: '📚 최근 Knowledge', dday: '📆 D-day',
+    stocks: '📈 증권 요약',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
   // 시계 셀별로 "직전에 보여 준 테마"를 기억해 홈이 다시 그려져도 배경이 끊기지 않고 크로스페이드되게 한다.
@@ -256,7 +257,58 @@
         weatherState.data[idx] = fresh;
         draw();
       });
-      showForecastModal(city);
+      window.openModal({
+        title: `☀️ ${city.name} 주간예보`,
+        contentBuilder(body) {
+          body.append(el('div', { class: 'text-muted' }, '불러오는 중…'));
+          // 기상청(KMA) 키가 설정되어 있으면 단기(1~3일 상세)+중기(4~10일 강수확률)를 합친
+          // 기상청 데이터를, 아니면(또는 실패하면) 기존 Open-Meteo 7일 예보를 그대로 보여준다.
+          const loader = window.fetchUnifiedWeeklyForecast ? window.fetchUnifiedWeeklyForecast(city) : window.fetchWeeklyForecast(city).then((days) => ({ days, source: 'open-meteo', note: null }));
+          loader.then(({ days, source, note }) => {
+            body.innerHTML = '';
+            if (!days || !days.length) {
+              body.append(el('div', { class: 'text-muted' }, '예보를 가져오지 못했습니다.'));
+              return;
+            }
+            if (note) {
+              body.append(el('div', { class: 'nm-card', style: 'font-size:12px; margin-bottom:10px; padding:8px 10px' }, [
+                el('span', { class: 'text-muted' }, `ℹ️ ${note}`),
+              ]));
+            } else if (source === 'kma') {
+              body.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:10px' }, '출처: 기상청(단기 1~3일 + 중기 4~10일)'));
+            }
+            const labels = days.map((d) => d.date.slice(5));
+            body.append(
+              el('div', {}, [el('strong', { style: 'font-size:13px' }, '최고/최저기온(℃)')]),
+              el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(labels, days.map((d) => d.max ?? 0), '#ef4444')]),
+              el('div', { style: 'margin-top:4px' }, [window.simpleLineChart(labels, days.map((d) => d.min ?? 0), '#3b82f6')])
+            );
+            if (days.some((d) => d.pop !== null && d.pop !== undefined)) {
+              body.append(
+                el('div', { style: 'margin-top:14px' }, [el('strong', { style: 'font-size:13px' }, '강수확률(%)')]),
+                el('div', { style: 'margin-top:6px' }, [window.simpleBarChart(labels, days.map((d) => d.pop ?? 0))])
+              );
+            }
+            const list = el('div', { class: 'item-list', style: 'margin-top:14px' });
+            for (const d of days) {
+              list.append(
+                el('div', { class: 'item-row' }, [
+                  el('div', { class: 'item-row__main' }, [
+                    el('div', { class: 'item-row__title' }, d.date),
+                    el('div', { class: 'item-row__meta' }, d.detail || window.weatherCodeToLabel(d.code)),
+                  ]),
+                  el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [
+                    d.pop !== null && d.pop !== undefined ? el('span', { class: 'nm-badge', title: '강수확률' }, `☔ ${d.pop}%`) : null,
+                    d.precip !== null && d.precip !== undefined && d.precip > 0 ? el('span', { class: 'nm-badge', title: '강수량' }, `💧 ${d.precip}mm`) : null,
+                    el('span', { style: 'font-weight:700' }, `${d.min ?? '-'}° / ${d.max ?? '-'}°`),
+                  ]),
+                ])
+              );
+            }
+            body.append(list);
+          });
+        },
+      });
     }
 
     // 대시보드 상단 연동 상태 배지. 현재는 문화생활(TMDB) API 연결 상태를 보여주며,
@@ -512,6 +564,47 @@
       }
       widgets.noti = notiCard;
 
+      // v7.24.0(아이디어 3): 증권 요약 카드 — 보유 종목이 있을 때만 보여준다. 시세를 비동기로 받아
+      // 평가손익과 목표가/손절가 도달 알림을 배지로 띄운다(KIS 키가 없으면 수동 요약만).
+      const homeHoldings = appState.stockHoldings.filter((h) => !h.deleted_at);
+      if (homeHoldings.length) {
+        const stockCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+          el('div', { class: 'row row--between' }, [
+            el('h3', {}, '증권 요약'),
+            el('button', { class: 'nm-btn nm-btn--icon', title: '증권 화면으로', onclick: () => navigate('/stocks') }, '→'),
+          ]),
+        ]);
+        const body = el('div', { style: 'margin-top:8px' });
+        stockCard.append(body);
+        const renderStockCard = (priceMap) => {
+          body.innerHTML = '';
+          const SC = window.StockCalc;
+          const total = SC.evaluatePortfolio(homeHoldings, priceMap);
+          body.append(
+            el('div', { class: 'row wrap', style: 'gap:16px; align-items:baseline' }, [
+              el('div', {}, [el('div', { class: 'text-muted', style: 'font-size:12px' }, '평가금액'), el('div', { style: 'font-weight:700' }, total.totalValue === null ? '—' : formatMoneyHome(total.totalValue))]),
+              el('div', {}, [el('div', { class: 'text-muted', style: 'font-size:12px' }, '평가손익'), el('div', { class: `stock-pnl--${SC.pnlClass(total.totalPnl)}`, style: 'font-weight:700' }, total.totalValue === null ? '—' : `${SC.formatPnl(total.totalPnl)} (${SC.formatPnlRate(total.totalPnlRate)})`)]),
+            ])
+          );
+          const alerts = SC.priceAlerts(homeHoldings, priceMap);
+          if (alerts.length) {
+            body.append(
+              el('div', { class: 'row wrap', style: 'gap:6px; margin-top:8px' },
+                alerts.map((a) => el('span', { class: `nm-badge ${a.kind === 'target' ? 'nm-badge--success' : 'nm-badge--critical'}` },
+                  `${a.kind === 'target' ? '🎯' : '🛑'} ${a.name} ${formatMoneyHome(a.price)}`)))
+            );
+          }
+          if (total.evaluatedCount < total.count) {
+            body.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, `※ ${total.count - total.evaluatedCount}개 종목은 시세 미반영`));
+          }
+        };
+        renderStockCard({}); // 먼저 수동 요약을 그리고
+        if (window.hasKisKey && window.hasKisKey()) {
+          window.fetchKisPrices(homeHoldings, {}).then(({ prices: p }) => renderStockCard(p)).catch(() => {});
+        }
+        widgets.stocks = stockCard;
+      }
+
       // 프로그램 메뉴의 즐겨찾기 URL을 홈에서 바로 열 수 있게(메뉴 간 연동).
       const topBookmarks = appState.bookmarks.slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).slice(0, 6);
       const shortcutsCard = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
@@ -613,6 +706,12 @@
         if (p) return `${window.programIcon(p)} ${p.name}`; // 아이콘을 나중에 바꿔도 최신 값으로
       }
       return item.label;
+    }
+
+    // 증권 요약 카드용 금액 표기(홈에서는 KRW 위주로 간단히 보여준다).
+    function formatMoneyHome(v) {
+      const n = Number(v || 0);
+      return `${n.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}원`;
     }
 
     // ---- 인사 헤더(시간대 테마) ----
@@ -772,74 +871,6 @@
       clearInterval(wxTimer);
     };
   }
-
-  // 주간예보 모달(클래식 홈·벤토 홈 공용)
-  function showForecastModal(city) {
-  window.openModal({
-    title: `☀️ ${city.name} 주간예보`,
-    width: '760px',
-    contentBuilder(body) {
-      body.append(el('div', { class: 'text-muted' }, '불러오는 중…'));
-      // 기상청(KMA) 키가 설정되어 있으면 단기(1~3일 상세)+중기(4~10일 강수확률)를 합친
-      // 기상청 데이터를, 아니면(또는 실패하면) 기존 Open-Meteo 7일 예보를 그대로 보여준다.
-      const loader = window.fetchUnifiedWeeklyForecast ? window.fetchUnifiedWeeklyForecast(city) : window.fetchWeeklyForecast(city).then((days) => ({ days, source: 'open-meteo', note: null }));
-      loader.then(({ days, source, note }) => {
-        body.innerHTML = '';
-        if (!days || !days.length) {
-          body.append(el('div', { class: 'text-muted' }, '예보를 가져오지 못했습니다.'));
-          return;
-        }
-        if (note) {
-          body.append(el('div', { class: 'nm-card', style: 'font-size:12px; margin-bottom:10px; padding:8px 10px' }, [
-            el('span', { class: 'text-muted' }, `ℹ️ ${note}`),
-          ]));
-        } else if (source === 'kma') {
-          body.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:10px' }, '출처: 기상청(단기 1~3일 + 중기 4~10일)'));
-        }
-        const labels = days.map((d) => d.date.slice(5));
-        // 가로 방향 주간예보: 요일별 카드를 한 줄로(좁은 화면에서는 옆으로 밀어서 보기).
-        const todayIso = todayISO();
-        const WD = ['월', '화', '수', '목', '금', '토', '일'];
-        const emojiOf = (d) => {
-          const label = d.detail || window.weatherCodeToLabel(d.code);
-          if (/눈/.test(label)) return '❄️';
-          if (/뇌우|천둥/.test(label)) return '⛈️';
-          if (/비|소나기/.test(label)) return '🌧️';
-          if (/안개/.test(label)) return '🌫️';
-          if (/맑/.test(label)) return '☀️';
-          if (/구름|흐/.test(label)) return /조금/.test(label) ? '🌤️' : '☁️';
-          return '🌡️';
-        };
-        const strip = el('div', { class: 'wx-week', role: 'list', 'aria-label': '주간예보' });
-        for (const d of days) {
-          const wd = WD[window.isoWeekday(d.date) - 1];
-          strip.append(el('div', { class: `wx-day ${d.date === todayIso ? 'wx-day--today' : ''}`, role: 'listitem' }, [
-            el('div', { class: 'wx-day__wd' }, d.date === todayIso ? '오늘' : wd),
-            el('div', { class: 'wx-day__date' }, d.date.slice(5).replace('-', '/')),
-            el('div', { class: 'wx-day__icon', 'aria-hidden': 'true' }, emojiOf(d)),
-            el('div', { class: 'wx-day__desc' }, d.detail || window.weatherCodeToLabel(d.code)),
-            el('div', { class: 'wx-day__temp' }, [el('b', {}, `${d.max ?? '-'}°`), el('span', { class: 'text-muted' }, ` / ${d.min ?? '-'}°`)]),
-            d.pop !== null && d.pop !== undefined ? el('div', { class: 'wx-day__pop', title: '강수확률' }, `☔ ${d.pop}%`) : null,
-            d.precip !== null && d.precip !== undefined && d.precip > 0 ? el('div', { class: 'wx-day__precip', title: '강수량' }, `💧 ${d.precip}mm`) : null,
-          ]));
-        }
-        body.append(strip);
-        body.append(
-          el('div', { style: 'margin-top:14px' }, [el('strong', { style: 'font-size:13px' }, '최고/최저기온(℃)')]),
-          el('div', { style: 'margin-top:6px' }, [window.simpleLineChart(labels, days.map((d) => d.max ?? 0), '#ef4444')]),
-          el('div', { style: 'margin-top:4px' }, [window.simpleLineChart(labels, days.map((d) => d.min ?? 0), '#3b82f6')])
-        );
-        if (days.some((d) => d.pop !== null && d.pop !== undefined)) {
-          body.append(
-            el('div', { style: 'margin-top:14px' }, [el('strong', { style: 'font-size:13px' }, '강수확률(%)')]),
-            el('div', { style: 'margin-top:6px' }, [window.simpleBarChart(labels, days.map((d) => d.pop ?? 0))])
-          );
-        }
-      });
-    },
-  });
-  }
-  window.showForecastModal = showForecastModal;
 
   // KPI 카드. opts: spark(7개 값), ring(0~100), decimals/signed/suffix(숫자 표시 형식). 숫자는 값이 바뀔 때만 count-up한다.
   const kpiLast = new Map();

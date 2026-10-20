@@ -10,7 +10,7 @@
    *   newAlerts:object[], weather: object|null
    * }}
    */
-  function buildLoginBriefing({ user, schedules, projects, progressByProject, newAlerts, weather }) {
+  function buildLoginBriefing({ user, schedules, projects, progressByProject, newAlerts, weather, briefingNewCount }) {
     const CONFIG = window.CONFIG;
     const today = todayISO();
     const todaySchedules = schedules
@@ -41,6 +41,8 @@
       todaySchedules,
       urgentProjects,
       newAlerts: newAlerts || [],
+      // v7.24.0(아이디어 1): 자동 수집으로 새로 들어온 관심주제 글 수(수집을 돌린 날에만 숫자).
+      briefingNewCount: typeof briefingNewCount === 'number' ? briefingNewCount : null,
       weather: weather || null,
     };
   }

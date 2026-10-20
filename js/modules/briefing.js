@@ -3,13 +3,15 @@
 // 자동 수집하지만(개발계획서 9장), 이 MVP는 브라우저에서 직접 수집하는 수동 트리거로 대체했다.
 // 일반 <script>로 로드된다.
 (function () {
-  const { appState, el, escapeHtml, toast, confirmDialog, openModal, parseKeywords } = window;
+  const { appState, el, escapeHtml, toast, confirmDialog, openModal, parseKeywords, nmField, todayISO } = window;
 
   function renderBriefing(root) {
     const container = el('div', {});
     root.append(container);
-    let tab = 'news'; // news | items | topics | sources
+    let tab = 'items'; // items | topics | sources
     let collecting = false;
+    // 브리핑 목록 일괄 선택 상태(v7.24.0). 항목 id 집합으로 관리해 화면을 다시 그려도 유지된다.
+    const selectedIds = new Set();
 
     function draw() {
       container.innerHTML = '';
@@ -29,15 +31,13 @@
 
       container.append(
         el('div', { class: 'row wrap', style: 'margin-bottom:14px' }, [
-          tabBtn('news', '📰 뉴스레터'),
           tabBtn('items', '브리핑 목록'),
           tabBtn('topics', `관심주제 (${appState.briefingTopics.length}/10)`),
           tabBtn('sources', '피드 소스'),
         ])
       );
 
-      if (tab === 'news') drawNews();
-      else if (tab === 'items') drawItems();
+      if (tab === 'items') drawItems();
       else if (tab === 'topics') drawTopics();
       else drawSources();
     }
@@ -71,25 +71,6 @@
       }
     }
 
-    function drawNews() {
-      const model = window.buildNewsletterModel(appState.briefingItems, { topics: appState.briefingTopics, sources: appState.feedSources, schedules: appState.schedules });
-      const html = window.newsletterToHtml(model);
-      if (!appState.briefingItems.length) {
-        container.append(el('div', { class: 'empty-state' }, '아직 수집된 항목이 없습니다. 관심주제를 등록하고 "지금 가져오기"를 누르면 뉴스레터가 만들어집니다.'));
-        return;
-      }
-      container.append(el('div', { class: 'row wrap', style: 'margin-bottom:10px; gap:8px' }, [
-        el('button', { class: 'nm-btn', onclick: () => window.print() }, '🖨 인쇄/PDF'),
-        el('button', { class: 'nm-btn', onclick: async () => {
-          let css = ''; try { css = await (await fetch('css/modules/newsletter.css')).text(); } catch { /* 스타일 없이 저장 */ }
-          const doc = `<!doctype html><meta charset="utf-8"><title>일일 브리핑</title><style>body{font-family:sans-serif;background:#f4f4f4;padding:16px;color:#14213D}.nl{background:#fff}${css}</style>${html}`;
-          const a = el('a', { href: URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' })), download: `briefing-${new Date().toLocaleDateString('sv-SE')}.html` });
-          document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-        } }, '⬇ HTML 저장'),
-      ]));
-      container.append(el('div', { html }));
-    }
-
     function drawItems() {
       const topicById = (id) => appState.briefingTopics.find((t) => t.id === id);
       const hitsOf = (it) => window.priorityHits(it, topicById(it.topic_id));
@@ -99,6 +80,11 @@
         return;
       }
       const buildMd = (onlyUnread) => window.briefingToMarkdown(rows, { topics: appState.briefingTopics, sources: appState.feedSources, date: new Date().toLocaleDateString('sv-SE'), onlyUnread });
+      // 선택 상태는 id 집합으로 관리한다(화면을 다시 그려도 유지). 현재 목록에 없는 id는 자동 정리된다.
+      const visibleIds = new Set(rows.map((r) => r.id));
+      for (const id of [...selectedIds]) if (!visibleIds.has(id)) selectedIds.delete(id);
+      const selectedRows = () => rows.filter((r) => selectedIds.has(r.id));
+
       container.append(el('div', { class: 'row wrap', style: 'margin-bottom:10px; gap:8px' }, [
         el('button', { class: 'nm-btn', title: '안 읽은 항목을 관심주제별 마크다운으로 복사', onclick: async () => {
           try { await navigator.clipboard.writeText(buildMd(true)); toast('안 읽은 항목을 마크다운으로 복사했습니다.', 'success'); }
@@ -109,31 +95,182 @@
           document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
         } }, '⬇ .md 저장'),
       ]));
+
+      // 선택 도구모음 — 하나라도 선택하면 나타난다. 일괄 읽음/선택 Knowledge 스크랩/일괄 삭제를 제공한다.
+      const toolbar = el('div', { class: 'row wrap', style: 'margin-bottom:10px; gap:8px; align-items:center' });
+      function refreshToolbar() {
+        toolbar.innerHTML = '';
+        const picked = selectedRows();
+        if (!picked.length) return;
+        toolbar.append(
+          el('span', { class: 'text-muted', style: 'font-size:13px' }, `${picked.length}개 선택됨`),
+          el('button', { class: 'nm-btn', title: '선택한 항목을 읽음 처리', onclick: async () => {
+            await bulkAction(picked, (it) => appState.markBriefingItemRead(it.id));
+            toast(`${picked.length}개를 읽음 처리했습니다.`, 'success');
+          } }, '✓ 읽음 처리'),
+          el('button', { class: 'nm-btn', title: '선택한 항목을 Knowledge 문서로 한꺼번에 스크랩', onclick: async () => {
+            await bulkScrapToKnowledge(picked);
+          } }, '📌 Knowledge로'),
+          el('button', { class: 'nm-btn nm-btn--danger', title: '선택한 항목을 삭제', onclick: async () => {
+            if (!confirmDialog(`선택한 ${picked.length}개 항목을 삭제할까요?`)) return;
+            await bulkAction(picked, (it) => appState.deleteBriefingItem(it.id));
+            toast(`${picked.length}개를 삭제했습니다.`, 'success');
+          } }, '🗑 선택 삭제'),
+          el('button', { class: 'nm-btn', title: '선택 해제', onclick: () => { selectedIds.clear(); draw(); } }, '선택 해제'),
+        );
+      }
+
+      // 개별 일괄 처리는 refreshAll()이 매 건마다 화면을 다시 그리므로(그리고 그 과정에서
+      // selectedIds가 정리되므로) 순차 처리 후 마지막에 한 번 더 그린다.
+      async function bulkAction(picked, fn) {
+        const ids = picked.map((p) => p.id);
+        for (const it of picked) await fn(it);
+        for (const id of ids) selectedIds.delete(id);
+        draw();
+      }
+      async function bulkScrapToKnowledge(picked) {
+        let ok = 0;
+        for (const it of picked) {
+          const topic = topicById(it.topic_id);
+          try {
+            await appState.addKnowledgeDoc({ title: it.title, url: it.link, tags: topic ? [topic.name] : [], memo: it.summary || null });
+            ok++;
+          } catch (e) {
+            toast(`"${it.title}" 스크랩 실패: ${e.message || e}`, 'error');
+          }
+        }
+        for (const it of picked) selectedIds.delete(it.id);
+        toast(`${ok}개를 Knowledge에 스크랩했습니다.`, 'success');
+        draw();
+      }
+
+      // 전체 선택 체크박스(헤더) + 개별 선택 체크박스.
+      const allChecked = rows.length > 0 && selectedIds.size === rows.length;
+      const headCheck = el('input', { type: 'checkbox', checked: allChecked || undefined, title: '전체 선택' });
+      headCheck.addEventListener('change', () => {
+        if (headCheck.checked) for (const r of rows) selectedIds.add(r.id);
+        else selectedIds.clear();
+        draw();
+      });
+      container.append(el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:6px' }, [headCheck, el('span', { class: 'text-muted', style: 'font-size:12px' }, '전체 선택')]));
+      container.append(toolbar);
+      refreshToolbar();
+
       const list = el('div', { class: 'item-list' });
       for (const item of rows) {
         const topic = appState.briefingTopics.find((t) => t.id === item.topic_id);
         const source = appState.feedSources.find((s) => s.id === item.source_id);
+        const check = el('input', { type: 'checkbox', checked: selectedIds.has(item.id) || undefined, title: '선택' });
+        check.addEventListener('change', () => {
+          if (check.checked) selectedIds.add(item.id);
+          else selectedIds.delete(item.id);
+          refreshToolbar();
+          // 전체 선택 체크박스 상태도 함께 갱신한다.
+          headCheck.checked = selectedIds.size === rows.length && rows.length > 0;
+        });
         list.append(
           el('div', { class: `item-row ${item.is_read ? 'item-row--done' : ''}` }, [
+            el('div', { style: 'display:flex; align-items:center; padding-right:8px' }, check),
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'item-row__title' }, [
                 hitsOf(item).length ? el('span', { class: 'nm-badge nm-badge--warning', title: `우선 검색어: ${hitsOf(item).join(', ')}`, style: 'margin-right:6px' }, '⭐ 우선') : null,
-                el('a', { href: item.link, target: '_blank', rel: 'noopener', onclick: () => !item.is_read && appState.markBriefingItemRead(item.id) }, item.title),
+                el('a', { href: item.link, target: '_blank', rel: 'noopener', onclick: () => !item.is_read && appState.markBriefingItemRead(item.id) }, escapeHtml(item.title)),
               ]),
               el(
                 'div',
                 { class: 'item-row__meta' },
-                `${topic ? '#' + topic.name + ' · ' : ''}${source ? source.name : window.deriveSourceLabel(item)}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
+                `${topic ? '#' + escapeHtml(topic.name) + ' · ' : ''}${source ? escapeHtml(source.name) : escapeHtml(window.deriveSourceLabel(item))}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
               ),
-              item.summary ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, item.summary) : null,
+              item.summary ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, escapeHtml(item.summary)) : null,
             ]),
             !item.is_read ? el('button', { class: 'nm-btn nm-btn--icon', title: '읽음 처리', onclick: () => appState.markBriefingItemRead(item.id) }, '✓') : null,
             el('button', { class: 'nm-btn nm-btn--icon', title: 'Knowledge에 스크랩', onclick: () => scrapToKnowledge(item, topic) }, '📌'),
+            // v7.24.0(아이디어 2): 기사에서 바로 "일정 잡기" / "프로젝트 참고자료로 붙이기".
+            el('button', { class: 'nm-btn nm-btn--icon', title: '일정으로 만들기', onclick: () => openItemToSchedule(item, topic) }, '📅'),
+            el('button', { class: 'nm-btn nm-btn--icon', title: '프로젝트에 참고자료로 붙이기', onclick: () => openItemToProject(item, topic) }, '📁'),
             el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => appState.deleteBriefingItem(item.id) }, '🗑'),
           ])
         );
       }
       container.append(list);
+    }
+
+    // 브리핑 항목 → 일정 만들기 (아이디어 2). 제목·날짜·시간·메모를 기본값으로 채워 주고,
+    // 저장하면 원문 링크를 메모에 남긴다. 저장 후 "읽음 처리"까지 해 목록을 깔끔하게 유지한다.
+    function openItemToSchedule(item, topic) {
+      openModal({
+        title: '브리핑 항목 → 일정',
+        width: '460px',
+        contentBuilder(body, close) {
+          const form = el('form', { class: 'stack' });
+          form.append(
+            nmField('제목', el('input', { class: 'nm-input', name: 'title', required: true, value: item.title })),
+            nmField('날짜', el('input', { class: 'nm-input', name: 'date', type: 'date', required: true, value: todayISO() })),
+            nmField('시간 (선택)', el('input', { class: 'nm-input', name: 'time', type: 'time' })),
+            nmField('분류', (() => {
+              const sel = el('select', { class: 'nm-select', name: 'category' });
+              for (const [v, l] of [['personal', '개인'], ['work', '회사'], ['family', '가족'], ['task', '업무'], ['etc', '기타']]) sel.append(el('option', { value: v, selected: v === 'personal' || undefined }, l));
+              return sel;
+            })()),
+            nmField('메모', el('textarea', { class: 'nm-textarea', name: 'memo', rows: 3 }, `${topic ? '#' + topic.name + '\n' : ''}${item.link}`)),
+            el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '일정 등록')
+          );
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            try {
+              await appState.addSchedule({
+                title: String(fd.get('title')).trim(),
+                date: fd.get('date'),
+                time: fd.get('time') || null,
+                category: fd.get('category'),
+                memo: fd.get('memo') || null,
+                source: 'briefing',
+              });
+              if (!item.is_read) await appState.markBriefingItemRead(item.id);
+              toast('일정으로 등록했습니다.', 'success');
+              close();
+            } catch (err) { toast(`등록 실패: ${err.message || err}`, 'error'); }
+          });
+          body.append(form);
+        },
+      });
+    }
+
+    // 브리핑 항목 → 프로젝트 참고자료 (아이디어 2). 프로젝트의 knowledge를 직접 건드리지 않고,
+    // Knowledge 문서로 저장하면서 프로젝트 이름을 태그로 붙인다(프로젝트 상세의 태그 기반 연동이 잡아낸다).
+    function openItemToProject(item, topic) {
+      const projects = appState.projects.filter((p) => !p.deleted_at);
+      if (!projects.length) { toast('등록된 프로젝트가 없습니다. 먼저 프로젝트를 만들어 주세요.', 'error'); return; }
+      openModal({
+        title: '브리핑 항목 → 프로젝트 참고자료',
+        width: '460px',
+        contentBuilder(body, close) {
+          const form = el('form', { class: 'stack' });
+          const sel = el('select', { class: 'nm-select', name: 'project_id', required: true });
+          for (const p of projects) sel.append(el('option', { value: p.id }, p.name));
+          form.append(
+            nmField('프로젝트', sel),
+            nmField('자료 제목', el('input', { class: 'nm-input', name: 'title', required: true, value: item.title })),
+            el('p', { class: 'text-muted', style: 'font-size:12px' }, 'Knowledge 문서로 저장하고 선택한 프로젝트 이름을 태그로 붙입니다. 프로젝트 상세의 "관련 자료"에 나타납니다.'),
+            el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '참고자료로 추가')
+          );
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            const project = projects.find((p) => p.id === fd.get('project_id'));
+            const tags = [project.name];
+            if (topic) tags.push(topic.name);
+            try {
+              await appState.addKnowledgeDoc({ title: String(fd.get('title')).trim(), url: item.link, tags, memo: item.summary || null });
+              if (!item.is_read) await appState.markBriefingItemRead(item.id);
+              toast(`"${project.name}" 참고자료로 추가했습니다.`, 'success');
+              close();
+            } catch (err) { toast(`추가 실패: ${err.message || err}`, 'error'); }
+          });
+          body.append(form);
+        },
+      });
     }
 
     function drawTopics() {
@@ -148,7 +285,7 @@
         list.append(
           el('div', { class: 'item-row' }, [
             el('div', { class: 'item-row__main' }, [
-              el('div', { class: 'item-row__title' }, `${t.name} ${t.active === false ? '(비활성)' : ''}`),
+              el('div', { class: 'item-row__title' }, `${escapeHtml(t.name)} ${t.active === false ? '(비활성)' : ''}`),
               el('div', { class: 'item-row__meta' }, [
                 (t.site_urls || []).length ? `사이트: ${t.site_urls.join(', ')}` : '',
                 (t.search_terms || []).length ? `검색어: ${t.search_terms.join(', ')}` : '',
@@ -172,27 +309,83 @@
         container.append(el('div', { class: 'empty-state' }, '등록된 피드 소스가 없습니다. RSS 주소를 등록해보세요. (예: 각 언론사/블로그의 RSS 주소)'));
         return;
       }
-      const list = el('div', { class: 'item-list' });
+      // v7.24.0(아이디어 5): 오래 실패한 소스를 목록 맨 위에 경고로 모아 보여준다. "마지막 수집일"이
+      // 생겼으니, 7일 이상 수집이 안 됐거나 마지막 결과가 오류/0건인 활성 소스를 한눈에 알 수 있게 한다.
+      const STALE_DAYS = 7;
+      const stale = rows.filter((s) => s.enabled !== false && isStaleSource(s, STALE_DAYS));
+      if (stale.length) {
+        const warn = el('div', { class: 'nm-banner nm-banner--warning', style: 'margin-bottom:10px; align-items:flex-start' }, [
+          el('div', {}, [
+            el('strong', {}, `⚠ 확인이 필요한 피드 소스 ${stale.length}개`),
+            el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px' }, stale.map((s) => `${s.name} (${staleReason(s, STALE_DAYS)})`).join(' · ')),
+          ]),
+        ]);
+        container.append(warn);
+      }
+      // v7.24.0: 목록을 "이름 / 종류 / 상태 / 등록일 / 마지막 수집일" 컬럼 형태로 보여준다.
+      // 행을 클릭하면 작은 팝업이 열리고(수정·삭제 아이콘은 팝업 안에 표시), 마우스를 올린
+      // 행의 우측 상단에 아이콘이 나타난다. 테이블 대신 grid를 써서 좁은 화면에서도 무너지지 않게 한다.
+      const fmt = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—');
+      const table = el('div', { class: 'source-table' });
+      table.append(
+        el('div', { class: 'source-table__head' }, [
+          el('div', {}, '이름'),
+          el('div', {}, '종류'),
+          el('div', {}, '상태'),
+          el('div', {}, '등록일'),
+          el('div', {}, '마지막 수집일'),
+        ])
+      );
       for (const s of rows) {
         // 소스 관제: 사용자 제어(활성/비활성)와 시스템 판단(정상/불안정/오류/미실행)을 분리해서 보여준다.
         const status = !s.last_run_at ? { label: '미실행', cls: '' } : s.last_result === 'success' ? { label: '정상', cls: 'nm-badge--success' } : s.last_result === 'empty' ? { label: '불안정(0건)', cls: 'nm-badge--warning' } : { label: '오류', cls: 'nm-badge--critical' };
-        const endpointPreview = s.type === 'markdown' ? `마크다운 텍스트 (${(s.endpoint || '').length.toLocaleString()}자)` : (s.endpoint || '');
-        list.append(
-          el('div', { class: 'item-row' }, [
-            el('div', { class: 'item-row__main' }, [
+        const rowEl = el('div', { class: 'source-table__row', role: 'button', tabindex: '0', title: '클릭하면 상세 팝업이 열립니다' }, [
+          el('div', { class: 'source-table__name' }, `${escapeHtml(s.name)} ${s.enabled === false ? '(비활성)' : ''}`),
+          el('div', {}, [el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS')]),
+          el('div', {}, [el('span', { class: `nm-badge ${status.cls}` }, status.label)]),
+          el('div', { class: 'source-table__date' }, fmt(s.created_at)),
+          el('div', { class: 'source-table__date' }, fmt(s.last_run_at)),
+          // 마우스를 올린 행의 우측 상단에 나타나는 수정·삭제 아이콘.
+          el('div', { class: 'source-table__actions' }, [
+            el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: (e) => { e.stopPropagation(); openSourceForm(s); } }, '✎'),
+            el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: (e) => { e.stopPropagation(); removeSource(s); } }, '🗑'),
+          ]),
+        ]);
+        const openDetail = () => openSourceDetail(s, status);
+        rowEl.addEventListener('click', openDetail);
+        rowEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); } });
+        table.append(rowEl);
+      }
+      container.append(table);
+    }
+
+    // 피드 소스 상세 팝업 — 주소 전체·마지막 수집 결과·등록일을 보여주고 수정/삭제로 이어진다.
+    function openSourceDetail(s, status) {
+      openModal({
+        title: `${s.name} — 피드 소스`,
+        width: '460px',
+        contentBuilder(body) {
+          const row = (label, value) => el('div', { class: 'nm-field' }, [el('label', {}, label), el('div', { style: 'word-break:break-all; font-size:13px' }, value)]);
+          const endpointIsUrl = s.type !== 'markdown';
+          body.append(
+            el('div', { class: 'stack', style: 'gap:10px' }, [
               el('div', { class: 'row wrap', style: 'gap:6px; align-items:center' }, [
-                el('div', { class: 'item-row__title' }, `${s.name} ${s.enabled === false ? '(비활성)' : ''}`),
                 el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS'),
                 el('span', { class: `nm-badge ${status.cls}` }, status.label),
+                el('span', { class: `nm-badge ${s.enabled === false ? '' : 'nm-badge--success'}` }, s.enabled === false ? '비활성' : '활성'),
               ]),
-              el('div', { class: 'item-row__meta' }, `${endpointPreview}${s.last_run_at ? ' · 마지막 수집 ' + s.last_run_at.slice(0, 16).replace('T', ' ') : ''}`),
-            ]),
-            el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openSourceForm(s) }, '✎'),
-            el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeSource(s) }, '🗑'),
-          ])
-        );
-      }
-      container.append(list);
+              row('등록일', s.created_at ? String(s.created_at).slice(0, 19).replace('T', ' ') : '—'),
+              row('마지막 수집일', s.last_run_at ? String(s.last_run_at).slice(0, 19).replace('T', ' ') : '아직 실행하지 않았습니다'),
+              endpointIsUrl
+                ? row('RSS 주소', el('a', { href: s.endpoint, target: '_blank', rel: 'noopener' }, s.endpoint || '—'))
+                : row('마크다운 본문', el('div', { style: 'max-height:200px; overflow:auto; white-space:pre-wrap; background:var(--surface-alt, #f4f6fb); padding:8px; border-radius:8px' }, (s.endpoint || '').slice(0, 2000) + ((s.endpoint || '').length > 2000 ? '…' : ''))),
+            ])
+          );
+          const editBtn = el('button', { class: 'nm-btn nm-btn--primary', style: 'flex:1', onclick: () => { close(); openSourceForm(s); } }, '✎ 수정');
+          const delBtn = el('button', { class: 'nm-btn nm-btn--danger', style: 'flex:1', onclick: async () => { if (!confirmDialog(`"${s.name}" 피드 소스를 삭제할까요?`)) return; close(); await removeSource(s); } }, '🗑 삭제');
+          body.append(el('div', { class: 'row', style: 'gap:8px; margin-top:14px' }, [editBtn, delBtn]));
+        },
+      });
     }
 
     // 개발계획서 9.2 "항목 스크랩 클릭 → Knowledge" 연동: 원문 링크·요약을 문서로 저장하고 주제 태그를 상속한다.
@@ -365,6 +558,22 @@
             '마크다운 본문(붙여넣기 또는 .md 파일 업로드 — 예: "- [기사 제목](https://example.com/article) 설명…" 형식의 링크가 포함된 텍스트에서, 관심주제와 맞는 링크만 자동으로 브리핑에 추가합니다)',
             el('div', { class: 'stack', style: 'gap:8px' }, [mdFileInput, mdTextarea])
           );
+          // v7.24.0: 저장하기 전에 "이 본문에서 링크를 몇 개나 찾는지" 바로 확인할 수 있게 한다.
+          // 예전에는 저장 후 수집해봐야 0건인지 알 수 없어 원인을 찾기 어려웠다.
+          const mdPreview = el('div', { class: 'text-muted', style: 'font-size:12px; white-space:pre-wrap; word-break:break-all' });
+          const mdPreviewBtn = el('button', {
+            type: 'button', class: 'nm-btn',
+            onclick: () => {
+              const items = window.parseMarkdownLinks(mdTextarea.value) || [];
+              if (!items.length) {
+                mdPreview.textContent = '⚠ 이 본문에서 링크를 찾지 못했습니다. "[제목](https://주소)" 형식이거나 http(s) 주소가 있는지 확인하세요.';
+                return;
+              }
+              const head = items.slice(0, 5).map((it) => `· ${it.title} → ${it.link}`).join('\n');
+              mdPreview.textContent = `✅ 링크 ${items.length}개를 찾았습니다:\n${head}${items.length > 5 ? `\n… 외 ${items.length - 5}개` : ''}`;
+            },
+          }, '🔍 링크 미리보기');
+          mdField.append(el('div', { class: 'stack', style: 'gap:6px' }, [mdPreviewBtn, mdPreview]));
           function syncVisibility() {
             rssField.style.display = typeSelect.value === 'markdown' ? 'none' : '';
             mdField.style.display = typeSelect.value === 'markdown' ? '' : 'none';

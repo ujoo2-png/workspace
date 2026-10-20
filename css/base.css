@@ -202,6 +202,23 @@ a { color: var(--accent); }
 .nm-badge--success { color: var(--success); background: var(--success-soft); border-color: transparent; }
 .nm-badge--info { color: var(--info); background: var(--info-soft); border-color: transparent; }
 
+/* v7.24.0: 안내/경고 배너 — 증권·브리핑 화면에서 재사용한다. */
+.nm-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.nm-banner--warning { color: var(--warning); background: var(--warning-soft); border-color: transparent; }
+.nm-banner--danger { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.nm-banner--info { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.nm-banner a { color: inherit; text-decoration: underline; }
+
 .nm-progress {
   width: 100%;
   height: 10px;
