@@ -21,9 +21,13 @@ const { decideLoad, mergeSettings, shouldDiscardLocal, shouldReload, createBatch
 
 const K = { cities: 'workspace:weatherCities', theme: 'workspace:theme', tmdb: 'workspace:tmdbApiKey' };
 
-test('동기화 키 목록: 요청된 14개 + v7.19.0 Health 2개(목표값·복약 알림)를 모두 포함하고 캐시/상태/세션 키는 없다', () => {
-  assert.equal(SYNCED_KEYS.length, 24);
+test('동기화 키 목록: 요청된 14개 + v7.19.0 Health 2개 + v7.24.0 증권 3개·브리핑 자동수집 3개 + v7.25.0 공급자 3개를 모두 포함하고 캐시/상태/세션 키는 없다', () => {
+  assert.equal(SYNCED_KEYS.length, 30); // v7.25.0: 증권 공급자(provider)·커스텀 API·시황/환율 표시 3개 추가
   assert.ok(SYNCED_KEYS.includes('workspace:health:targets') && SYNCED_KEYS.includes('workspace:health:medReminder'));
+  assert.ok(SYNCED_KEYS.includes('workspace:stocks:kisAppKey') && SYNCED_KEYS.includes('workspace:stocks:kisAppSecret') && SYNCED_KEYS.includes('workspace:stocks:kisEnv'));
+  assert.ok(SYNCED_KEYS.includes('workspace:stocks:provider') && SYNCED_KEYS.includes('workspace:stocks:customProvider'));
+  assert.ok(SYNCED_KEYS.includes('workspace:market:fxEnabled'));
+  assert.ok(SYNCED_KEYS.includes('workspace:briefing:autoCollect') && SYNCED_KEYS.includes('workspace:briefing:autoCollectLastRun'));
   for (const k of ['workspace:weatherCities', 'workspace:customApis', 'workspace:publicData:dataGoKrKey', 'workspace:publicData:kopisKey',
     'workspace:publicData:opinetKey', 'workspace:publicData:enabled', 'workspace:tmdbApiKey', 'workspace:homeWidgetOrder',
     'workspace:clockTimezones', 'workspace:sidebarCollapsed', 'workspace:theme', 'workspace:schedule:hideDone',
