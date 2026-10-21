@@ -8,40 +8,68 @@
 .stock-summary__tile { display: grid; gap: 4px; }
 .stock-summary__value { font-size: 18px; font-weight: 700; }
 
-.stock-account__title { font-size: 15px; font-weight: 700; }
-
 .stock-pnl--gain { color: var(--critical, #d33); }
 .stock-pnl--loss { color: var(--info, #2563eb); }
 .stock-pnl--flat { color: var(--text-muted); }
 
-/* 보유 종목 표 — 좁은 화면에서도 무너지지 않게 grid로 그린다. */
-.stock-holdings { display: grid; gap: 4px; }
-.stock-holdings__head,
-.stock-holdings__row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1.6fr) 70px 100px 100px 110px 130px 96px;
-  gap: 8px;
+/* 보유 종목/증권사별 현황 — v7.26.0: 표(grid) 대신 list 형태로 개선. */
+.broker-card { display: grid; gap: 0; padding: 0; overflow: hidden; }
+.broker-head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-}
-.stock-holdings__head {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-muted);
-  padding: 0 6px 4px;
-}
-.stock-holdings__row {
-  padding: 8px 6px;
-  border-radius: var(--radius-sm, 8px);
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
   background: var(--surface);
   box-shadow: var(--shadow-pressed);
 }
-.stock-holdings__name { font-weight: 700; }
-@media (max-width: 720px) {
-  .stock-holdings__head { display: none; }
-  .stock-holdings__row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
-  .stock-holdings__row > div:first-child { grid-column: 1 / -1; }
+.broker-head__left { display: grid; gap: 4px; min-width: 0; }
+.broker-head__name { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.broker-head__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #6d5dfc); flex: 0 0 auto; }
+.broker-head__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.broker-head__right { display: flex; align-items: center; gap: 16px; }
+.broker-head__stat { display: grid; gap: 2px; text-align: right; }
+.broker-head__value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.broker-head__actions { display: flex; gap: 4px; }
+
+.holding-list { display: grid; }
+.holding-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  transition: background 0.15s ease;
 }
+.holding-item:hover { background: var(--surface); }
+.holding-item__main { display: grid; gap: 3px; min-width: 0; }
+.holding-item__name { font-weight: 700; display: flex; align-items: center; flex-wrap: wrap; }
+.holding-item__sub { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.holding-item__sym { color: var(--text); opacity: 0.75; }
+.holding-item__right { display: grid; gap: 2px; text-align: right; min-width: 108px; }
+.holding-item__value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.holding-item__pnl { font-size: 12px; font-variant-numeric: tabular-nums; }
+.holding-item__actions { display: flex; gap: 4px; }
+.holding-list__empty { padding: 14px; font-size: 13px; color: var(--text-muted); }
+
+@media (max-width: 720px) {
+  .holding-item { grid-template-columns: 1fr auto; grid-template-areas: 'main right' 'actions actions'; row-gap: 8px; }
+  .holding-item__main { grid-area: main; }
+  .holding-item__right { grid-area: right; }
+  .holding-item__actions { grid-area: actions; justify-content: flex-end; }
+  .broker-head__right { width: 100%; justify-content: space-between; }
+  .broker-head__stat { text-align: left; }
+}
+
+/* v7.26.0: 총자산(강조) 카드 — 총 평가금액을 크게, 기존 지표는 타일로 유지. */
+.asset-card { margin-bottom: 14px; }
+.asset-card__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.asset-card__main { display: grid; gap: 4px; }
+.asset-card__label { font-size: 12px; color: var(--text-muted); letter-spacing: 0.02em; }
+.asset-card__value { font-size: 30px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.asset-card__sub { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
 
 /* v7.25.0: 오늘의 시황 · 환율 카드 */
 .market-card { margin-bottom: 14px; }
