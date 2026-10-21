@@ -5,6 +5,10 @@
 //   카테고리 슬라이서 칩(같은 페이지 차트 교차 필터: 필터 컨텍스트 pub/sub), 표 보기, PNG/CSV 내보내기, 전체 화면(포커스), 시각 전환(막대/꺾은선/영역/도넛).
 // 데이터비즈 원칙: 시리즈 색은 고정 순서(검증된 팔레트 8색, 색은 "개체"를 따르고 순위를 따르지 않음), 단일 y축(이중 축 없음), 얇은 마크,
 //   범례 항상 표시(2개 이상), 표 보기 제공, 다크 모드는 별도 선택값(css/modules/chartkit.css).
+// v7.25.0 "다이나믹 + 완만한 곡선":
+//   · 꺾은선/영역은 기본으로 단조 3차 스플라인(monotone cubic) — 데이터를 넘지 않으면서 완만하게 곡선화(lineCurve:'smooth'|'straight'로 선택).
+//   · 모든 차트가 렌더 시 등장 애니메이션: 선은 좌→우 드로잉, 영역은 아래에서 페이드-업, 막대는 0에서 자라남, 점은 팝, 도넛은 쓸어 담듯 스윕.
+//   · prefers-reduced-motion 사용자에게는 애니메이션을 생략한다(접근성).
 // 일반 <script>로 로드. js/utils/chartLogic.js, js/utils/dom.js가 먼저, js/modules/analytics.js(niceTicks)도 먼저 로드되어야 한다.
 (function () {
   const { el } = window;
@@ -22,6 +26,58 @@
     return n;
   };
   const fmtNum = (v, unit) => (v === null || v === undefined ? '-' : `${Number.isInteger(v) ? v : Number(v.toFixed(2))}${unit ? (unit.length <= 2 ? unit : ` ${unit}`) : ''}`);
+
+  // 동작 최소화 설정을 존중한다(접근성).
+  const reduceMotion = () => {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch { return false; }
+  };
+
+  // ---------- 완만한 곡선(단조 3차 스플라인) ----------
+  // Fritsch–Carlson 방식: 각 구간의 접선을 이웃 기울기로 제한해 "데이터를 넘지 않는" 완만한 곡선을 만든다.
+  // (베지에 제어점을 데이터 범위 안으로 묶으므로 값이 실제보다 과장되지 않는다 — 데이터 정직성 유지.)
+  function smoothPath(pts) {
+    const n = pts.length;
+    if (n < 3) return pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    // 1) 구간 기울기
+    const dx = []; const dy = []; const ms = [];
+    for (let i = 0; i < n - 1; i++) {
+      const dxi = pts[i + 1][0] - pts[i][0];
+      const dyi = pts[i + 1][1] - pts[i][1];
+      dx.push(dxi); dy.push(dyi);
+      ms.push(dxi === 0 ? 0 : dyi / dxi);
+    }
+    // 2) 각 점의 접선(양끝은 한쪽 기울기, 가운데는 조화 평균; 부호가 바뀌면 0으로 눌러 오버슈트 방지)
+    const t = new Array(n);
+    t[0] = ms[0]; t[n - 1] = ms[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      if (ms[i - 1] * ms[i] <= 0) t[i] = 0;
+      else {
+        const w1 = 2 * dx[i] + dx[i - 1]; const w2 = dx[i] + 2 * dx[i - 1];
+        t[i] = (w1 + w2) / (w1 / ms[i - 1] + w2 / ms[i]);
+      }
+    }
+    // 3) 베지에 제어점(구간 길이의 1/3)
+    let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < n - 1; i++) {
+      const h = dx[i] / 3;
+      const c1x = pts[i][0] + h; const c1y = pts[i][1] + t[i] * h;
+      const c2x = pts[i + 1][0] - h; const c2y = pts[i + 1][1] - t[i + 1] * h;
+      d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${pts[i + 1][0].toFixed(1)},${pts[i + 1][1].toFixed(1)}`;
+    }
+    return d;
+  }
+  // 선 경로 문자열을 만든다(부드러운 곡선 ↔ 곧은 선).
+  function linePath(pts, smooth) {
+    if (smooth && pts.length > 2) return smoothPath(pts);
+    return pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  }
+
+  // ---------- 등장 애니메이션 ----------
+  function animAttrs(kind, i = 0) {
+    const cls = `ck-anim ck-anim--${kind}`;
+    if (reduceMotion()) return { class: cls };
+    return { class: cls, style: `animation-delay:${Math.min(i * 45, 600)}ms` };
+  }
 
   function getPrefs() { try { return JSON.parse(window.settingsSync.get(PREF_KEY) || '{}') || {}; } catch { return {}; } }
   function setPref(id, type) { const p = getPrefs(); p[id] = type; try { window.settingsSync.set(PREF_KEY, JSON.stringify(p)); } catch { /* 무시 */ } }
@@ -208,6 +264,7 @@
   // ---------- 본체: 인터랙티브 차트 카드 ----------
   /**
    * spec: { id, title, unit, mode:'time'|'category', types:['bar','line','area','donut'], defaultType,
+   *   lineCurve?: 'smooth'|'straight' (기본 'smooth' — 완만한 곡선),
    *   time: { series:[{key, rows:[{date,v}], agg?}], agg:'avg'|'sum'|… }   (mode 'time')
    *   category: { items:[{label,value}] }                                 (mode 'category')
    *   ctx: 필터 컨텍스트(생략 가능), onRemove?: fn, today?: 'YYYY-MM-DD' }
@@ -216,6 +273,7 @@
   function create(spec) {
     const ctx = spec.ctx || L().createFilterContext();
     const types = spec.types && spec.types.length ? spec.types : ['bar'];
+    const smooth = spec.lineCurve !== 'straight';
     const prefs = getPrefs();
     const state = { type: types.includes(prefs[spec.id]) ? prefs[spec.id] : (types.includes(spec.defaultType) ? spec.defaultType : types[0]), hidden: new Set(), drill: [], table: false };
     const isTime = spec.mode === 'time';
@@ -282,6 +340,10 @@
           const sel = ctx.state.categories.has(lb);
           const dim = ctx.state.categories.size && !sel;
           const path = sv('path', { d, class: `ck-slice ${dim ? 'is-dim' : ''}`, 'data-label': lb, fill: colorOf(i), 'fill-rule': 'evenodd' });
+          const total2 = v.labels.length;
+          for (const [k, val2] of Object.entries(animAttrs('donut', i))) if (k !== 'class') path.setAttribute(k, val2);
+          path.classList.add('ck-anim', 'ck-anim--donut');
+          if (!reduceMotion()) path.style.animationDelay = `${Math.min((i / Math.max(1, total2)) * 420, 600)}ms`;
           path.append(sv('title', {}, `${lb}: ${fmtNum(val, unit)} (${Math.round((val / total) * 100)}%)`));
           path.addEventListener('click', () => ctx.toggleCategory(lb));
           svg.append(path); a0 = a1;
@@ -314,18 +376,45 @@
           if (val === null || val === undefined) return;
           const x = xs[i] - (bw * k) / 2 + si * bw; const y0 = yOf(Math.max(lo, 0)); const y1 = yOf(val);
           const top = Math.min(y0, y1); const h = Math.max(1, Math.abs(y0 - y1));
-          svg.append(sv('rect', { x: x + 1, y: top, width: Math.max(2, bw - 2), height: h, rx: 3, fill: s.color, class: 'ck-bar' }));
+          const rect = sv('rect', { x: x + 1, y: top, width: Math.max(2, bw - 2), height: h, rx: 3, fill: s.color, class: 'ck-bar' });
+          if (!reduceMotion()) {
+            // 0에서 자라나는 등장 애니메이션: transform-origin을 축(바닥)에 두고 scaleY.
+            rect.classList.add('ck-anim', 'ck-anim--bar');
+            rect.style.transformOrigin = `${(x + 1 + Math.max(2, bw - 2) / 2).toFixed(1)}px ${y0.toFixed(1)}px`;
+            rect.style.animationDelay = `${Math.min(i * 28 + si * 40, 600)}ms`;
+          }
+          svg.append(rect);
         }));
       } else {
-        shown.forEach((s) => {
+        shown.forEach((s, si) => {
           const segs = []; let cur = null;
           s.values.forEach((val, i) => { if (val === null || val === undefined) { cur = null; } else { if (!cur) { cur = []; segs.push(cur); } cur.push([xs[i], yOf(val)]); } });
           for (const sg of segs) {
-            const d = sg.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-            if (state.type === 'area' && sg.length > 1) svg.append(sv('path', { d: `${d} L${sg[sg.length - 1][0].toFixed(1)},${yOf(Math.max(lo, 0))} L${sg[0][0].toFixed(1)},${yOf(Math.max(lo, 0))} Z`, fill: s.color, class: 'ck-area' }));
-            if (sg.length > 1) svg.append(sv('path', { d, fill: 'none', stroke: s.color, class: 'ck-line' }));
+            // v7.25.0: 완만한 곡선(단조 3차 스플라인). lineCurve:'straight'면 곧은 선.
+            const d = linePath(sg, smooth);
+            if (state.type === 'area' && sg.length > 1) {
+              const da = `${d} L${sg[sg.length - 1][0].toFixed(1)},${yOf(Math.max(lo, 0))} L${sg[0][0].toFixed(1)},${yOf(Math.max(lo, 0))} Z`;
+              const area = sv('path', { d: da, fill: s.color, class: 'ck-area' });
+              if (!reduceMotion()) { area.classList.add('ck-anim', 'ck-anim--area'); area.style.animationDelay = `${Math.min(si * 60, 300)}ms`; }
+              svg.append(area);
+            }
+            if (sg.length > 1) {
+              const line = sv('path', { d, fill: 'none', stroke: s.color, class: 'ck-line' });
+              if (!reduceMotion()) {
+                // 선 드로잉 애니메이션: pathLength=1로 정규화 후 dashoffset을 1→0으로.
+                line.classList.add('ck-anim', 'ck-anim--line');
+                line.setAttribute('pathLength', '1');
+                line.style.animationDelay = `${Math.min(si * 60, 300)}ms`;
+              }
+              svg.append(line);
+            }
           }
-          s.values.forEach((val, i) => { if (val !== null && val !== undefined && (n <= 40 || i === n - 1)) svg.append(sv('circle', { cx: xs[i], cy: yOf(val), r: 3.5, fill: s.color, class: 'ck-dot' })); });
+          s.values.forEach((val, i) => {
+            if (val === null || val === undefined || !(n <= 40 || i === n - 1)) return;
+            const dot = sv('circle', { cx: xs[i], cy: yOf(val), r: 3.5, fill: s.color, class: 'ck-dot' });
+            if (!reduceMotion()) { dot.classList.add('ck-anim', 'ck-anim--dot'); dot.style.transformOrigin = `${xs[i].toFixed(1)}px ${yOf(val).toFixed(1)}px`; dot.style.animationDelay = `${Math.min(i * 28 + 200, 700)}ms`; }
+            svg.append(dot);
+          });
         });
       }
       return { svg, xs, plot };
@@ -406,5 +495,5 @@
     return { min, max };
   }
 
-  window.ChartKit = { create, decorate, slicerBar, attachHover, exportPng, downloadCsv, tableNode, dateSpanOf, TYPE_LABEL };
+  window.ChartKit = { create, decorate, slicerBar, attachHover, exportPng, downloadCsv, tableNode, dateSpanOf, TYPE_LABEL, smoothPath, linePath, reduceMotion };
 })();

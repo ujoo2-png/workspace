@@ -599,8 +599,8 @@
           }
         };
         renderStockCard({}); // 먼저 수동 요약을 그리고
-        if (window.hasKisKey && window.hasKisKey()) {
-          window.fetchKisPrices(homeHoldings, {}).then(({ prices: p }) => renderStockCard(p)).catch(() => {});
+        if (window.hasQuoteProvider && window.hasQuoteProvider()) {
+          window.fetchPrices(homeHoldings, {}).then(({ prices: p }) => renderStockCard(p)).catch(() => {});
         }
         widgets.stocks = stockCard;
       }

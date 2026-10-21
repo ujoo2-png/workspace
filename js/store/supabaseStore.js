@@ -94,16 +94,22 @@
       const { data, error } = await client.auth.signUp({ email, password, options: { data: { name } } });
       if (error) throw error;
       const userId = data.user?.id;
+      let becameAdmin = false;
       if (userId) {
-        await client.from('profiles').upsert({
-          id: userId,
-          email,
-          name: name || email,
-          role: isFirstUser ? 'admin' : 'user',
-          status: isFirstUser ? 'approved' : 'pending',
-        });
+        // v7.25.0: 0029의 profiles_one_admin 유니크 인덱스가 "admin 1명"을 강제한다.
+        // 동시 가입 등으로 admin upsert가 충돌하면 user/pending으로 재시도한다(경쟁 상태 안전).
+        const base = { id: userId, email, name: name || email };
+        const tryUpsert = (row) => client.from('profiles').upsert(row).then((r) => r.error);
+        let upsertErr = await tryUpsert({ ...base, role: isFirstUser ? 'admin' : 'user', status: isFirstUser ? 'approved' : 'pending' });
+        if (upsertErr && isFirstUser) {
+          // 누군가 먼저 admin이 되었다는 뜻 → 일반 사용자(승인 대기)로 등록.
+          upsertErr = await tryUpsert({ ...base, role: 'user', status: 'pending' });
+        } else {
+          becameAdmin = isFirstUser && !upsertErr;
+        }
+        if (upsertErr) throw new Error(upsertErr.message || '프로필 저장에 실패했습니다.');
       }
-      if (isFirstUser) return { pending: false, message: '첫 번째 계정은 관리자로 즉시 활성화됩니다.' };
+      if (becameAdmin) return { pending: false, message: '첫 번째 계정은 관리자로 즉시 활성화됩니다.' };
       return { pending: true, message: '회원가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다. (이메일 확인이 필요할 수 있습니다)' };
     }
 
@@ -114,10 +120,15 @@
       const { data, error } = await client.auth.signInWithPassword({ email, password });
       if (error) throw new Error('아이디(이메일) 또는 비밀번호가 올바르지 않습니다.');
       const profile = await this._fetchProfile(data.user.id);
-      if (!profile || profile.status === 'pending') {
+      // v7.25.0 보안 강화: "승인된 계정만 로그인"을 화이트리스트로 보장한다.
+      // 이전에는 pending/rejected만 차단해 status가 없거나(null/오타 등) 예외값이면 통과했다.
+      // 이제는 status !== 'approved'면 프로필 유무와 무관하게 세션을 즉시 파기하고 거부한다.
+      if (!profile || profile.status !== 'approved') {
+        try { await client.auth.signOut(); } catch { /* 세션 파기 실패는 무시(서버 세션은 만료됨) */ }
+        if (!profile) throw new Error('계정 정보를 찾을 수 없습니다. 관리자에게 문의해 주세요.');
+        if (profile.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
         return { pending: true, message: '아직 관리자 승인 대기 중입니다. 승인 후 다시 로그인해 주세요.' };
       }
-      if (profile.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
       return { user: { ...data.user, name: profile.name, role: profile.role }, mode: 'supabase' };
     }
 

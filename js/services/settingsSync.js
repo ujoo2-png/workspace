@@ -25,6 +25,11 @@
     'workspace:stocks:kisAppKey',
     'workspace:stocks:kisAppSecret',
     'workspace:stocks:kisEnv',
+    // v7.25.0 — 증권 시세 공급자 선택 + 커스텀(사용자 정의) API 설정.
+    'workspace:stocks:provider',
+    'workspace:stocks:customProvider',
+    // v7.25.0 — 오늘의 시황·환율 표시 on/off.
+    'workspace:market:fxEnabled',
     // v7.24.0 — 브리핑 자동 수집 설정(하루 1회 실행 기록 포함).
     'workspace:briefing:autoCollect',
     'workspace:briefing:autoCollectLastRun',

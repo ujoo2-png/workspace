@@ -250,7 +250,7 @@
       const y = H - padB - (max > 0 ? ((H - padB - padT) * v) / max : 0);
       return [x, y];
     });
-    const pathD = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const pathD = (window.ChartKit && window.ChartKit.smoothPath ? window.ChartKit.smoothPath(points) : points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' '));
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', pathD);
     path.setAttribute('fill', 'none');
@@ -258,6 +258,11 @@
     path.setAttribute('stroke-width', '2');
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
+    // v7.25.0: 완만한 곡선 + 좌→우 드로잉 애니메이션.
+    if (window.ChartKit && !window.ChartKit.reduceMotion()) {
+      path.setAttribute('class', 'ck-anim ck-anim--line');
+      path.setAttribute('pathLength', '1');
+    }
     svg.append(path);
 
     points.forEach(([x, y], i) => {
@@ -366,7 +371,12 @@
       } else cur = null;
     });
     const fmt = (v) => v.toFixed(1);
-    const segOut = segments.map((sg) => ({ idx: sg.idx, d: sg.pts.map((p, k) => `${k === 0 ? 'M' : 'L'}${fmt(p.x)},${fmt(p.y)}`).join(' ') }));
+    const segOut = segments.map((sg) => {
+      const pts = sg.pts.map((p) => [p.x, p.y]);
+      // v7.25.0: 완만한 곡선(단조 3차 스플라인). ChartKit이 없으면 곧은 선으로 폴백.
+      const d = (window.ChartKit && window.ChartKit.smoothPath) ? window.ChartKit.smoothPath(pts) : pts.map(([x, y], k) => `${k === 0 ? 'M' : 'L'}${fmt(x)},${fmt(y)}`).join(' ');
+      return { idx: sg.idx, d };
+    });
     return {
       W, H, plot, yMin, yMax,
       ticks: niceTicks(yMin, yMax, 4).map((v) => ({ v, y: y(v) })),
@@ -456,7 +466,10 @@
     // 5) 꺾은선(2px) — 빈 구간에서 끊김
     for (const sg of geo.segments) {
       if (sg.idx.length < 2) continue;
-      svg.append(svgNode('path', { d: sg.d, fill: 'none', stroke: hue, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+      const lineAttrs = { d: sg.d, fill: 'none', stroke: hue, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+      // v7.25.0: 좌→우 드로잉 애니메이션.
+      if (window.ChartKit && !window.ChartKit.reduceMotion()) { lineAttrs.class = 'ck-anim ck-anim--line'; lineAttrs.pathLength = '1'; }
+      svg.append(svgNode('path', lineAttrs));
     }
     // 6) 점 마커(표면색 링으로 겹침 분리) + 넓은 투명 히트 영역과 툴팁(<title>)
     const lastIdx = (() => { for (let i = geo.points.length - 1; i >= 0; i--) if (geo.points[i]) return i; return -1; })();

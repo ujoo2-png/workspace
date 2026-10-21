@@ -22,11 +22,11 @@
       if (loadingPrices) return;
       const holdings = appState.stockHoldings.filter((h) => !h.deleted_at);
       if (!holdings.length) { prices = {}; pricesLoaded = true; return; }
-      if (!window.hasKisKey()) { pricesLoaded = true; return; }
+      if (!window.hasQuoteProvider()) { prices = {}; pricesLoaded = true; return; }
       loadingPrices = true;
       draw();
       try {
-        const { prices: p, errors } = await window.fetchKisPrices(holdings, { force });
+        const { prices: p, errors } = await window.fetchPrices(holdings, { force });
         prices = p;
         if (errors.length && errors[0].symbol !== '*') {
           toast(`일부 종목 시세를 받지 못했습니다: ${errors.slice(0, 2).map((e) => e.symbol).join(', ')}${errors.length > 2 ? ' 외' : ''}`, 'error');
@@ -53,9 +53,10 @@
         ])
       );
 
-      if (!window.hasKisKey()) {
+      if (!window.hasQuoteProvider()) {
+        const label = window.stockProviderLabel ? window.stockProviderLabel() : '증권 API';
         container.append(el('div', { class: 'nm-banner nm-banner--warning' }, [
-          el('span', {}, '실시간 시세를 쓰려면 한국투자증권(KIS) API 키를 등록하세요. 지금은 보유 정보만 관리됩니다. '),
+          el('span', {}, `실시간 시세를 쓰려면 ${label} 설정을 등록하세요(설정 → 증권 시세 API). 지금은 보유 정보만 관리됩니다. `),
           el('a', { href: '#/settings' }, '설정으로 이동'),
         ]));
       }
@@ -63,6 +64,8 @@
       const holdings = appState.stockHoldings.filter((h) => !h.deleted_at);
       const accounts = appState.brokerageAccounts.filter((a) => !a.deleted_at);
       if (!holdings.length && !accounts.length) {
+        // v7.25.0: 종목이 없어도 오늘의 시황·환율은 볼 수 있게 먼저 보여준다.
+        container.append(buildMarketCard());
         container.append(el('div', { class: 'empty-state' }, '등록된 계좌나 보유 종목이 없습니다. "+ 계좌 등록"으로 시작하세요.'));
         return;
       }
@@ -109,6 +112,9 @@
         container.append(banner);
       }
 
+      // v7.25.0: 오늘의 시황 + 환율 카드.
+      container.append(buildMarketCard());
+
       // 계좌별 그룹
       const stack = el('div', { class: 'stack' });
       const noAccount = holdings.filter((h) => !h.account_id);
@@ -118,6 +124,72 @@
         stack.append(accountSection(acc, list));
       }
       container.append(stack);
+    }
+
+    // v7.25.0: 오늘의 시황(지수) + 환율 카드. 값이 없으면 지어내지 않고 안내만 한다.
+    let marketData = null;      // { indices:[], fx:{majors,rest} }
+    let marketLoading = false;
+    let marketTried = false;
+    function buildMarketCard() {
+      const card = el('div', { class: 'nm-card market-card' });
+      const body = el('div', { class: 'market-card__body' });
+      const head = el('div', { class: 'row row--between', style: 'align-items:center' }, [
+        el('strong', { style: 'font-size:14px' }, '📈 오늘의 시황 · 환율'),
+        el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', disabled: marketLoading || undefined, onclick: () => loadMarket(true) }, marketLoading ? '⏳' : '🔄'),
+      ]);
+      card.append(head, body);
+      function paint() {
+        body.replaceChildren();
+        if (!marketData) {
+          body.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '시황·환율을 불러오는 중입니다…'));
+          return;
+        }
+        // 지수
+        const idx = marketData.indices || [];
+        body.append(el('div', { class: 'market-sec' }, [
+          el('div', { class: 'market-sec__label' }, '지수'),
+          idx.length
+            ? el('div', { class: 'market-chips' }, idx.map((r) => el('div', { class: 'market-chip' }, [
+                el('span', { class: 'market-chip__name' }, r.label),
+                el('strong', { class: 'market-chip__val' }, num(r.value)),
+                el('span', { class: `market-chip__chg ${pnlClass(r.changeRate)}` }, r.changeRate === null || r.changeRate === undefined ? '' : `${r.changeRate > 0 ? '▲' : r.changeRate < 0 ? '▼' : ''}${Math.abs(r.changeRate).toFixed(2)}%`),
+              ])))
+            : el('span', { class: 'text-muted', style: 'font-size:12px' }, marketData.indexNote || '지수 정보를 불러오지 못했습니다.'),
+        ]));
+        // 환율
+        const fx = marketData.fx;
+        body.append(el('div', { class: 'market-sec' }, [
+          el('div', { class: 'market-sec__label' }, '환율(매매기준율)'),
+          fx && fx.majors && fx.majors.length
+            ? el('div', { class: 'market-chips' }, fx.majors.map((r) => el('div', { class: 'market-chip' }, [
+                el('span', { class: 'market-chip__name' }, r.name || r.unit),
+                el('strong', { class: 'market-chip__val' }, num(r.rate)),
+              ])))
+            : el('span', { class: 'text-muted', style: 'font-size:12px' }, marketData.fxNote || '환율 정보를 불러오지 못했습니다.'),
+        ]));
+      }
+      paint();
+      if (!marketTried) { marketTried = true; loadMarket(false); }
+      return card;
+    }
+
+    async function loadMarket(force) {
+      if (marketLoading) return;
+      marketLoading = true;
+      if (force) { marketData = null; draw(); }
+      const indices = [];
+      let indexNote = '';
+      let fx = null;
+      let fxNote = '';
+      try { indices.push(...await window.fetchIndices()); }
+      catch (e) { indexNote = e.message; }
+      if (window.getFxEnabled()) {
+        try { const rows = await window.fetchExchangeRates(); fx = window.orderMajorFx(rows); }
+        catch (e) { fxNote = e.message; }
+      } else { fxNote = '환율 표시가 꺼져 있습니다(설정에서 켤 수 있습니다).'; }
+      marketData = { indices, indexNote, fx, fxNote };
+      marketLoading = false;
+      draw();
     }
 
     function accountSection(acc, holdings) {
@@ -231,7 +303,7 @@
           const nameBtn = el('button', { type: 'button', class: 'nm-btn', onclick: async () => {
             const sym = symbolInput.value.trim();
             if (!sym) { toast('종목코드를 먼저 입력하세요.', 'error'); return; }
-            if (!window.hasKisKey()) { toast('종목명 자동 조회는 KIS API 키가 필요합니다. 직접 입력해 주세요.', 'info'); return; }
+            if (!window.hasQuoteProvider()) { toast('종목명 자동 조회는 시세 API 설정이 필요합니다(설정 → 증권 시세 API). 직접 입력해 주세요.', 'info'); return; }
             nameBtn.textContent = '조회 중…';
             const name = await window.lookupStockName(sym, marketSel.value);
             nameBtn.textContent = '🔍 이름 조회';

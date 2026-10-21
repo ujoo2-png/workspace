@@ -492,7 +492,7 @@
         },
       }, '저장 및 연결 테스트');
 
-      // v7.24.0: 증권 실시간 시세(한국투자증권 KIS) 키/시크릿/환경.
+      // v7.25.0: 증권 시세 공급자 선택 + (KIS | 커스텀 API) 설정.
       const kisKeyInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appkey', placeholder: 'KIS AppKey', value: window.getKisAppKey() });
       const kisSecretInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appsecret', placeholder: 'KIS AppSecret', value: window.getKisAppSecret() });
       const kisEnvSel = el('select', { class: 'nm-select', name: 'kis_env' });
@@ -503,9 +503,99 @@
         type: 'button',
         onclick: () => {
           window.setKisCredentials({ appkey: kisKeyInput.value, appsecret: kisSecretInput.value, env: kisEnvSel.value });
+          window.setStockProvider('kis');
+          window.clearStockQuoteCache();
           toast(window.hasKisKey() ? 'KIS 키를 저장했습니다. 증권 화면에서 시세를 조회할 수 있습니다.' : 'KIS 키를 삭제했습니다.', window.hasKisKey() ? 'success' : 'info');
+          renderProviderConfig();
         },
       }, '저장');
+
+      const providerSel = el('select', { class: 'nm-select', name: 'stock_provider' });
+      for (const [v, label] of [['kis', '한국투자증권(KIS) — 공식, 앱키 필요'], ['custom', '커스텀 API — 내가 등록한 JSON API'], ['none', '사용 안 함(수동 입력)']]) {
+        providerSel.append(el('option', { value: v, selected: window.getStockProvider() === v || undefined }, label));
+      }
+      const providerConfigHost = el('div', { style: 'margin-top:8px' });
+      const saveProviderBtn = el('button', {
+        class: 'nm-btn',
+        type: 'button',
+        onclick: () => { window.setStockProvider(providerSel.value); window.clearStockQuoteCache(); toast(`증권 공급자를 "${window.stockProviderLabel()}"(으)로 설정했습니다.`, 'success'); renderProviderConfig(); },
+      }, '공급자 적용');
+
+      function renderProviderConfig() {
+        providerConfigHost.replaceChildren();
+        const p = window.getStockProvider();
+        if (p === 'none') { providerConfigHost.append(el('p', { class: 'text-muted', style: 'font-size:11px' }, '외부 시세 연동을 쓰지 않습니다. 증권 화면에서 보유 정보만 수동으로 관리합니다.')); return; }
+        if (p === 'kis') {
+          providerConfigHost.append(
+            el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+              '활용신청: ',
+              el('a', { href: 'https://apiportal.koreainvestment.com/', target: '_blank', rel: 'noopener' }, '한국투자증권 API 포털'),
+              ' 에서 앱키/앱시크릿을 발급받으세요. 시크릿은 이 브라우저에만 저장되고, 실제 조회는 Vercel 서버리스 프록시(/api/kis-proxy)를 거칩니다. 일봉 차트도 이 공급자에서 지원합니다.',
+            ]),
+            el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kisKeyInput, kisSecretInput]),
+            el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [kisEnvSel, saveKisBtn, testBtn])
+          );
+          return;
+        }
+        // custom
+        const cur = window.getCustomProvider() || { name: '', priceUrl: '', nameUrl: '', headers: {}, paths: { price: 'price', changeRate: 'changeRate', name: 'name' }, currency: 'KRW' };
+        const cName = el('input', { class: 'nm-input', placeholder: '공급자 이름(예: 미래에셋/야후/네이버 비공식)', value: cur.name });
+        const cPrice = el('input', { class: 'nm-input', placeholder: '현재가 URL — 종목코드는 {symbol} 로 (예: https://api.example.com/q?code={symbol})', value: cur.priceUrl });
+        const cNameUrl = el('input', { class: 'nm-input', placeholder: '종목명 URL(선택) — {symbol} 사용', value: cur.nameUrl });
+        const cHeaders = el('textarea', { class: 'nm-input', rows: '3', placeholder: '요청 헤더(JSON, 선택) — 예: {"Authorization":"Bearer ..."}' }, cur.headers && Object.keys(cur.headers).length ? JSON.stringify(cur.headers) : '');
+        const pPrice = el('input', { class: 'nm-input', placeholder: '가격 JSON 경로', value: (cur.paths || {}).price || 'price' });
+        const pChange = el('input', { class: 'nm-input', placeholder: '등락률 JSON 경로(선택)', value: (cur.paths || {}).changeRate || 'changeRate' });
+        const pName = el('input', { class: 'nm-input', placeholder: '종목명 JSON 경로(선택)', value: (cur.paths || {}).name || 'name' });
+        // v7.25.0: 지수(시황)용 URL/경로(선택). 없으면 시황 카드는 "설정 필요" 안내만 한다.
+        const cIndicesUrl = el('input', { class: 'nm-input', placeholder: '지수(시황) URL(선택) — 코스피/코스닥 등 배열을 주는 JSON', value: cur.indicesUrl || '' });
+        const pIndices = el('input', { class: 'nm-input', placeholder: '지수 배열 JSON 경로(선택) — 예: data.indices', value: (cur.paths || {}).indices || '' });
+        const cCur = el('select', { class: 'nm-select' }, [
+          el('option', { value: 'KRW', selected: (cur.currency || 'KRW') === 'KRW' || undefined }, 'KRW(원)'),
+          el('option', { value: 'USD', selected: cur.currency === 'USD' || undefined }, 'USD(달러)'),
+        ]);
+        const saveCustomBtn = el('button', {
+          class: 'nm-btn nm-btn--primary', type: 'button',
+          onclick: () => {
+            // providerSel이 'custom'으로 적용되어 있어야 실제 조회에 쓰인다.
+            window.setStockProvider('custom');
+            providerSel.value = 'custom';
+            let headers = {};
+            if (cHeaders.value.trim()) { try { headers = JSON.parse(cHeaders.value); } catch { toast('요청 헤더가 올바른 JSON이 아닙니다.', 'error'); return; } }
+            window.setCustomProvider({ name: cName.value, priceUrl: cPrice.value, nameUrl: cNameUrl.value, indicesUrl: cIndicesUrl.value, headers, paths: { price: pPrice.value, changeRate: pChange.value, name: pName.value, indices: pIndices.value }, currency: cCur.value });
+            window.clearStockQuoteCache();
+            toast('커스텀 증권 API를 저장했습니다. "연결 테스트"로 확인해 보세요.', 'success');
+          },
+        }, '커스텀 API 저장');
+        const cTestBtn = el('button', { class: 'nm-btn', type: 'button', onclick: () => runTest(cTestBtn) }, '연결 테스트');
+        providerConfigHost.append(
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, '이 증권사의 JSON 응답에서 어떤 필드가 가격/등락률/종목명인지 "경로"로 지정합니다. 예: 응답이 {"data":{"close":71000}} 이면 경로는 data.close. 조회는 /api/stock-proxy를 통해 CORS를 우회합니다(https만, 사설 IP 차단).'),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; flex-wrap:wrap' }, [cName, cCur]),
+          el('div', { style: 'margin:6px 0' }, [cPrice]),
+          el('div', { style: 'margin:6px 0' }, [cNameUrl]),
+          el('div', { style: 'margin:6px 0' }, [cHeaders]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [pPrice, pChange, pName]),
+          el('div', { style: 'margin:6px 0' }, [cIndicesUrl]),
+          el('div', { style: 'margin:6px 0' }, [pIndices]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [saveCustomBtn, cTestBtn])
+        );
+      }
+
+      async function runTest(btn) {
+        btn.disabled = true; const old = btn.textContent; btn.textContent = '확인 중…';
+        // 테스트 전에 현재 폼 값을 먼저 반영한다(사용자가 저장을 누르지 않아도 테스트되게).
+        const cur = window.getCustomProvider();
+        if (!cur) { toast('먼저 커스텀 API를 저장해 주세요.', 'error'); btn.disabled = false; btn.textContent = old; return; }
+        try { toast(await window.testStockConnection(), 'success'); }
+        catch (e) { toast('연결 실패: ' + (e.message || e), 'error'); }
+        btn.disabled = false; btn.textContent = old;
+      }
+      const testBtn = el('button', { class: 'nm-btn', type: 'button', onclick: () => runTest(testBtn) }, '연결 테스트');
+      // v7.25.0: 오늘의 시황·환율 표시 토글.
+      const fxToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center; margin-top:8px' }, [
+        el('input', { type: 'checkbox', name: 'fx_enabled', checked: window.getFxEnabled() || undefined, onchange: (e) => { window.setFxEnabled(e.target.checked); toast(e.target.checked ? '증권 화면에 환율을 표시합니다.' : '환율 표시를 껐습니다.', 'info'); } }),
+        el('span', { class: 'text-muted' }, '증권 화면에 오늘의 시황(지수)과 환율을 표시'),
+      ]);
+      renderProviderConfig();
 
       return el('div', { class: 'nm-card' }, [
         el('h3', {}, '공공데이터포털 연동'),
@@ -542,14 +632,18 @@
           kopisToggle,
         ]),
         el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
-          el('strong', { style: 'font-size:13px' }, '한국투자증권(KIS) — 증권 실시간 시세 v7.24.0'),
-          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
-            '활용신청: ',
-            el('a', { href: 'https://apiportal.koreainvestment.com/', target: '_blank', rel: 'noopener' }, '한국투자증권 API 포털'),
-            ' 에서 앱키(AppKey)와 앱시크릿(AppSecret)을 발급받으세요. 시크릿은 이 브라우저에만 저장되고, 실제 조회는 Vercel 서버리스 프록시(/api/kis-proxy)를 거쳐 안전하게 호출됩니다.',
-          ]),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kisKeyInput, kisSecretInput]),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [kisEnvSel, saveKisBtn]),
+          el('strong', { style: 'font-size:13px' }, '증권 시세 API v7.25.0 — 공급자 선택'),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, '현재가·차트를 어느 증권 API에서 받을지 고릅니다. 한국투자증권(KIS) 외에, 다른 증권사/직접 만든 JSON API도 등록해 쓸 수 있습니다.'),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [providerSel, saveProviderBtn]),
+        ]),
+        el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
+          el('strong', { style: 'font-size:13px' }, '공급자 설정'),
+          providerConfigHost,
+        ]),
+        el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
+          el('strong', { style: 'font-size:13px' }, '오늘의 시황 · 환율'),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, '증권 화면 상단에 지수·환율 요약을 표시합니다. 환율은 공공데이터포털의 "한국수출입은행 환율정보" 오픈API 활용신청이 필요합니다(위 공공데이터포털 키와 동일).'),
+          fxToggle,
         ]),
       ]);
     }
