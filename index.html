@@ -70,6 +70,8 @@
   <script src="js/services/clockService.js"></script>
   <script src="js/services/publicDataService.js"></script>
   <script src="js/services/kmaService.js"></script>
+  <!-- v7.25.0: 오늘의 시황·환율 서비스(공공데이터포털 환율 키 + 증권 공급자 지수) — stockService/publicDataService 뒤에 로드 -->
+  <script src="js/services/marketService.js"></script>
   <script src="js/services/customApiService.js"></script>
   <script src="js/services/medReminder.js"></script>
   <!-- v7.22.0: 양식 문서 도구(ExcelJS/JSZip/formTemplate/formEngine/careerDocs)는 탭을 열 때 이 로더가 지연 로딩한다 -->
@@ -81,6 +83,8 @@
   <script src="js/components/homeFx.js"></script>
   <script src="js/components/customApiWidget.js"></script>
   <script src="js/components/briefingModal.js"></script>
+  <!-- v7.25.0: 로그인 화면의 개인정보 처리방침(클릭 시 모달) — auth.js보다 먼저 로드 -->
+  <script src="js/components/privacyPolicy.js"></script>
   <script src="js/modules/auth.js"></script>
   <script src="js/modules/home.js"></script>
   <script src="js/modules/schedule.js"></script>
