@@ -3,7 +3,7 @@
 -- 직접 RSS를 수집하므로 feed_fetch_logs / item_feedback / track_token 클릭추적처럼
 -- Edge Function 전용 기능은 이번 라운드에는 포함하지 않았다(고도화 시 원래 설계대로 추가).
 
-create table briefing_topics (
+create table if not exists briefing_topics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -15,7 +15,7 @@ create table briefing_topics (
   updated_at timestamptz not null default now()
 );
 
-create table feed_sources (
+create table if not exists feed_sources (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -25,7 +25,7 @@ create table feed_sources (
   created_at timestamptz not null default now()
 );
 
-create table briefing_items (
+create table if not exists briefing_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   topic_id uuid references briefing_topics(id) on delete set null,
@@ -41,19 +41,22 @@ create table briefing_items (
   unique (user_id, item_hash)
 );
 
-create index idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
-create index idx_briefing_topics_user on briefing_topics(user_id, active);
-create index idx_feed_sources_user on feed_sources(user_id, enabled);
+create index if not exists idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
+create index if not exists idx_briefing_topics_user on briefing_topics(user_id, active);
+create index if not exists idx_feed_sources_user on feed_sources(user_id, enabled);
 
 alter table briefing_topics enable row level security;
+drop policy if exists briefing_topics_own_rows on briefing_topics;
 create policy briefing_topics_own_rows on briefing_topics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table feed_sources enable row level security;
+drop policy if exists feed_sources_own_rows on feed_sources;
 create policy feed_sources_own_rows on feed_sources for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table briefing_items enable row level security;
+drop policy if exists briefing_items_own_rows on briefing_items;
 create policy briefing_items_own_rows on briefing_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -69,6 +72,7 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_briefing_topic_limit on briefing_topics;
 create trigger trg_briefing_topic_limit
   before insert on briefing_topics
   for each row execute function enforce_briefing_topic_limit();

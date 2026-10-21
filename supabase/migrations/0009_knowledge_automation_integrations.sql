@@ -29,6 +29,7 @@ create index if not exists idx_knowledge_docs_user on knowledge_docs(user_id) wh
 create index if not exists idx_knowledge_docs_tags on knowledge_docs using gin(tags);
 
 alter table knowledge_docs enable row level security;
+drop policy if exists knowledge_docs_own_rows on knowledge_docs;
 create policy knowledge_docs_own_rows on knowledge_docs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -47,6 +48,7 @@ create table if not exists automation_rules (
 );
 
 alter table automation_rules enable row level security;
+drop policy if exists automation_rules_own_rows on automation_rules;
 create policy automation_rules_own_rows on automation_rules for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -63,6 +65,7 @@ create index if not exists idx_automation_logs_user on automation_logs(user_id, 
 
 alter table automation_logs enable row level security;
 do $$ begin
+drop policy if exists automation_logs_own_rows on automation_logs;
   create policy automation_logs_own_rows on automation_logs for all to authenticated
     using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 exception when duplicate_object then null;
@@ -82,6 +85,7 @@ create table if not exists integrations (
 );
 
 alter table integrations enable row level security;
+drop policy if exists integrations_own_rows on integrations;
 create policy integrations_own_rows on integrations for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 

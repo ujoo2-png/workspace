@@ -107,31 +107,38 @@ create index if not exists idx_automation_logs_user on automation_logs (user_id,
 -- 없는 테이블(project_progress)은 부모(projects) 소유권을 EXISTS로 검증한다.
 
 alter table profiles enable row level security;
+drop policy if exists profiles_own_rows on profiles;
 create policy profiles_own_rows on profiles for all to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
 alter table projects enable row level security;
+drop policy if exists projects_own_rows on projects;
 create policy projects_own_rows on projects for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table schedules enable row level security;
+drop policy if exists schedules_own_rows on schedules;
 create policy schedules_own_rows on schedules for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table programs enable row level security;
+drop policy if exists programs_own_rows on programs;
 create policy programs_own_rows on programs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table notifications enable row level security;
+drop policy if exists notifications_own_rows on notifications;
 create policy notifications_own_rows on notifications for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table automation_logs enable row level security;
+drop policy if exists automation_logs_own_rows on automation_logs;
 create policy automation_logs_own_rows on automation_logs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- project_progress: 직접 user_id가 없으므로 부모 프로젝트 소유권을 확인한다.
 alter table project_progress enable row level security;
+drop policy if exists project_progress_own_rows on project_progress;
 create policy project_progress_own_rows on project_progress for all to authenticated
   using (exists (select 1 from projects p where p.id = project_id and p.user_id = (select auth.uid())))
   with check (exists (select 1 from projects p where p.id = project_id and p.user_id = (select auth.uid())));
@@ -147,10 +154,13 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_projects_updated_at on projects;
 create trigger trg_projects_updated_at before update on projects
   for each row execute function set_updated_at();
+drop trigger if exists trg_schedules_updated_at on schedules;
 create trigger trg_schedules_updated_at before update on schedules
   for each row execute function set_updated_at();
+drop trigger if exists trg_programs_updated_at on programs;
 create trigger trg_programs_updated_at before update on programs
   for each row execute function set_updated_at();
 
@@ -222,6 +232,7 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
+drop trigger if exists trg_predict_completion on project_progress;
 create trigger trg_predict_completion
   after insert on project_progress
   for each row execute function calc_predicted_completion();
@@ -293,14 +304,34 @@ $$;
 -- ===== supabase/migrations/0006_cron.sql =====
 -- pg_cron 스케줄링. Supabase 대시보드 Database > Extensions에서 pg_cron을 먼저 켠 뒤 실행하세요.
 -- (일반 마이그레이션 권한으로는 확장 설치가 막혀 있을 수 있습니다.)
-create extension if not exists pg_cron;
+--
+-- v7.25.0: 이 파일 전체를 do 블록으로 감싸 재실행·권한 부족 상황에서도
+--   "전체 붙여넣기 실행"이 중단되지 않게 한다(이미 스케줄이 있으면 지우고 다시 등록 → 중복 없음).
+--   pg_cron이 없거나 권한이 없으면 알림(notice)만 남기고 조용히 건너뛴다.
+do $$
+begin
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron 확장을 설치하지 못했습니다(권한 또는 미지원). 대시보드 Database > Extensions에서 직접 켜 주세요: %', sqlerrm;
+    return;
+  end;
 
--- 매일 한국시간 08:00 = UTC 23:00 실행. run_daily_automation()은 0005_functions.sql 참고.
-select cron.schedule(
-  'daily-automation',
-  '0 23 * * *',
-  $$select run_daily_automation(7)$$
-);
+  -- 매일 한국시간 08:00 = UTC 23:00 실행. run_daily_automation()은 0005_functions.sql 참고.
+  -- 재실행 시 중복 등록을 막기 위해 기존 스케줄을 먼저 지운다(없으면 무시).
+  begin
+    perform cron.unschedule('daily-automation');
+  exception when others then
+    null; -- 아직 없는 스케줄을 지우려 한 경우는 무시
+  end;
+  perform cron.schedule(
+    'daily-automation',
+    '0 23 * * *',
+    $cron$select run_daily_automation(7)$cron$
+  );
+exception when others then
+  raise notice 'pg_cron 스케줄 등록을 건너뛰었습니다(확장 미설치). 나머지 마이그레이션은 정상입니다: %', sqlerrm;
+end $$;
 
 -- 스케줄 확인: select * from cron.job;
 -- 스케줄 제거: select cron.unschedule('daily-automation');
@@ -318,7 +349,7 @@ select cron.schedule(
 -- ---------------------------------------------------------------
 -- 챌린저
 -- ---------------------------------------------------------------
-create table challenges (
+create table if not exists challenges (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -332,7 +363,7 @@ create table challenges (
   updated_at timestamptz not null default now()
 );
 
-create table challenge_checkins (
+create table if not exists challenge_checkins (
   id uuid primary key default gen_random_uuid(),
   challenge_id uuid references challenges(id) on delete cascade not null,
   checkin_date date not null,
@@ -342,14 +373,16 @@ create table challenge_checkins (
   unique (challenge_id, checkin_date)
 );
 
-create index idx_challenges_user on challenges(user_id, status);
-create index idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
+create index if not exists idx_challenges_user on challenges(user_id, status);
+create index if not exists idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
 
 alter table challenges enable row level security;
+drop policy if exists challenges_own_rows on challenges;
 create policy challenges_own_rows on challenges for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table challenge_checkins enable row level security;
+drop policy if exists challenge_checkins_own_rows on challenge_checkins;
 create policy challenge_checkins_own_rows on challenge_checkins for all to authenticated
   using (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())))
   with check (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())));
@@ -357,7 +390,7 @@ create policy challenge_checkins_own_rows on challenge_checkins for all to authe
 -- ---------------------------------------------------------------
 -- 차량관리
 -- ---------------------------------------------------------------
-create table vehicles (
+create table if not exists vehicles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -368,7 +401,7 @@ create table vehicles (
   deleted_at timestamptz
 );
 
-create table vehicle_maintenance (
+create table if not exists vehicle_maintenance (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   item text not null,
@@ -381,7 +414,7 @@ create table vehicle_maintenance (
   created_at timestamptz not null default now()
 );
 
-create table vehicle_fuel_logs (
+create table if not exists vehicle_fuel_logs (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   logged_at date not null,
@@ -391,21 +424,24 @@ create table vehicle_fuel_logs (
   created_at timestamptz not null default now()
 );
 
-create index idx_vehicles_user on vehicles(user_id) where deleted_at is null;
-create index idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
-create index idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
-create index idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
+create index if not exists idx_vehicles_user on vehicles(user_id) where deleted_at is null;
+create index if not exists idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
+create index if not exists idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
+create index if not exists idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
 
 alter table vehicles enable row level security;
+drop policy if exists vehicles_own_rows on vehicles;
 create policy vehicles_own_rows on vehicles for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table vehicle_maintenance enable row level security;
+drop policy if exists vehicle_maintenance_own_rows on vehicle_maintenance;
 create policy vehicle_maintenance_own_rows on vehicle_maintenance for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
 
 alter table vehicle_fuel_logs enable row level security;
+drop policy if exists vehicle_fuel_logs_own_rows on vehicle_fuel_logs;
 create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
@@ -413,7 +449,7 @@ create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authent
 -- ---------------------------------------------------------------
 -- Health (일반 웰니스 지표만 — 진단명·복약 등 민감 의료정보는 다루지 않는다)
 -- ---------------------------------------------------------------
-create table health_metrics (
+create table if not exists health_metrics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   metric_type text not null check (metric_type in ('weight', 'exercise', 'sleep', 'steps', 'condition')),
@@ -423,7 +459,7 @@ create table health_metrics (
   recorded_at timestamptz not null default now()
 );
 
-create table health_appointments (
+create table if not exists health_appointments (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -435,21 +471,23 @@ create table health_appointments (
   created_at timestamptz not null default now()
 );
 
-create index idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
-create index idx_health_appointments_user on health_appointments(user_id, appointment_date);
+create index if not exists idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
+create index if not exists idx_health_appointments_user on health_appointments(user_id, appointment_date);
 
 alter table health_metrics enable row level security;
+drop policy if exists health_metrics_own_rows on health_metrics;
 create policy health_metrics_own_rows on health_metrics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table health_appointments enable row level security;
+drop policy if exists health_appointments_own_rows on health_appointments;
 create policy health_appointments_own_rows on health_appointments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- ---------------------------------------------------------------
 -- 문화생활(PlayList) — 영화/음악/연극/음악회 등
 -- ---------------------------------------------------------------
-create table playlist_items (
+create table if not exists playlist_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   content_type text not null check (content_type in ('movie','music','theater','concert','musical','exhibition','book','etc')),
@@ -466,10 +504,11 @@ create table playlist_items (
   deleted_at timestamptz
 );
 
-create index idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
-create index idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
+create index if not exists idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
+create index if not exists idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
 
 alter table playlist_items enable row level security;
+drop policy if exists playlist_own_rows on playlist_items;
 create policy playlist_own_rows on playlist_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -484,7 +523,7 @@ create policy playlist_own_rows on playlist_items for all to authenticated
 -- 직접 RSS를 수집하므로 feed_fetch_logs / item_feedback / track_token 클릭추적처럼
 -- Edge Function 전용 기능은 이번 라운드에는 포함하지 않았다(고도화 시 원래 설계대로 추가).
 
-create table briefing_topics (
+create table if not exists briefing_topics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -496,7 +535,7 @@ create table briefing_topics (
   updated_at timestamptz not null default now()
 );
 
-create table feed_sources (
+create table if not exists feed_sources (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -506,7 +545,7 @@ create table feed_sources (
   created_at timestamptz not null default now()
 );
 
-create table briefing_items (
+create table if not exists briefing_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   topic_id uuid references briefing_topics(id) on delete set null,
@@ -522,19 +561,22 @@ create table briefing_items (
   unique (user_id, item_hash)
 );
 
-create index idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
-create index idx_briefing_topics_user on briefing_topics(user_id, active);
-create index idx_feed_sources_user on feed_sources(user_id, enabled);
+create index if not exists idx_briefing_items_inbox on briefing_items (user_id, is_read, created_at desc);
+create index if not exists idx_briefing_topics_user on briefing_topics(user_id, active);
+create index if not exists idx_feed_sources_user on feed_sources(user_id, enabled);
 
 alter table briefing_topics enable row level security;
+drop policy if exists briefing_topics_own_rows on briefing_topics;
 create policy briefing_topics_own_rows on briefing_topics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table feed_sources enable row level security;
+drop policy if exists feed_sources_own_rows on feed_sources;
 create policy feed_sources_own_rows on feed_sources for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table briefing_items enable row level security;
+drop policy if exists briefing_items_own_rows on briefing_items;
 create policy briefing_items_own_rows on briefing_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -550,6 +592,7 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_briefing_topic_limit on briefing_topics;
 create trigger trg_briefing_topic_limit
   before insert on briefing_topics
   for each row execute function enforce_briefing_topic_limit();
@@ -591,6 +634,7 @@ create index if not exists idx_knowledge_docs_user on knowledge_docs(user_id) wh
 create index if not exists idx_knowledge_docs_tags on knowledge_docs using gin(tags);
 
 alter table knowledge_docs enable row level security;
+drop policy if exists knowledge_docs_own_rows on knowledge_docs;
 create policy knowledge_docs_own_rows on knowledge_docs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -609,6 +653,7 @@ create table if not exists automation_rules (
 );
 
 alter table automation_rules enable row level security;
+drop policy if exists automation_rules_own_rows on automation_rules;
 create policy automation_rules_own_rows on automation_rules for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -625,6 +670,7 @@ create index if not exists idx_automation_logs_user on automation_logs(user_id, 
 
 alter table automation_logs enable row level security;
 do $$ begin
+drop policy if exists automation_logs_own_rows on automation_logs;
   create policy automation_logs_own_rows on automation_logs for all to authenticated
     using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 exception when duplicate_object then null;
@@ -644,6 +690,7 @@ create table if not exists integrations (
 );
 
 alter table integrations enable row level security;
+drop policy if exists integrations_own_rows on integrations;
 create policy integrations_own_rows on integrations for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -679,6 +726,7 @@ create index if not exists idx_devlogs_project on devlogs(project_id) where proj
 create index if not exists idx_devlogs_tags on devlogs using gin(tags);
 
 alter table devlogs enable row level security;
+drop policy if exists devlogs_own_rows on devlogs;
 create policy devlogs_own_rows on devlogs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -728,10 +776,13 @@ as $$
 $$;
 
 drop policy if exists profiles_own_rows on profiles;
+drop policy if exists profiles_select on profiles;
 create policy profiles_select on profiles for select to authenticated
   using (id = (select auth.uid()) or is_admin());
+drop policy if exists profiles_insert on profiles;
 create policy profiles_insert on profiles for insert to authenticated
   with check (id = (select auth.uid()));
+drop policy if exists profiles_update on profiles;
 create policy profiles_update on profiles for update to authenticated
   using (id = (select auth.uid()) or is_admin())
   with check (id = (select auth.uid()) or is_admin());
@@ -778,6 +829,7 @@ create table if not exists project_stages (
 create index if not exists idx_project_stages_project on project_stages(project_id, seq);
 
 alter table project_stages enable row level security;
+drop policy if exists project_stages_own_rows on project_stages;
 create policy project_stages_own_rows on project_stages for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -800,6 +852,7 @@ create table if not exists attachments (
 );
 create index if not exists idx_attachments_owner on attachments(owner_table, owner_id);
 alter table attachments enable row level security;
+drop policy if exists attachments_own_rows on attachments;
 create policy attachments_own_rows on attachments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -812,6 +865,7 @@ create table if not exists vehicle_odometer_logs (
 );
 create index if not exists idx_vehicle_odometer_logs_vehicle on vehicle_odometer_logs(vehicle_id, logged_at);
 alter table vehicle_odometer_logs enable row level security;
+drop policy if exists vehicle_odometer_logs_own_rows on vehicle_odometer_logs;
 create policy vehicle_odometer_logs_own_rows on vehicle_odometer_logs for all to authenticated
   using (vehicle_id in (select id from vehicles where user_id = (select auth.uid())))
   with check (vehicle_id in (select id from vehicles where user_id = (select auth.uid())));
@@ -901,6 +955,7 @@ create table if not exists bookmarks (
 create index if not exists idx_bookmarks_user on bookmarks(user_id, sort_order);
 
 alter table bookmarks enable row level security;
+drop policy if exists bookmarks_own_rows on bookmarks;
 create policy bookmarks_own_rows on bookmarks for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
