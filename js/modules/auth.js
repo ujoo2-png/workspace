@@ -133,7 +133,7 @@
     function buildSignupPanel() {
       const idInput = el('input', { type: isLocal ? 'text' : 'email', name: 'username', placeholder: isLocal ? '사용할 아이디' : 'you@example.com', required: true, autofocus: true, autocomplete: 'username' });
       const nameInput = el('input', { type: 'text', name: 'name', placeholder: '이름(선택)', autocomplete: 'name' });
-      const pwInput = el('input', { type: 'password', name: 'password', placeholder: '비밀번호(4자 이상)', required: true, minlength: '4', autocomplete: 'new-password' });
+      const pwInput = el('input', { type: 'password', name: 'password', placeholder: '비밀번호(6자 이상)', required: true, minlength: '6', autocomplete: 'new-password' });
       const pwConfirmInput = el('input', { type: 'password', name: 'passwordConfirm', placeholder: '비밀번호 확인', required: true, autocomplete: 'new-password' });
       const errMsg = el('div', { class: 'lo-errmsg', id: 'errSignup' });
       const submitBtn = el('button', { class: 'lo-btn', type: 'submit', disabled: true }, '회원가입');
@@ -189,10 +189,19 @@
     }
 
     // 로그인 폼 아래에 붙는 "개인정보 처리방침" 안내 + 링크.
-    // 일반적인 웹앱처럼 링크를 누르면 모달이 열린다.
+    // 로그인 "전"에도 누르면 바로 모달이 열려야 한다(모달 z-index 는 css/base.css 참고).
     function buildPolicyConsent() {
-      const link = el('button', { type: 'button', class: 'lo-policy-link', onclick: () => window.openPrivacyPolicy() }, '개인정보 처리방침');
-      return el('div', { class: 'lo-policy' }, [link, el('span', {}, '을 확인해 주세요.')]);
+      const link = el('button', {
+        type: 'button',
+        class: 'lo-policy-link',
+        // type=button 이라 폼 제출을 유발하지 않는다. 클릭 즉시 모달을 연다.
+        onclick: (e) => { e.preventDefault(); window.openPrivacyPolicy(); },
+      }, '개인정보 처리방침');
+      return el('div', { class: 'lo-policy' }, [
+        el('span', {}, '로그인하면 '),
+        link,
+        el('span', {}, '에 동의한 것으로 봅니다.'),
+      ]);
     }
 
     let pendingNoticeMessage = '';
