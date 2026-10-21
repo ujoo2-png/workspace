@@ -12,7 +12,7 @@
 (function () {
   const CACHE_PREFIX = 'workspace:market:cache:';
   const FX_INDEX_STORAGE = 'workspace:market:fxEnabled';
-  const FX_SOURCE_STORAGE = 'workspace:market:fxSource';   // 'public' | 'custom' | 'kis'
+  const FX_SOURCE_STORAGE = 'workspace:market:fxSource';        // 'public' | 'custom'
   const FX_CUSTOM_ID_STORAGE = 'workspace:market:fxCustomApiId'; // 커스텀 API 관리에 등록한 API id
 
   const get = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
@@ -25,10 +25,9 @@
   // ── 환율 데이터 출처 ───────────────────────────────────────────────────────
   //  · 'public' : 공공데이터포털 "한국수출입은행 환율정보" API(기본, 공공데이터 키 재사용)
   //  · 'custom' : 설정 → 커스텀 API 관리에 등록한 API를 환율 소스로 지정
-  //  · 'kis'    : (해당 없음 — 향후 확장 여지)
-  // ※ 사용자가 "커스텀 API 관리"에 한국수출입은행 API를 등록해도 기본값은 공공데이터포털이라
-  //   증권 화면과 연결되지 않던 문제를 해결하기 위해, 출처를 명시적으로 고를 수 있게 한다.
-  const getFxSource = () => { const v = get(FX_SOURCE_STORAGE); return ['public', 'custom'].includes(v) ? v : 'public'; };
+  // ※ "커스텀 API 관리"에 한국수출입은행 API를 등록해도 기본값은 공공데이터포털이라 증권 화면과
+  //   연결되지 않던 문제를 해결하기 위해, 출처를 명시적으로 고를 수 있게 한다(둘 다 지원).
+  const getFxSource = () => { const v = get(FX_SOURCE_STORAGE); return v === 'custom' ? 'custom' : 'public'; };
   const setFxSource = (s) => set(FX_SOURCE_STORAGE, s === 'custom' ? 'custom' : 'public');
   const getFxCustomApiId = () => get(FX_CUSTOM_ID_STORAGE);
   const setFxCustomApiId = (id) => set(FX_CUSTOM_ID_STORAGE, id || '');
@@ -89,7 +88,6 @@
     const result = await window.fetchCustomApi(api, {});
     const data = result && result.kind === 'json' ? result.data : null;
     if (!data) throw new Error('커스텀 API 응답이 JSON이 아닙니다.');
-    // 응답에서 환율 배열을 최대한 관대하게 찾는다.
     const arr = extractFxArray(data);
     if (!arr.length) throw new Error('커스텀 API 응답에서 환율 배열을 찾지 못했습니다(unit/cur_unit + rate/deal_bas_r 필드 필요).');
     const rows = arr.map((it) => {
@@ -116,7 +114,7 @@
     return [];
   }
 
-  /** 환율(현재 소스 기준). */
+  /** 환율(현재 설정된 소스 기준). */
   async function fetchExchangeRates({ date } = {}) {
     const source = getFxSource();
     const cacheKey = `fx:${source}:${source === 'custom' ? getFxCustomApiId() : 'public'}:${date || 'today'}`;

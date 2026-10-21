@@ -72,8 +72,7 @@
         return;
       }
 
-      // ② 총자산 카드 — 총 평가금액(총자산)을 크게 강조하고, 기존 지표(매입금액·평가손익·수익률·
-      //    실현손익·배당)를 함께 보여준다.
+      // ② 총자산 카드 — 총 평가금액(총자산)을 크게 강조하고, 기존 지표(매입금액·평가손익·수익률·실현손익·배당)는 유지한다.
       const total = evaluatePortfolio(holdings, prices);
       const allTrades = appState.stockTrades || [];
       const realized = evaluateRealized(allTrades);
@@ -97,7 +96,7 @@
         container.append(banner);
       }
 
-      // ③ 증권사별 보유 현황(계좌별 그룹).
+      // ③ 증권사별 보유 현황.
       container.append(el('div', { class: 'section-title', style: 'margin:2px 0 4px' }, '증권사별 보유 현황'));
       const stack = el('div', { class: 'stack' });
       const noAccount = holdings.filter((h) => !h.account_id);
@@ -172,8 +171,14 @@
         ]));
         // 환율
         const fx = marketData.fx;
+        const fxSrc = window.getFxSource && window.getFxSource() === 'custom'
+          ? (() => { const id = window.getFxCustomApiId && window.getFxCustomApiId(); const a = (window.listCustomApis ? window.listCustomApis() : []).find((x) => x.id === id); return a ? a.name : '커스텀 API'; })()
+          : '공공데이터포털';
         body.append(el('div', { class: 'market-sec' }, [
-          el('div', { class: 'market-sec__label' }, '환율(매매기준율)'),
+          el('div', { class: 'market-sec__label' }, [
+            '환율(매매기준율)',
+            el('span', { class: 'text-muted', style: 'font-weight:400; margin-left:6px; text-transform:none' }, `출처: ${escapeHtml(fxSrc)}`),
+          ]),
           fx && fx.majors && fx.majors.length
             ? el('div', { class: 'market-chips' }, fx.majors.map((r) => el('div', { class: 'market-chip' }, [
                 el('span', { class: 'market-chip__name' }, r.name || r.unit),
@@ -206,31 +211,53 @@
       draw();
     }
 
+    // v7.26.0: 계좌별 보유 현황을 "list 형태"로 깔끔하게 개선.
+    //   · 헤더: 증권사/별칭 + 요약(평가금액·손익) + 수정/삭제
+    //   · 각 종목: 한 줄 리스트(이름·코드·수량·평단·현재가·평가금액·손익) — 좁은 화면에서는 자동 줄바꿈
     function accountSection(acc, holdings) {
       const summary = evaluatePortfolio(holdings, prices);
+      const hasEval = summary.totalValue !== null;
       const header = acc
-        ? el('div', { class: 'row row--between wrap', style: 'align-items:center' }, [
-            el('div', {}, [
-              el('div', { class: 'stock-account__title' }, `${escapeHtml(acc.broker)}${acc.nickname ? ' · ' + escapeHtml(acc.nickname) : ''}`),
-              el('div', { class: 'text-muted', style: 'font-size:12px' }, `${acc.account_no ? escapeHtml(maskAccount(acc.account_no)) + ' · ' : ''}${acc.currency === 'USD' ? '해외(USD)' : '국내(KRW)'}`),
+        ? el('div', { class: 'broker-head' }, [
+            el('div', { class: 'broker-head__left' }, [
+              el('div', { class: 'broker-head__name' }, [
+                el('span', { class: 'broker-head__dot' }),
+                `${escapeHtml(acc.broker)}${acc.nickname ? ' · ' + escapeHtml(acc.nickname) : ''}`,
+              ]),
+              el('div', { class: 'broker-head__meta' }, [
+                acc.account_no ? escapeHtml(maskAccount(acc.account_no)) : null,
+                el('span', { class: `nm-badge ${acc.currency === 'USD' ? 'nm-badge--info' : ''}` }, acc.currency === 'USD' ? '해외 USD' : '국내 KRW'),
+                el('span', { class: 'text-muted' }, `${holdings.length}종목`),
+              ]),
             ]),
-            el('div', { class: 'row', style: 'gap:6px; align-items:center' }, [
-              el('span', { class: `stock-pnl stock-pnl--${pnlClass(summary.totalPnl)}` }, summary.totalValue === null ? '—' : `${formatPnl(summary.totalPnl)} (${formatPnlRate(summary.totalPnlRate)})`),
-              el('button', { class: 'nm-btn nm-btn--icon', title: '계좌 수정', onclick: () => openAccountForm(acc) }, '✎'),
-              el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '계좌 삭제', onclick: () => removeAccount(acc) }, '🗑'),
+            el('div', { class: 'broker-head__right' }, [
+              hasEval
+                ? el('div', { class: 'broker-head__stat' }, [
+                    el('div', { class: 'text-muted', style: 'font-size:11px' }, '평가금액'),
+                    el('div', { class: 'broker-head__value' }, formatMoney(summary.totalValue)),
+                  ])
+                : null,
+              summary.count
+                ? el('div', { class: 'broker-head__stat' }, [
+                    el('div', { class: 'text-muted', style: 'font-size:11px' }, '평가손익'),
+                    el('div', { class: `broker-head__value stock-pnl--${pnlClass(summary.totalPnl)}` }, hasEval ? `${formatPnl(summary.totalPnl)} (${formatPnlRate(summary.totalPnlRate)})` : '—'),
+                  ])
+                : null,
+              el('div', { class: 'broker-head__actions' }, [
+                el('button', { class: 'nm-btn nm-btn--icon', title: '계좌 수정', onclick: () => openAccountForm(acc) }, '✎'),
+                el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '계좌 삭제', onclick: () => removeAccount(acc) }, '🗑'),
+              ]),
             ]),
           ])
-        : el('div', { class: 'stock-account__title' }, '계좌 미지정');
+        : el('div', { class: 'broker-head' }, [
+            el('div', { class: 'broker-head__left' }, [el('div', { class: 'broker-head__name' }, '계좌 미지정')]),
+          ]);
 
       const body = holdings.length
-        ? el('div', { class: 'stock-holdings' }, [holdingHeader(), ...holdings.map(holdingRow)])
-        : el('div', { class: 'text-muted', style: 'font-size:13px; padding:6px 2px' }, '보유 종목이 없습니다.');
+        ? el('div', { class: 'holding-list' }, holdings.map(holdingRow))
+        : el('div', { class: 'holding-list__empty' }, '보유 종목이 없습니다.');
 
-      return el('div', { class: 'nm-card' }, [header, el('div', { style: 'margin-top:10px' }, body)]);
-    }
-
-    function holdingHeader() {
-      return el('div', { class: 'stock-holdings__head' }, ['종목', '수량', '평단', '현재가', '평가금액', '손익', ''].map((t) => el('div', {}, t)));
+      return el('div', { class: 'nm-card broker-card' }, [header, body]);
     }
 
     function holdingRow(h) {
@@ -239,20 +266,26 @@
       const cur = prices[key];
       // v7.24.0(아이디어 3): 이 종목이 목표가/손절가에 도달했으면 이름 옆에 배지로 표시한다.
       const alert = priceAlerts([h], Object.prototype.hasOwnProperty.call(prices, key) ? prices : {})[0];
-      return el('div', { class: 'stock-holdings__row' }, [
-        el('div', {}, [
-          el('div', { class: 'stock-holdings__name' }, [
+      const pnlText = ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`;
+      return el('div', { class: 'holding-item' }, [
+        el('div', { class: 'holding-item__main' }, [
+          el('div', { class: 'holding-item__name' }, [
             `${escapeHtml(h.name || h.symbol)}`,
             alert ? el('span', { class: `nm-badge ${alert.kind === 'target' ? 'nm-badge--success' : 'nm-badge--critical'}`, style: 'margin-left:6px' }, alert.kind === 'target' ? '🎯 목표가' : '🛑 손절가') : null,
           ]),
-          el('div', { class: 'text-muted', style: 'font-size:11px' }, `${MARKET_LABEL[h.market] || h.market} ${escapeHtml(h.symbol)}${h.target_price ? ` · 목표 ${formatMoney(h.target_price, h.currency)}` : ''}${h.stop_price ? ` · 손절 ${formatMoney(h.stop_price, h.currency)}` : ''}`),
+          el('div', { class: 'holding-item__sub' }, [
+            el('span', { class: 'holding-item__sym' }, `${MARKET_LABEL[h.market] || h.market} ${escapeHtml(h.symbol)}`),
+            el('span', {}, `${num(h.quantity)}주 · 평단 ${formatMoney(h.avg_price, h.currency)}`),
+            el('span', {}, `현재가 ${cur === undefined ? '—' : formatMoney(cur, h.currency)}`),
+            h.target_price ? el('span', { class: 'text-muted' }, `목표 ${formatMoney(h.target_price, h.currency)}`) : null,
+            h.stop_price ? el('span', { class: 'text-muted' }, `손절 ${formatMoney(h.stop_price, h.currency)}`) : null,
+          ]),
         ]),
-        el('div', {}, num(h.quantity)),
-        el('div', {}, formatMoney(h.avg_price, h.currency)),
-        el('div', {}, cur === undefined ? '—' : formatMoney(cur, h.currency)),
-        el('div', {}, ev.marketValue === null ? '—' : formatMoney(ev.marketValue, h.currency)),
-        el('div', { class: `stock-pnl stock-pnl--${pnlClass(ev.pnl)}` }, ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`),
-        el('div', { class: 'row', style: 'gap:4px' }, [
+        el('div', { class: 'holding-item__right' }, [
+          el('div', { class: 'holding-item__value' }, ev.marketValue === null ? '—' : formatMoney(ev.marketValue, h.currency)),
+          el('div', { class: `holding-item__pnl stock-pnl stock-pnl--${pnlClass(ev.pnl)}` }, pnlText),
+        ]),
+        el('div', { class: 'holding-item__actions' }, [
           el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openHoldingForm(h) }, '✎'),
           el('button', { class: 'nm-btn nm-btn--icon', title: '매매 기록', onclick: () => openTradeList(h) }, '📄'),
           el('button', { class: 'nm-btn nm-btn--icon', title: '배당 기록', onclick: () => openDividendList(h) }, '💰'),

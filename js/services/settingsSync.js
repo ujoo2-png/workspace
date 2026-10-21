@@ -30,6 +30,10 @@
     'workspace:stocks:customProvider',
     // v7.25.0 — 오늘의 시황·환율 표시 on/off.
     'workspace:market:fxEnabled',
+    // v7.26.0 — 환율 데이터 출처(공공데이터포털 / 커스텀 API)와 선택한 커스텀 API id.
+    //   ※ 연결 상태(workspace:customApiStatus:*)는 기기별 네트워크 상태라 동기화하지 않는다.
+    'workspace:market:fxSource',
+    'workspace:market:fxCustomApiId',
     // v7.24.0 — 브리핑 자동 수집 설정(하루 1회 실행 기록 포함).
     'workspace:briefing:autoCollect',
     'workspace:briefing:autoCollectLastRun',
