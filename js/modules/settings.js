@@ -632,7 +632,7 @@
           kopisToggle,
         ]),
         el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
-          el('strong', { style: 'font-size:13px' }, '증권 시세 API v7.25.0 — 공급자 선택'),
+          el('strong', { style: 'font-size:13px' }, '증권 시세 API — 공급자 선택'),
           el('p', { class: 'text-muted', style: 'font-size:11px' }, '현재가·차트를 어느 증권 API에서 받을지 고릅니다. 한국투자증권(KIS) 외에, 다른 증권사/직접 만든 JSON API도 등록해 쓸 수 있습니다.'),
           el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [providerSel, saveProviderBtn]),
         ]),

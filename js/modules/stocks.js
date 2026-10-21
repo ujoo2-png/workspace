@@ -63,38 +63,23 @@
 
       const holdings = appState.stockHoldings.filter((h) => !h.deleted_at);
       const accounts = appState.brokerageAccounts.filter((a) => !a.deleted_at);
+
+      // v7.26.0 카드 순서: ① 오늘의 시황·환율 → ② 총자산 카드 → ③ 증권사별 보유 현황
+      container.append(buildMarketCard());
+
       if (!holdings.length && !accounts.length) {
-        // v7.25.0: 종목이 없어도 오늘의 시황·환율은 볼 수 있게 먼저 보여준다.
-        container.append(buildMarketCard());
         container.append(el('div', { class: 'empty-state' }, '등록된 계좌나 보유 종목이 없습니다. "+ 계좌 등록"으로 시작하세요.'));
         return;
       }
 
-      // 전체 포트폴리오 요약
+      // ② 총자산 카드 — 총 평가금액(총자산)을 크게 강조하고, 기존 지표(매입금액·평가손익·수익률·
+      //    실현손익·배당)를 함께 보여준다.
       const total = evaluatePortfolio(holdings, prices);
-      // v7.24.0(아이디어 4): 실현손익·수수료·배당 누적도 함께 보여준다.
       const allTrades = appState.stockTrades || [];
       const realized = evaluateRealized(allTrades);
       const divSum = sumDividends(appState.stockDividends || []);
       const divTotal = divSum.byCurrency.KRW || 0;
-      container.append(
-        el('div', { class: 'nm-card stock-summary' }, [
-          summaryTile('총 매입금액', formatMoney(total.totalCost), ''),
-          summaryTile('총 평가금액', total.totalValue === null ? '—' : formatMoney(total.totalValue), ''),
-          summaryTile('평가손익', total.totalValue === null ? '—' : formatPnl(total.totalPnl), pnlClass(total.totalPnl)),
-          summaryTile('수익률', formatPnlRate(total.totalPnlRate), pnlClass(total.totalPnl)),
-        ])
-      );
-      if (allTrades.length || divSum.count) {
-        container.append(
-          el('div', { class: 'nm-card stock-summary' }, [
-            summaryTile('실현손익', allTrades.length ? formatPnl(realized.realizedPnl) : '—', allTrades.length ? pnlClass(realized.realizedPnl) : ''),
-            summaryTile('누적 수수료', formatMoney(realized.totalFee), ''),
-            summaryTile('배당 합계', divSum.count ? formatMoney(divTotal) : '—', divSum.count ? 'gain' : ''),
-            summaryTile('총 수익(실현+배당)', formatPnl(realized.realizedPnl + divTotal), pnlClass(realized.realizedPnl + divTotal)),
-          ])
-        );
-      }
+      container.append(buildAssetCard(total, { allTrades, realized, divSum, divTotal }));
       if (total.evaluatedCount < total.count) {
         container.append(el('div', { class: 'text-muted', style: 'font-size:12px; margin:-4px 0 10px' }, `※ ${total.count - total.evaluatedCount}개 종목은 시세가 없어 평가에서 제외했습니다.`));
       }
@@ -112,10 +97,8 @@
         container.append(banner);
       }
 
-      // v7.25.0: 오늘의 시황 + 환율 카드.
-      container.append(buildMarketCard());
-
-      // 계좌별 그룹
+      // ③ 증권사별 보유 현황(계좌별 그룹).
+      container.append(el('div', { class: 'section-title', style: 'margin:2px 0 4px' }, '증권사별 보유 현황'));
       const stack = el('div', { class: 'stack' });
       const noAccount = holdings.filter((h) => !h.account_id);
       if (noAccount.length) stack.append(accountSection(null, noAccount));
@@ -123,7 +106,38 @@
         const list = appState.stockHoldings.filter((h) => !h.deleted_at && h.account_id === acc.id);
         stack.append(accountSection(acc, list));
       }
+      if (!stack.childElementCount) {
+        stack.append(el('div', { class: 'nm-card text-muted', style: 'font-size:13px' }, '표시할 보유 종목이 없습니다.'));
+      }
       container.append(stack);
+    }
+
+    // ② 총자산 카드(v7.26.0) — 총 평가금액을 크게 강조 + 기존 지표 유지.
+    function buildAssetCard(total, { allTrades, realized, divSum, divTotal }) {
+      const hasEval = total.totalValue !== null;
+      const evalCls = pnlClass(total.totalPnl);
+      const head = el('div', { class: 'asset-card__head' }, [
+        el('div', { class: 'asset-card__main' }, [
+          el('div', { class: 'asset-card__label' }, '총자산(평가금액)'),
+          el('div', { class: `asset-card__value ${hasEval ? 'stock-pnl--' + evalCls : ''}` }, hasEval ? formatMoney(total.totalValue) : '—'),
+          el('div', { class: 'asset-card__sub' }, [
+            el('span', { class: 'text-muted' }, '매입금액 '),
+            el('span', {}, formatMoney(total.totalCost)),
+            hasEval ? el('span', { class: 'text-muted', style: 'margin-left:10px' }, '평가손익 ') : null,
+            hasEval ? el('span', { class: `stock-pnl stock-pnl--${evalCls}` }, `${formatPnl(total.totalPnl)} (${formatPnlRate(total.totalPnlRate)})`) : null,
+          ]),
+        ]),
+      ]);
+      const grid = el('div', { class: 'stock-summary', style: 'margin:12px 0 0' }, [
+        summaryTile('총 매입금액', formatMoney(total.totalCost), ''),
+        summaryTile('평가손익', hasEval ? formatPnl(total.totalPnl) : '—', hasEval ? evalCls : ''),
+        summaryTile('수익률', hasEval ? formatPnlRate(total.totalPnlRate) : '—', hasEval ? evalCls : ''),
+        summaryTile('실현손익', allTrades.length ? formatPnl(realized.realizedPnl) : '—', allTrades.length ? pnlClass(realized.realizedPnl) : ''),
+        summaryTile('누적 수수료', formatMoney(realized.totalFee), ''),
+        summaryTile('배당 합계', divSum.count ? formatMoney(divTotal) : '—', divSum.count ? 'gain' : ''),
+        summaryTile('총 수익(실현+배당)', formatPnl(realized.realizedPnl + divTotal), pnlClass(realized.realizedPnl + divTotal)),
+      ]);
+      return el('div', { class: 'nm-card asset-card' }, [head, grid]);
     }
 
     // v7.25.0: 오늘의 시황(지수) + 환율 카드. 값이 없으면 지어내지 않고 안내만 한다.

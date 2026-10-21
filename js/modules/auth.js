@@ -189,7 +189,7 @@
     }
 
     // 로그인 폼 아래에 붙는 "개인정보 처리방침" 안내 + 링크.
-    // 로그인 "전"에도 누르면 바로 모달이 열려야 한다(모달 z-index 는 css/base.css 참고).
+    // 로그인 "전"에도 누르면 바로 모달이 열려야 한다(v7.26.0에서 z-index 수정, css/base.css 참고).
     function buildPolicyConsent() {
       const link = el('button', {
         type: 'button',

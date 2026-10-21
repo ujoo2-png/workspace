@@ -12,6 +12,8 @@
 (function () {
   const CACHE_PREFIX = 'workspace:market:cache:';
   const FX_INDEX_STORAGE = 'workspace:market:fxEnabled';
+  const FX_SOURCE_STORAGE = 'workspace:market:fxSource';   // 'public' | 'custom' | 'kis'
+  const FX_CUSTOM_ID_STORAGE = 'workspace:market:fxCustomApiId'; // 커스텀 API 관리에 등록한 API id
 
   const get = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
   const set = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
@@ -19,6 +21,17 @@
 
   const getFxEnabled = () => get(FX_INDEX_STORAGE) !== '0';
   const setFxEnabled = (on) => set(FX_INDEX_STORAGE, on ? '1' : '0');
+
+  // ── 환율 데이터 출처 ───────────────────────────────────────────────────────
+  //  · 'public' : 공공데이터포털 "한국수출입은행 환율정보" API(기본, 공공데이터 키 재사용)
+  //  · 'custom' : 설정 → 커스텀 API 관리에 등록한 API를 환율 소스로 지정
+  //  · 'kis'    : (해당 없음 — 향후 확장 여지)
+  // ※ 사용자가 "커스텀 API 관리"에 한국수출입은행 API를 등록해도 기본값은 공공데이터포털이라
+  //   증권 화면과 연결되지 않던 문제를 해결하기 위해, 출처를 명시적으로 고를 수 있게 한다.
+  const getFxSource = () => { const v = get(FX_SOURCE_STORAGE); return ['public', 'custom'].includes(v) ? v : 'public'; };
+  const setFxSource = (s) => set(FX_SOURCE_STORAGE, s === 'custom' ? 'custom' : 'public');
+  const getFxCustomApiId = () => get(FX_CUSTOM_ID_STORAGE);
+  const setFxCustomApiId = (id) => set(FX_CUSTOM_ID_STORAGE, id || '');
 
   function cacheGet(key, ttlMs) {
     const box = getJson(CACHE_PREFIX + key);
@@ -33,11 +46,7 @@
   // ── 환율 ──────────────────────────────────────────────────────────────────
   // 한국수출입은행 "환율정보" (공공데이터포털). searchdate=YYYYMMDD, data=AP01(매매기준율).
   // 응답: [{ result:1, cur_unit:'USD', cur_nm:'미국 달러', deal_bas_r:'1,350.5', ... }]
-  async function fetchExchangeRates({ date } = {}) {
-    const cacheKey = `fx:${date || 'today'}`;
-    const cached = cacheGet(cacheKey, 1000 * 60 * 60 * 3); // 3시간 캐시(환율은 하루 몇 번 고시)
-    if (cached) return cached;
-
+  async function fetchExchangeRatesPublic({ date } = {}) {
     const key = window.getPublicDataKey && window.getPublicDataKey();
     if (!key) throw new Error('환율을 보려면 설정에서 공공데이터포털 API 키를 등록하고, "한국수출입은행 환율정보" 오픈API를 활용신청하세요.');
 
@@ -67,6 +76,56 @@
       return { unit: it.cur_unit, name: it.cur_nm, rate: Number(raw), date: date || todayCompact() };
     }).filter((r) => Number.isFinite(r.rate));
     if (!rows.length) throw new Error('해당 날짜의 환율 고시가 없습니다(주말·공휴일일 수 있습니다). 다른 날짜로 시도하세요.');
+    return rows;
+  }
+
+  // 커스텀 API 관리에 등록한 API를 환율 소스로 쓴다.
+  // 한국수출입은행 응답(deal_bas_r/cur_unit/cur_nm) 또는 일반적인 {unit/name/rate} 구조를 모두 인식한다.
+  async function fetchExchangeRatesCustom() {
+    const id = getFxCustomApiId();
+    if (!id) throw new Error('환율 소스로 쓸 커스텀 API를 설정에서 선택하세요(설정 → 오늘의 시황 · 환율).');
+    const api = (window.listCustomApis ? window.listCustomApis() : []).find((a) => a.id === id);
+    if (!api) throw new Error('선택한 커스텀 API를 찾지 못했습니다. 설정에서 다시 선택하세요.');
+    const result = await window.fetchCustomApi(api, {});
+    const data = result && result.kind === 'json' ? result.data : null;
+    if (!data) throw new Error('커스텀 API 응답이 JSON이 아닙니다.');
+    // 응답에서 환율 배열을 최대한 관대하게 찾는다.
+    const arr = extractFxArray(data);
+    if (!arr.length) throw new Error('커스텀 API 응답에서 환율 배열을 찾지 못했습니다(unit/cur_unit + rate/deal_bas_r 필드 필요).');
+    const rows = arr.map((it) => {
+      const unit = String(it.cur_unit ?? it.unit ?? it.currency ?? it.symbol ?? '').trim();
+      const name = it.cur_nm ?? it.name ?? unit;
+      const rate = Number(String(it.deal_bas_r ?? it.rate ?? it.price ?? it.value ?? it.baseRate ?? '').replace(/,/g, ''));
+      return { unit, name, rate, date: todayCompact() };
+    }).filter((r) => r.unit && Number.isFinite(r.rate));
+    if (!rows.length) throw new Error('커스텀 API에서 읽은 환율 값이 올바르지 않습니다.');
+    return rows;
+  }
+
+  /** 응답 JSON 안에서 환율처럼 보이는 배열을 관대하게 찾는다. */
+  function extractFxArray(root) {
+    if (Array.isArray(root)) return root.filter((x) => x && typeof x === 'object');
+    if (!root || typeof root !== 'object') return [];
+    const candidates = [
+      root?.response?.body?.items?.item, root?.response?.body?.items, root?.items, root?.data, root?.result, root?.list, root?.rows,
+    ];
+    for (const c of candidates) {
+      if (Array.isArray(c) && c.length && typeof c[0] === 'object') return c;
+      if (c && typeof c === 'object' && !Array.isArray(c)) { const inner = extractFxArray(c); if (inner.length) return inner; }
+    }
+    return [];
+  }
+
+  /** 환율(현재 소스 기준). */
+  async function fetchExchangeRates({ date } = {}) {
+    const source = getFxSource();
+    const cacheKey = `fx:${source}:${source === 'custom' ? getFxCustomApiId() : 'public'}:${date || 'today'}`;
+    const cached = cacheGet(cacheKey, 1000 * 60 * 60 * 3); // 3시간 캐시(환율은 하루 몇 번 고시)
+    if (cached) return cached;
+
+    const rows = source === 'custom'
+      ? await fetchExchangeRatesCustom()
+      : await fetchExchangeRatesPublic({ date });
     cacheSet(cacheKey, rows);
     return rows;
   }
@@ -138,6 +197,7 @@
   Object.assign(window, {
     fetchExchangeRates, orderMajorFx: orderMajor,
     fetchIndices, getFxEnabled, setFxEnabled,
-    MARKET_STORAGES: { FX_INDEX_STORAGE },
+    getFxSource, setFxSource, getFxCustomApiId, setFxCustomApiId,
+    MARKET_STORAGES: { FX_INDEX_STORAGE, FX_SOURCE_STORAGE, FX_CUSTOM_ID_STORAGE },
   });
 })();
