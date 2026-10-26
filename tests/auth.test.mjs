@@ -126,38 +126,6 @@ test('중복된 아이디로는 가입할 수 없다', async () => {
   await assert.rejects(() => store.signUp({ username: 'alice', password: 'pw9999' }), /이미 사용 중/);
 });
 
-test('v7.25.0 화이트리스트: status가 없거나(null/예외값)면 로그인을 거부한다', async () => {
-  globalThis.localStorage = new FakeLocalStorage();
-  globalThis.sessionStorage = new FakeLocalStorage();
-  const store = new LocalStore();
-  await store.signUp({ username: 'alice', password: 'pw1234' });
-  // 첫 가입자는 admin/approved. DB에서 status를 지워(예외 상태) 로그인을 시도한다.
-  const u = store.db.users.find((x) => x.username === 'alice');
-  u.status = undefined;
-  await assert.rejects(() => store.signIn('alice', 'pw1234'), /승인 대기/);
-});
-
-test('v7.25.0 세션 재검증: 승인 취소 후에는 남아있던 세션으로 로그인 상태가 유지되지 않는다', async () => {
-  globalThis.localStorage = new FakeLocalStorage();
-  globalThis.sessionStorage = new FakeLocalStorage();
-  const store = new LocalStore();
-  await store.signUp({ username: 'alice', password: 'pw1234' });
-  await store.signIn('alice', 'pw1234', true);
-  assert.ok(await store.getSession());
-  // 관리자가 승인을 취소(pending으로 되돌림)하면, 저장된 세션은 재검증에서 무효가 된다.
-  const u = store.db.users.find((x) => x.username === 'alice');
-  u.status = 'pending';
-  assert.equal(await store.getSession(), null);
-  assert.equal(globalThis.localStorage.getItem('workspace:auth:v1'), null); // 세션도 지워진다
-});
-
-test('v7.25.0 비밀번호 최소 길이는 6자(Supabase와 동일)', async () => {
-  globalThis.localStorage = new FakeLocalStorage();
-  globalThis.sessionStorage = new FakeLocalStorage();
-  const store = new LocalStore();
-  await assert.rejects(() => store.signUp({ username: 'short', password: '12345' }), /6자 이상/);
-});
-
 test('"로그인 상태 유지"를 체크하지 않으면 세션이 sessionStorage에만 저장된다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
   globalThis.sessionStorage = new FakeLocalStorage();

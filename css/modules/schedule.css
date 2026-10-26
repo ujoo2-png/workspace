@@ -129,3 +129,7 @@
 .calendar-cell__item.span--rowstart { margin-left: 0; border-left: 3px solid currentColor; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 .calendar-cell__item.span--rowend { margin-right: 0; border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .calendar-cell__item.span--mid, .calendar-cell__item.span--end { z-index: 0; }
+
+/* ---- v7.24.0: "n일 전" 칩/버튼 ---- */
+.offset-chip--before { background: var(--cat-work-soft, #fff1e0); color: var(--cat-work, #b45309); }
+.offset-preset--before { border-style: dashed; }
