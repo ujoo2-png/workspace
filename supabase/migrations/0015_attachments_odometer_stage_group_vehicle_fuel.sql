@@ -12,7 +12,6 @@ create table if not exists attachments (
 );
 create index if not exists idx_attachments_owner on attachments(owner_table, owner_id);
 alter table attachments enable row level security;
-drop policy if exists attachments_own_rows on attachments;
 create policy attachments_own_rows on attachments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
@@ -25,7 +24,6 @@ create table if not exists vehicle_odometer_logs (
 );
 create index if not exists idx_vehicle_odometer_logs_vehicle on vehicle_odometer_logs(vehicle_id, logged_at);
 alter table vehicle_odometer_logs enable row level security;
-drop policy if exists vehicle_odometer_logs_own_rows on vehicle_odometer_logs;
 create policy vehicle_odometer_logs_own_rows on vehicle_odometer_logs for all to authenticated
   using (vehicle_id in (select id from vehicles where user_id = (select auth.uid())))
   with check (vehicle_id in (select id from vehicles where user_id = (select auth.uid())));

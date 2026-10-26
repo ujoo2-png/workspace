@@ -24,7 +24,6 @@ create index if not exists idx_devlogs_project on devlogs(project_id) where proj
 create index if not exists idx_devlogs_tags on devlogs using gin(tags);
 
 alter table devlogs enable row level security;
-drop policy if exists devlogs_own_rows on devlogs;
 create policy devlogs_own_rows on devlogs for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
