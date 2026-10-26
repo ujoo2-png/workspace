@@ -25,16 +25,6 @@
           );
         }
 
-        // v7.24.0(아이디어 1): 자동 수집으로 새 글이 들어왔으면 인사말 아래에 한 줄로 강조한다.
-        if (typeof briefing.briefingNewCount === 'number' && briefing.briefingNewCount > 0) {
-          body.append(
-            el('div', { class: 'briefing-weather', style: 'cursor:pointer', onclick: () => { body.closest('.nm-modal-backdrop')?.remove(); window.navigate('/briefing'); } }, [
-              el('span', {}, '📰'),
-              el('span', {}, `관심주제 새 글 ${briefing.briefingNewCount}건 — 눌러서 브리핑 보기`),
-            ])
-          );
-        }
-
         body.append(section('오늘 일정', briefing.todaySchedules, (s) => `${s.time ? s.time + ' · ' : ''}${escapeHtml(s.title)}`));
 
         body.append(

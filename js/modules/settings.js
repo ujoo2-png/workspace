@@ -46,38 +46,6 @@
   // 기록해 보여주고, (2) 5일이 지나면 경고 배지로 알리고 수동으로 "지금 확인"할 수 있게 하고,
   // (3) 브라우저 탭이 열려 있는 동안만 24시간마다 best-effort로 자동 핑을 보낸다.
   const SUPABASE_ACTIVE_KEY = 'workspace:supabase:lastActive';
-
-  // 커스텀 API 응답에서 "가격/환율처럼 보이는" 숫자 필드의 경로를 자동으로 찾는다.
-  // (v7.26.0) JSON 경로를 몰라도 등록할 수 있게 돕는 용도 — 결과는 사용자가 수정할 수 있다.
-  // 반환: ['price', 'data.list[].close'] 처럼 점/배열 표기 문자열.
-  function autoDetectPricePaths(data, maxDepth = 8, maxResults = 3) {
-    const HINTS = ['price', 'close', 'clpr', 'last', 'rate', 'deal_bas_r', 'value', 'current', 'now', 'trade', 'stck_prpr'];
-    const found = [];
-    const seen = new Set();
-    function walk(node, path, depth) {
-      if (!node || depth > maxDepth || found.length >= maxResults) return;
-      if (Array.isArray(node)) {
-        const head = node.find((x) => x && typeof x === 'object');
-        if (head) walk(head, `${path}[]`, depth + 1);
-        return;
-      }
-      if (typeof node !== 'object') return;
-      for (const [k, v] of Object.entries(node)) {
-        const key = k.toLowerCase();
-        const here = path ? `${path}.${k}` : k;
-        if (typeof v === 'number' && Number.isFinite(v)) {
-          if (HINTS.some((h) => key.includes(h)) && !seen.has(here)) { seen.add(here); found.push(here); }
-        } else if (typeof v === 'string' && /^[\d,.\-]+$/.test(v.trim())) {
-          if (HINTS.some((h) => key.includes(h)) && !seen.has(here)) { seen.add(here); found.push(here); }
-        } else if (v && typeof v === 'object') {
-          walk(v, here, depth + 1);
-        }
-      }
-    }
-    walk(data, '', 0);
-    return found;
-  }
-
   function markSupabaseActive() {
     try { localStorage.setItem(SUPABASE_ACTIVE_KEY, new Date().toISOString()); } catch { /* 무시 */ }
   }
@@ -145,18 +113,6 @@
             return el('label', { class: 'row', style: 'gap:8px; align-items:center; cursor:pointer' }, [cb, el('span', {}, '홈 애니메이션 효과')]);
           })(),
           window.HomeFx.prefersReduced() ? el('p', { class: 'text-muted', style: 'font-size:12px; margin-top:6px' }, 'ℹ️ 이 기기는 "동작 줄이기"가 켜져 있어 효과가 항상 꺼져 있습니다.') : null,
-        ]),
-        el('div', { class: 'nm-card' }, [
-          el('h3', {}, '관심주제 브리핑'),
-          el('p', { class: 'text-muted' }, '로그인할 때마다 하루 한 번, 등록된 관심주제·피드 소스에서 새 글을 자동으로 모아 옵니다(새 글이 있으면 알림과 로그인 브리핑에 요약). 기기 간 동기화됩니다.'),
-          (() => {
-            const cb = el('input', { type: 'checkbox', id: 'briefing-auto-toggle', checked: window.isAutoCollectEnabled() || undefined });
-            cb.addEventListener('change', () => {
-              window.setAutoCollectEnabled(cb.checked);
-              toast(cb.checked ? '로그인 시 브리핑 자동 수집을 켰습니다.' : '브리핑 자동 수집을 껐습니다.', 'success');
-            });
-            return el('label', { class: 'row', style: 'gap:8px; align-items:center; cursor:pointer' }, [cb, el('span', {}, '로그인 시 자동 수집(하루 1회)')]);
-          })(),
         ]),
         el('div', { class: 'nm-card' }, [
           el('h3', {}, '데이터 내보내기'),
@@ -524,155 +480,6 @@
         },
       }, '저장 및 연결 테스트');
 
-      // v7.25.0: 증권 시세 공급자 선택 + (KIS | 커스텀 API) 설정.
-      const kisKeyInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appkey', placeholder: 'KIS AppKey', value: window.getKisAppKey() });
-      const kisSecretInput = el('input', { class: 'nm-input', type: 'password', name: 'kis_appsecret', placeholder: 'KIS AppSecret', value: window.getKisAppSecret() });
-      const kisEnvSel = el('select', { class: 'nm-select', name: 'kis_env' });
-      kisEnvSel.append(el('option', { value: 'real', selected: window.getKisEnv() === 'real' || undefined }, '실전투자(real)'));
-      kisEnvSel.append(el('option', { value: 'mock', selected: window.getKisEnv() === 'mock' || undefined }, '모의투자(mock)'));
-      const saveKisBtn = el('button', {
-        class: 'nm-btn',
-        type: 'button',
-        onclick: () => {
-          window.setKisCredentials({ appkey: kisKeyInput.value, appsecret: kisSecretInput.value, env: kisEnvSel.value });
-          window.setStockProvider('kis');
-          window.clearStockQuoteCache();
-          toast(window.hasKisKey() ? 'KIS 키를 저장했습니다. 증권 화면에서 시세를 조회할 수 있습니다.' : 'KIS 키를 삭제했습니다.', window.hasKisKey() ? 'success' : 'info');
-          renderProviderConfig();
-        },
-      }, '저장');
-
-      const providerSel = el('select', { class: 'nm-select', name: 'stock_provider' });
-      for (const [v, label] of [['kis', '한국투자증권(KIS) — 공식, 앱키 필요'], ['custom', '커스텀 API — 내가 등록한 JSON API'], ['none', '사용 안 함(수동 입력)']]) {
-        providerSel.append(el('option', { value: v, selected: window.getStockProvider() === v || undefined }, label));
-      }
-      const providerConfigHost = el('div', { style: 'margin-top:8px' });
-      const saveProviderBtn = el('button', {
-        class: 'nm-btn',
-        type: 'button',
-        onclick: () => { window.setStockProvider(providerSel.value); window.clearStockQuoteCache(); toast(`증권 공급자를 "${window.stockProviderLabel()}"(으)로 설정했습니다.`, 'success'); renderProviderConfig(); },
-      }, '공급자 적용');
-
-      function renderProviderConfig() {
-        providerConfigHost.replaceChildren();
-        const p = window.getStockProvider();
-        if (p === 'none') { providerConfigHost.append(el('p', { class: 'text-muted', style: 'font-size:11px' }, '외부 시세 연동을 쓰지 않습니다. 증권 화면에서 보유 정보만 수동으로 관리합니다.')); return; }
-        if (p === 'kis') {
-          providerConfigHost.append(
-            el('p', { class: 'text-muted', style: 'font-size:11px' }, [
-              '활용신청: ',
-              el('a', { href: 'https://apiportal.koreainvestment.com/', target: '_blank', rel: 'noopener' }, '한국투자증권 API 포털'),
-              ' 에서 앱키/앱시크릿을 발급받으세요. 시크릿은 이 브라우저에만 저장되고, 실제 조회는 Vercel 서버리스 프록시(/api/kis-proxy)를 거칩니다. 일봉 차트도 이 공급자에서 지원합니다.',
-            ]),
-            el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kisKeyInput, kisSecretInput]),
-            el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [kisEnvSel, saveKisBtn, testBtn])
-          );
-          return;
-        }
-        // custom
-        const cur = window.getCustomProvider() || { name: '', priceUrl: '', nameUrl: '', headers: {}, paths: { price: 'price', changeRate: 'changeRate', name: 'name' }, currency: 'KRW' };
-        const cName = el('input', { class: 'nm-input', placeholder: '공급자 이름(예: 미래에셋/야후/네이버 비공식)', value: cur.name });
-        const cPrice = el('input', { class: 'nm-input', placeholder: '현재가 URL — 종목코드는 {symbol} 로 (예: https://api.example.com/q?code={symbol})', value: cur.priceUrl });
-        const cNameUrl = el('input', { class: 'nm-input', placeholder: '종목명 URL(선택) — {symbol} 사용', value: cur.nameUrl });
-        const cHeaders = el('textarea', { class: 'nm-input', rows: '3', placeholder: '요청 헤더(JSON, 선택) — 예: {"Authorization":"Bearer ..."}' }, cur.headers && Object.keys(cur.headers).length ? JSON.stringify(cur.headers) : '');
-        const pPrice = el('input', { class: 'nm-input', placeholder: '가격 JSON 경로', value: (cur.paths || {}).price || 'price' });
-        const pChange = el('input', { class: 'nm-input', placeholder: '등락률 JSON 경로(선택)', value: (cur.paths || {}).changeRate || 'changeRate' });
-        const pName = el('input', { class: 'nm-input', placeholder: '종목명 JSON 경로(선택)', value: (cur.paths || {}).name || 'name' });
-        // v7.25.0: 지수(시황)용 URL/경로(선택). 없으면 시황 카드는 "설정 필요" 안내만 한다.
-        const cIndicesUrl = el('input', { class: 'nm-input', placeholder: '지수(시황) URL(선택) — 코스피/코스닥 등 배열을 주는 JSON', value: cur.indicesUrl || '' });
-        const pIndices = el('input', { class: 'nm-input', placeholder: '지수 배열 JSON 경로(선택) — 예: data.indices', value: (cur.paths || {}).indices || '' });
-        const cCur = el('select', { class: 'nm-select' }, [
-          el('option', { value: 'KRW', selected: (cur.currency || 'KRW') === 'KRW' || undefined }, 'KRW(원)'),
-          el('option', { value: 'USD', selected: cur.currency === 'USD' || undefined }, 'USD(달러)'),
-        ]);
-        const saveCustomBtn = el('button', {
-          class: 'nm-btn nm-btn--primary', type: 'button',
-          onclick: () => {
-            // providerSel이 'custom'으로 적용되어 있어야 실제 조회에 쓰인다.
-            window.setStockProvider('custom');
-            providerSel.value = 'custom';
-            let headers = {};
-            if (cHeaders.value.trim()) { try { headers = JSON.parse(cHeaders.value); } catch { toast('요청 헤더가 올바른 JSON이 아닙니다.', 'error'); return; } }
-            window.setCustomProvider({ name: cName.value, priceUrl: cPrice.value, nameUrl: cNameUrl.value, indicesUrl: cIndicesUrl.value, headers, paths: { price: pPrice.value, changeRate: pChange.value, name: pName.value, indices: pIndices.value }, currency: cCur.value });
-            window.clearStockQuoteCache();
-            toast('커스텀 증권 API를 저장했습니다. "연결 테스트"로 확인해 보세요.', 'success');
-          },
-        }, '커스텀 API 저장');
-        const cTestBtn = el('button', { class: 'nm-btn', type: 'button', onclick: () => runTest(cTestBtn) }, '연결 테스트');
-        providerConfigHost.append(
-          el('p', { class: 'text-muted', style: 'font-size:11px' }, '이 증권사의 JSON 응답에서 어떤 필드가 가격/등락률/종목명인지 "경로"로 지정합니다. 예: 응답이 {"data":{"close":71000}} 이면 경로는 data.close. 조회는 /api/stock-proxy를 통해 CORS를 우회합니다(https만, 사설 IP 차단).'),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; flex-wrap:wrap' }, [cName, cCur]),
-          el('div', { style: 'margin:6px 0' }, [cPrice]),
-          el('div', { style: 'margin:6px 0' }, [cNameUrl]),
-          el('div', { style: 'margin:6px 0' }, [cHeaders]),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [pPrice, pChange, pName]),
-          el('div', { style: 'margin:6px 0' }, [cIndicesUrl]),
-          el('div', { style: 'margin:6px 0' }, [pIndices]),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [saveCustomBtn, cTestBtn])
-        );
-      }
-
-      async function runTest(btn) {
-        btn.disabled = true; const old = btn.textContent; btn.textContent = '확인 중…';
-        // 테스트 전에 현재 폼 값을 먼저 반영한다(사용자가 저장을 누르지 않아도 테스트되게).
-        const cur = window.getCustomProvider();
-        if (!cur) { toast('먼저 커스텀 API를 저장해 주세요.', 'error'); btn.disabled = false; btn.textContent = old; return; }
-        try { toast(await window.testStockConnection(), 'success'); }
-        catch (e) { toast('연결 실패: ' + (e.message || e), 'error'); }
-        btn.disabled = false; btn.textContent = old;
-      }
-      const testBtn = el('button', { class: 'nm-btn', type: 'button', onclick: () => runTest(testBtn) }, '연결 테스트');
-      // v7.25.0: 오늘의 시황·환율 표시 토글.
-      const fxToggle = el('label', { class: 'row', style: 'gap:8px; cursor:pointer; align-items:center; margin-top:8px' }, [
-        el('input', { type: 'checkbox', name: 'fx_enabled', checked: window.getFxEnabled() || undefined, onchange: (e) => { window.setFxEnabled(e.target.checked); toast(e.target.checked ? '증권 화면에 환율을 표시합니다.' : '환율 표시를 껐습니다.', 'info'); } }),
-        el('span', { class: 'text-muted' }, '증권 화면에 오늘의 시황(지수)과 환율을 표시'),
-      ]);
-      renderProviderConfig();
-
-      // v7.26.0: 환율 데이터 출처(공공데이터포털 기본 / 커스텀 API 선택 — 둘 다 지원).
-      // "커스텀 API 관리"에 한국수출입은행 API를 등록해도 기본값은 공공데이터포털이라 증권 화면과
-      // 연결되지 않던 문제를 해결한다. 여기서 소스를 고르면 증권 화면의 환율 카드에 바로 반영된다.
-      const fxSourceHost = el('div', { style: 'margin-top:6px' });
-      function renderFxSource() {
-        fxSourceHost.replaceChildren();
-        const src = window.getFxSource ? window.getFxSource() : 'public';
-        const srcSel = el('select', { class: 'nm-select' }, [
-          el('option', { value: 'public', selected: src === 'public' || undefined }, '공공데이터포털(한국수출입은행 환율정보) — 기본'),
-          el('option', { value: 'custom', selected: src === 'custom' || undefined }, '커스텀 API 관리에 등록한 API'),
-        ]);
-        const customSel = el('select', { class: 'nm-select' });
-        const customApis = (window.listCustomApis ? window.listCustomApis() : []).filter((a) => a.enabled !== false);
-        customSel.append(el('option', { value: '' }, customApis.length ? '커스텀 API 선택…' : '등록된 커스텀 API가 없습니다'));
-        for (const a of customApis) {
-          customSel.append(el('option', { value: a.id, selected: (window.getFxCustomApiId && window.getFxCustomApiId()) === a.id || undefined }, a.name));
-        }
-        const customRow = el('div', { class: 'row', style: 'gap:8px; margin:6px 0; flex-wrap:wrap' }, [
-          customSel,
-          el('button', {
-            class: 'nm-btn nm-btn--sm', type: 'button',
-            onclick: () => {
-              if (!customSel.value) { toast('환율 소스로 쓸 커스텀 API를 선택하세요.', 'error'); return; }
-              window.setFxCustomApiId(customSel.value);
-              window.setFxSource('custom');
-              renderFxSource();
-              toast('환율 소스를 커스텀 API로 설정했습니다.', 'success');
-            },
-          }, '커스텀 API를 환율 소스로 사용'),
-        ]);
-        fxSourceHost.append(
-          el('p', { class: 'text-muted', style: 'font-size:11px; margin:6px 0 2px' }, '환율 데이터 출처 — 커스텀 API 관리에 한국수출입은행 환율 API를 등록했다면 여기서 그 API를 소스로 지정하세요.'),
-          el('div', { class: 'row', style: 'gap:8px; align-items:center; flex-wrap:wrap' }, [
-            srcSel,
-            el('button', {
-              class: 'nm-btn nm-btn--sm', type: 'button',
-              onclick: () => { window.setFxSource(srcSel.value); renderFxSource(); toast(srcSel.value === 'custom' ? '환율 소스: 커스텀 API' : '환율 소스: 공공데이터포털', 'info'); },
-            }, '적용'),
-          ]),
-          window.getFxSource && window.getFxSource() === 'custom' ? customRow : null,
-        );
-      }
-      renderFxSource();
-
       return el('div', { class: 'nm-card' }, [
         el('h3', {}, '공공데이터포털 연동'),
         el('p', { class: 'text-muted', style: 'font-size:12px' }, '공공데이터포털·오피넷·KOPIS에서 무료로 발급받은 서비스 키를 등록하면 공휴일 자동 등록, 전국 평균 유가 비교, 공연·전시 검색 기능을 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.'),
@@ -707,21 +514,6 @@
           el('div', { class: 'row', style: 'gap:8px; margin:6px 0' }, [kopisInput, saveKopisBtn]),
           kopisToggle,
         ]),
-        el('div', { style: 'margin-top:16px; padding-top:12px; border-top:1px solid var(--border)' }, [
-          el('strong', { style: 'font-size:13px' }, '증권 시세 API — 공급자 선택'),
-          el('p', { class: 'text-muted', style: 'font-size:11px' }, '현재가·차트를 어느 증권 API에서 받을지 고릅니다. 한국투자증권(KIS) 외에, 다른 증권사/직접 만든 JSON API도 등록해 쓸 수 있습니다.'),
-          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; align-items:center' }, [providerSel, saveProviderBtn]),
-        ]),
-        el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
-          el('strong', { style: 'font-size:13px' }, '공급자 설정'),
-          providerConfigHost,
-        ]),
-        el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
-          el('strong', { style: 'font-size:13px' }, '오늘의 시황 · 환율'),
-          el('p', { class: 'text-muted', style: 'font-size:11px' }, '증권 화면 상단에 지수·환율 요약을 표시합니다. 환율은 기본적으로 공공데이터포털의 "한국수출입은행 환율정보" 오픈API를 쓰며(위 공공데이터포털 키와 동일, 활용신청 필요), 커스텀 API 관리에 등록한 API를 소스로 지정할 수도 있습니다.'),
-          fxToggle,
-          fxSourceHost,
-        ]),
       ]);
     }
 
@@ -740,20 +532,6 @@
       card.append(list);
       renderList();
 
-      function statusBadge(api) {
-        const st = (window.getCustomApiStatus ? window.getCustomApiStatus(api.id) : { state: 'unset' });
-        const meta = (window.CUSTOM_API_STATUS_META || {})[st.state] || { label: '미연결', cls: 'muted' };
-        const when = st.at ? new Date(st.at) : null;
-        const whenText = when ? `${String(when.getMonth() + 1).padStart(2, '0')}.${String(when.getDate()).padStart(2, '0')} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '';
-        return el('span', {
-          class: `api-status api-status--${meta.cls}`,
-          title: [st.message || '', st.ms ? `${st.ms}ms` : '', whenText].filter(Boolean).join(' · ') || '아직 호출한 적이 없습니다.',
-        }, [
-          el('span', { class: 'api-status__dot' }),
-          meta.label + (whenText ? ` · ${whenText}` : ''),
-        ]);
-      }
-
       function renderList() {
         list.innerHTML = '';
         const apis = window.listCustomApis();
@@ -765,33 +543,13 @@
           const menuLabels = (api.menus || [])
             .map((path) => (window.NAV_ITEMS || []).find((n) => n.path === path)?.label || path)
             .join(', ');
-          const statusEl = statusBadge(api);
-          const testBtn = el('button', {
-            class: 'nm-btn nm-btn--icon',
-            title: '연결 테스트',
-            onclick: async () => {
-              testBtn.disabled = true;
-              const old = testBtn.textContent;
-              testBtn.textContent = '⏳';
-              const r = window.testCustomApi ? await window.testCustomApi(api) : { ok: false, message: '테스트 기능을 사용할 수 없습니다.' };
-              testBtn.disabled = false;
-              testBtn.textContent = old;
-              const badge = list.querySelector(`[data-api-id="${api.id}"] .api-status`);
-              if (badge) badge.replaceWith(statusBadge(api));
-              toast(r.ok ? `연결 성공 (${r.ms}ms)` : `연결 실패: ${r.message || ''}`, r.ok ? 'success' : 'error');
-            },
-          }, '🔌');
           list.append(
-            el('div', { class: 'item-row', 'data-api-id': api.id }, [
+            el('div', { class: 'item-row' }, [
               el('div', { class: 'item-row__main' }, [
-                el('div', { class: 'row', style: 'gap:8px; align-items:center; flex-wrap:wrap' }, [
-                  el('div', { class: 'item-row__title' }, escapeHtml(api.name)),
-                  statusEl,
-                ]),
+                el('div', { class: 'item-row__title' }, escapeHtml(api.name)),
                 el('div', { class: 'text-muted', style: 'font-size:12px' }, `연결: ${menuLabels || '없음'}`),
               ]),
               el('div', { class: 'row', style: 'gap:6px; align-items:center' }, [
-                testBtn,
                 el('button', {
                   class: `nm-toggle ${api.enabled !== false ? 'nm-toggle--on' : ''}`,
                   title: api.enabled !== false ? '사용 중(눌러서 끄기)' : '꺼짐(눌러서 켜기)',
@@ -819,33 +577,8 @@
       function openCustomApiForm(existing) {
         openModal({
           title: existing ? 'API 수정' : 'API 등록',
-          width: '620px',
           contentBuilder(body, close) {
-            // ── 프리셋(자주 쓰는 API를 한 번에 채운다) ─────────────────────────
-            const PRESETS = [
-              {
-                id: 'exim', label: '한국수출입은행 환율', icon: '💱',
-                name: '한국수출입은행 환율',
-                urlTemplate: 'https://apis.data.go.kr/B552180/exchRate/exchange?serviceKey={key}&dataType=JSON&numOfRows=100&pageNo=1&searchdate=' + new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-                menus: [],
-                note: '공공데이터포털 키를 넣고, 증권 화면에서 이 API를 환율 소스로 선택하세요(설정 → 오늘의 시황 · 환율).',
-              },
-              {
-                id: 'yahoo', label: '야후 파이낸스 시세', icon: '📈',
-                name: '야후 파이낸스 시세',
-                urlTemplate: 'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1mo',
-                menus: ['/stocks'],
-                note: '비공식 API입니다(차단·약관 변경 가능). {symbol}에 종목코드를 넣습니다(예: 005930.KS).',
-              },
-              {
-                id: 'holiday', label: '공휴일(특일정보)', icon: '📅',
-                name: '공휴일(특일정보)',
-                urlTemplate: 'https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?serviceKey={key}&solYear=' + new Date().getFullYear() + '&numOfRows=50&_type=json',
-                menus: ['/schedule'],
-                note: '공공데이터포털 키가 필요합니다.',
-              },
-            ];
-            const nameInput = el('input', { class: 'nm-input', name: 'name', required: true, placeholder: '예: 한국수출입은행 환율', value: existing?.name || '' });
+            const nameInput = el('input', { class: 'nm-input', name: 'name', required: true, value: existing?.name || '' });
             const urlInput = el('input', { class: 'nm-input', name: 'url', required: true, placeholder: 'https://api.example.com/data?serviceKey={key}&type=json', value: existing?.urlTemplate || '' });
             const keyInput = el('input', { class: 'nm-input', type: 'password', name: 'key', placeholder: '키가 필요 없는 공개 API면 비워두세요', value: existing?.keyValue || '' });
             const enabledCheckbox = el('input', { type: 'checkbox', name: 'enabled', checked: existing ? existing.enabled !== false : true });
@@ -855,64 +588,7 @@
                 el('span', {}, `${item.icon} ${item.label}`),
               ])
             );
-            const noteBox = el('p', { class: 'text-muted', style: 'font-size:12px; margin:0' }, '');
-
-            // 프리셋 버튼들 — 누르면 이름/URL/메뉴가 자동으로 채워진다(키는 직접).
-            const presetRow = el('div', { class: 'row wrap', style: 'gap:6px' }, PRESETS.map((p) =>
-              el('button', {
-                type: 'button', class: 'nm-btn nm-btn--sm',
-                onclick: () => {
-                  nameInput.value = p.name;
-                  urlInput.value = p.urlTemplate;
-                  for (const label of menuChecks) {
-                    const cb = label.querySelector('input');
-                    cb.checked = (p.menus || []).includes(cb.value);
-                  }
-                  noteBox.textContent = p.note || '';
-                },
-              }, `${p.icon} ${p.label}`)
-            ));
-
-            // ── 고급(접힘): 응답에서 가격/환율 필드를 자동 감지해 JSON 경로를 채운다 ──
-            const pathInput = el('input', { class: 'nm-input', name: 'paths', placeholder: '예: price, data.list[].close', value: existing?.paths?.price || '' });
-            const detectBtn = el('button', { type: 'button', class: 'nm-btn nm-btn--sm' }, '🔍 자동 감지');
-            const detectOut = el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, 'URL과 키를 채운 뒤 누르면, 응답을 받아 가격처럼 보이는 필드 경로를 찾아 채웁니다.');
-            detectBtn.addEventListener('click', async () => {
-              detectBtn.disabled = true; detectBtn.textContent = '⏳ 감지 중';
-              try {
-                const probe = { id: existing?.id || `probe_${Date.now()}`, urlTemplate: urlInput.value.trim(), keyValue: keyInput.value.trim() };
-                const r = await window.fetchCustomApi(probe, { force: true });
-                const paths = autoDetectPricePaths(r.data);
-                if (paths.length) {
-                  pathInput.value = paths.join(', ');
-                  detectOut.textContent = `감지된 필드: ${paths.join(', ')} — 필요하면 수정하세요.`;
-                } else {
-                  detectOut.textContent = '숫자로 된 가격 후보 필드를 찾지 못했습니다. 응답 구조를 확인하고 직접 입력하세요.';
-                }
-              } catch (e) {
-                detectOut.textContent = `감지 실패: ${e.message || e}`;
-              } finally {
-                detectBtn.disabled = false; detectBtn.textContent = '🔍 자동 감지';
-              }
-            });
-
-            const advanced = el('details', {}, [
-              el('summary', { style: 'cursor:pointer; font-size:13px' }, '고급 설정(선택) — 응답 필드 경로'),
-              el('div', { class: 'stack', style: 'margin-top:8px' }, [
-                el('div', { class: 'row', style: 'gap:6px; align-items:flex-end' }, [
-                  el('div', { class: 'nm-field', style: 'flex:1' }, [el('label', {}, '가격/환율 필드 경로(쉼표 구분)'), pathInput]),
-                  detectBtn,
-                ]),
-                detectOut,
-              ]),
-            ]);
-
             const form = el('form', { class: 'stack' }, [
-              el('div', { class: 'nm-field' }, [
-                el('label', {}, '빠른 시작 (프리셋)'),
-                presetRow,
-              ]),
-              noteBox,
               el('div', { class: 'nm-field' }, [el('label', {}, '이름'), nameInput]),
               el('div', { class: 'nm-field' }, [el('label', {}, '요청 URL(전체, {key}로 키 위치 표시)'), urlInput]),
               el('div', { class: 'nm-field' }, [el('label', {}, 'API 키(선택)'), keyInput]),
@@ -921,7 +597,6 @@
                 el('label', {}, '연결할 메뉴(체크한 화면 하단에 카드가 나타납니다)'),
                 el('div', { class: 'row wrap', style: 'gap:10px; max-height:180px; overflow-y:auto; padding:4px 0' }, menuChecks),
               ]),
-              advanced,
               el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장'),
             ]);
             form.addEventListener('submit', (e) => {
@@ -937,7 +612,6 @@
                 keyValue: keyInput.value.trim(),
                 enabled: enabledCheckbox.checked,
                 menus,
-                paths: { price: pathInput.value.trim() },
               });
               toast('저장했습니다.', 'success');
               renderList();

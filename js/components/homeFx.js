@@ -68,9 +68,7 @@
     svg.setAttribute('aria-hidden', 'true');
     const flat = values.length > 0 && Math.min(...values) === Math.max(...values);
     if (pts.length) {
-      // v7.25.0: 완만한 곡선(단조 3차 스플라인) — 추이를 부드럽게 잇는다.
-      const xy = pts.map((p) => [p.x, p.y]);
-      const d = (window.ChartKit && window.ChartKit.smoothPath) ? window.ChartKit.smoothPath(xy) : pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
       const area = document.createElementNS(SVG_NS, 'path');
       area.setAttribute('class', 'spark__area');
       area.setAttribute('d', `${d} L${pts[pts.length - 1].x.toFixed(1)} ${h} L${pts[0].x.toFixed(1)} ${h} Z`);

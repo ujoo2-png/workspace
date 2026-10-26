@@ -128,88 +128,6 @@
     );
   }
 
-  // v7.24.0: "저장 전 파일 첨부" 공통 헬퍼.
-  // 레코드가 아직 저장되지 않았을 때(ownerId 없음) 파일을 메모리에 담아 두었다가,
-  // 저장이 끝나 실제 id가 생기면 한꺼번에 addAttachment()로 옮긴다.
-  // 저장 팝업(일정/Knowledge/문화생활/Career 등)에서 이 함수가 그리는 드래그 영역을
-  // 폼 안에 두면, 사용자는 저장을 누르기 전에 파일을 끌어다 놓을 수 있다.
-  //   const pending = window.createPendingAttachments(container, ownerTable);
-  //   // 저장 성공 후:  await pending.flush(row.id);
-  //   // 저장 실패/취소: pending.clear();  (선택)
-  function createPendingAttachments(container, ownerTable) {
-    let files = []; // { file, ok, message }
-    container.innerHTML = '';
-    container.className = 'attach-panel attach-panel--pending';
-
-    const list = el('div', { class: 'attach-list' });
-    function drawList() {
-      list.innerHTML = '';
-      if (!files.length) {
-        list.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, '아직 담긴 파일이 없습니다. 저장하면 아래 파일이 첨부됩니다.'));
-        return;
-      }
-      files.forEach((entry, i) => {
-        list.append(
-          el('div', { class: 'attach-item' }, [
-            el('span', { class: 'attach-item__name' }, `📎 ${entry.file.name}`),
-            el('span', { class: 'attach-item__size' }, formatSize(entry.file.size)),
-            el('button', {
-              type: 'button', class: 'nm-btn nm-btn--icon nm-btn--danger', title: '목록에서 빼기',
-              onclick: () => { files.splice(i, 1); drawList(); },
-            }, '✕'),
-          ])
-        );
-      });
-    }
-
-    function addFiles(incoming) {
-      for (const file of Array.from(incoming || [])) {
-        const chk = window.checkAttachmentSize(ownerTable, file.size, file.name);
-        if (!chk.ok) { toast(chk.message, 'error'); continue; }
-        // 같은 이름·크기 파일은 한 번만 담는다.
-        if (files.some((f) => f.file.name === file.name && f.file.size === file.size)) continue;
-        files.push({ file });
-      }
-      drawList();
-    }
-
-    const fileInput = el('input', { type: 'file', class: 'hidden', multiple: true });
-    fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
-    const addBtn = el('button', { type: 'button', class: 'nm-btn', onclick: () => fileInput.click() }, '+ 파일 담기');
-    const dropzone = el('div', { class: 'attach-dropzone' }, [
-      el('span', { class: 'text-muted', style: 'font-size:12px' }, `저장 전에 여기로 파일을 드래그하거나 버튼으로 담으세요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
-    ]);
-    let dragCounter = 0;
-    dropzone.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropzone.classList.add('attach-dropzone--active'); });
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
-    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter = Math.max(0, dragCounter - 1); if (dragCounter === 0) dropzone.classList.remove('attach-dropzone--active'); });
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropzone.classList.remove('attach-dropzone--active'); addFiles(e.dataTransfer?.files); });
-
-    container.append(
-      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px' }, [addBtn, fileInput]),
-      dropzone,
-      list
-    );
-    drawList();
-
-    return {
-      get count() { return files.length; },
-      // 저장 후 호출: 담아둔 파일을 실제 레코드에 첨부한다. 성공 건수를 반환한다.
-      async flush(ownerId) {
-        if (!ownerId || !files.length) return 0;
-        let ok = 0;
-        for (const entry of files) {
-          try { await appState.addAttachment(ownerTable, ownerId, entry.file); ok++; }
-          catch (err) { toast(`"${entry.file.name}" 첨부 실패: ${err.message || err}`, 'error'); }
-        }
-        files = [];
-        drawList();
-        return ok;
-      },
-      clear() { files = []; drawList(); },
-    };
-  }
-
   // 별도 모달로 열어서 쓰고 싶을 때(목록 화면의 📎 버튼 등)를 위한 헬퍼.
   function openAttachmentsModal(ownerTable, ownerId, title) {
     window.openModal({
@@ -274,5 +192,4 @@
   window.renderAttachmentsPanel = renderAttachmentsPanel;
   window.openAttachmentsModal = openAttachmentsModal;
   window.renderAttachmentPreviews = renderAttachmentPreviews;
-  window.createPendingAttachments = createPendingAttachments;
 })();

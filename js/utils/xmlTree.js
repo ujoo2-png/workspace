@@ -132,8 +132,6 @@
   }
   function textOf(node) {
     if (node.t === 'text') return decode(node.raw);
-    // CDATA(<![CDATA[…]]>)는 "텍스트"이므로 내용을 그대로 반환한다. 그 밖의 raw(주석/선언/DOCTYPE)는 무시.
-    if (node.t === 'raw') return /^<!\[CDATA\[/.test(node.raw) ? node.raw.slice(9, -3) : '';
     if (node.t !== 'el' && node.t !== 'root') return '';
     return node.children.map(textOf).join('');
   }

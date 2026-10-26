@@ -39,10 +39,6 @@
     'career_awards', 'career_experiences', 'career_photos',
     'career_documents', // v7.22.0 (0025) — career_basic_info는 사용자당 1행이라 deleted_at 없음
     'health_medications', // v7.19.0 (0023) — health_med_logs는 챌린지 체크인처럼 hard delete라 deleted_at 없음
-    // v7.24.0 (0027): 증권 — 계좌/보유종목은 기록 보존을 위해 소프트 삭제. stock_trades는 hard delete.
-    'brokerage_accounts', 'stock_holdings',
-    // v7.24.0 (0028): 배당 기록도 소프트 삭제(수익 요약에서 조용히 빠지지 않게).
-    'stock_dividends',
   ]);
 
   class SupabaseStore {
@@ -94,22 +90,16 @@
       const { data, error } = await client.auth.signUp({ email, password, options: { data: { name } } });
       if (error) throw error;
       const userId = data.user?.id;
-      let becameAdmin = false;
       if (userId) {
-        // v7.25.0: 0029의 profiles_one_admin 유니크 인덱스가 "admin 1명"을 강제한다.
-        // 동시 가입 등으로 admin upsert가 충돌하면 user/pending으로 재시도한다(경쟁 상태 안전).
-        const base = { id: userId, email, name: name || email };
-        const tryUpsert = (row) => client.from('profiles').upsert(row).then((r) => r.error);
-        let upsertErr = await tryUpsert({ ...base, role: isFirstUser ? 'admin' : 'user', status: isFirstUser ? 'approved' : 'pending' });
-        if (upsertErr && isFirstUser) {
-          // 누군가 먼저 admin이 되었다는 뜻 → 일반 사용자(승인 대기)로 등록.
-          upsertErr = await tryUpsert({ ...base, role: 'user', status: 'pending' });
-        } else {
-          becameAdmin = isFirstUser && !upsertErr;
-        }
-        if (upsertErr) throw new Error(upsertErr.message || '프로필 저장에 실패했습니다.');
+        await client.from('profiles').upsert({
+          id: userId,
+          email,
+          name: name || email,
+          role: isFirstUser ? 'admin' : 'user',
+          status: isFirstUser ? 'approved' : 'pending',
+        });
       }
-      if (becameAdmin) return { pending: false, message: '첫 번째 계정은 관리자로 즉시 활성화됩니다.' };
+      if (isFirstUser) return { pending: false, message: '첫 번째 계정은 관리자로 즉시 활성화됩니다.' };
       return { pending: true, message: '회원가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다. (이메일 확인이 필요할 수 있습니다)' };
     }
 
@@ -120,15 +110,10 @@
       const { data, error } = await client.auth.signInWithPassword({ email, password });
       if (error) throw new Error('아이디(이메일) 또는 비밀번호가 올바르지 않습니다.');
       const profile = await this._fetchProfile(data.user.id);
-      // v7.25.0 보안 강화: "승인된 계정만 로그인"을 화이트리스트로 보장한다.
-      // 이전에는 pending/rejected만 차단해 status가 없거나(null/오타 등) 예외값이면 통과했다.
-      // 이제는 status !== 'approved'면 프로필 유무와 무관하게 세션을 즉시 파기하고 거부한다.
-      if (!profile || profile.status !== 'approved') {
-        try { await client.auth.signOut(); } catch { /* 세션 파기 실패는 무시(서버 세션은 만료됨) */ }
-        if (!profile) throw new Error('계정 정보를 찾을 수 없습니다. 관리자에게 문의해 주세요.');
-        if (profile.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
+      if (!profile || profile.status === 'pending') {
         return { pending: true, message: '아직 관리자 승인 대기 중입니다. 승인 후 다시 로그인해 주세요.' };
       }
+      if (profile.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
       return { user: { ...data.user, name: profile.name, role: profile.role }, mode: 'supabase' };
     }
 
@@ -193,6 +178,17 @@
 
     // ---- 데이터 CRUD (RLS가 user_id를 강제하므로 여기서는 그대로 전달) ----
     // columns: 'a,b,c' — 큰 컬럼(첨부파일 base64 본문 등)을 빼고 가볍게 읽을 때 쓴다(기본 '*').
+    // v7.26.0: 사용량 화면용 서버 통계(0027 마이그레이션의 app_usage_stats RPC). 함수가 없으면 안내 오류.
+    async usageStats() {
+      const client = await this._ensureClient();
+      const { data, error } = await client.rpc('app_usage_stats');
+      if (error) {
+        if (/app_usage_stats|42883|PGRST202|schema cache/i.test(`${error.code || ''} ${error.message || ''}`)) throw new Error('사용량 함수(0027)가 아직 없어요. Supabase SQL Editor에서 supabase/combined/all_migrations_0001_to_0027.sql을 실행해 주세요.');
+        throw error;
+      }
+      return data;
+    }
+
     async list(table, { where, orderBy, ascending = true, columns } = {}) {
       const client = await this._ensureClient();
       let q = client.from(table).select(columns || '*');

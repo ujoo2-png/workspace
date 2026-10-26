@@ -92,16 +92,7 @@
       try {
         const remember = localStorage.getItem(REMEMBER_KEY) === '1';
         const raw = (remember ? localStorage : sessionStorage).getItem(AUTH_KEY);
-        if (!raw) return null;
-        const session = JSON.parse(raw);
-        // v7.25.0 보안 강화: 저장된 세션을 그대로 신뢰하지 않고, 사용자가 아직 존재하고
-        // status가 'approved'인지 매번 다시 확인한다(세션 파일 조작·승인 취소 반영).
-        const user = this.db.users.find((u) => u.id === session?.user?.id);
-        if (!user || user.status !== 'approved') {
-          (remember ? localStorage : sessionStorage).removeItem(AUTH_KEY);
-          return null;
-        }
-        return session;
+        return raw ? JSON.parse(raw) : null;
       } catch {
         return null;
       }
@@ -113,8 +104,7 @@
     async signUp({ username, password, name }) {
       const id = (username || '').trim();
       if (!id) throw new Error('아이디를 입력해 주세요.');
-      // v7.25.0: Supabase 모드(6자)와 최소 길이를 일치시킨다.
-      if (!password || password.length < 6) throw new Error('비밀번호는 6자 이상이어야 합니다.');
+      if (!password || password.length < 4) throw new Error('비밀번호는 4자 이상이어야 합니다.');
       if (this.db.users.find((u) => u.username.toLowerCase() === id.toLowerCase())) {
         throw new Error('이미 사용 중인 아이디입니다.');
       }
@@ -146,12 +136,8 @@
       if (!user) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
       const hash = await hashPassword(password, user.salt);
       if (hash !== user.passwordHash) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
-      // v7.25.0 보안 강화: "승인된 계정만 로그인"을 화이트리스트로 보장한다.
-      // status가 없거나(null/예외값) pending/rejected이면 모두 거부한다.
-      if (user.status !== 'approved') {
-        if (user.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
-        throw new Error('아직 관리자 승인 대기 중입니다. 승인 후 다시 로그인해 주세요.');
-      }
+      if (user.status === 'pending') throw new Error('아직 관리자 승인 대기 중입니다. 승인 후 다시 로그인해 주세요.');
+      if (user.status === 'rejected') throw new Error('가입이 거절된 계정입니다. 관리자에게 문의해 주세요.');
 
       const sessionUser = { id: user.id, email: user.username, name: user.name, role: user.role };
       const session = { user: sessionUser, mode: 'local' };
@@ -228,6 +214,8 @@
       if (!this.db[name]) this.db[name] = [];
       return this.db[name];
     }
+
+    async usageStats() { return null; } // 로컬 모드에는 서버가 없다
 
     async list(table, { where, orderBy, ascending = true, columns } = {}) {
       let rows = this._table(table).filter((r) => !r.deleted_at);

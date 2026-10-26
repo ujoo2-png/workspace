@@ -21,25 +21,11 @@
     'workspace:publicData:kopisKey',
     'workspace:publicData:opinetKey',
     'workspace:publicData:enabled',
-    // v7.24.0 — 증권 실시간 시세(한국투자증권) 키/시크릿/환경.
-    'workspace:stocks:kisAppKey',
-    'workspace:stocks:kisAppSecret',
-    'workspace:stocks:kisEnv',
-    // v7.25.0 — 증권 시세 공급자 선택 + 커스텀(사용자 정의) API 설정.
-    'workspace:stocks:provider',
-    'workspace:stocks:customProvider',
-    // v7.25.0 — 오늘의 시황·환율 표시 on/off.
-    'workspace:market:fxEnabled',
-    // v7.26.0 — 환율 데이터 출처(공공데이터포털 / 커스텀 API)와 선택한 커스텀 API id.
-    //   ※ 연결 상태(workspace:customApiStatus:*)는 기기별 네트워크 상태라 동기화하지 않는다.
-    'workspace:market:fxSource',
-    'workspace:market:fxCustomApiId',
-    // v7.24.0 — 브리핑 자동 수집 설정(하루 1회 실행 기록 포함).
-    'workspace:briefing:autoCollect',
-    'workspace:briefing:autoCollectLastRun',
-    'workspace:briefing:autoCollectLastCount',
     'workspace:tmdbApiKey',
     'workspace:homeWidgetOrder',
+    'workspace:openmaic', // v7.28.0 — OpenMAIC 주소·수업 링크(키 없음)
+    'workspace:refboard', // v7.27.0 — 디자인 레퍼런스 보드(URL·메모·태그만, 이미지 파일 없음)
+    'workspace:usage:manual', // v7.26.0 — 사용량 화면의 직접 입력값/한도(egress는 이 브라우저에서만 추정하므로 동기화하지 않는다)
     'workspace:clockTimezones',
     'workspace:sidebarCollapsed',
     'workspace:theme',
