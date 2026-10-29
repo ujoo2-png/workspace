@@ -156,6 +156,9 @@ a { color: var(--accent); }
 .nm-btn--danger { color: var(--danger); }
 .nm-btn--danger:hover { background: var(--danger-soft); border-color: var(--danger-soft); }
 
+/* v7.26.0: 작은 보조 버튼(프리셋·자동 감지 등) */
+.nm-btn--sm { font-size: 12px; padding: 5px 10px; border-radius: var(--radius-sm); }
+
 .nm-input, .nm-select, .nm-textarea {
   width: 100%;
   font-family: inherit;
@@ -202,6 +205,42 @@ a { color: var(--accent); }
 .nm-badge--success { color: var(--success); background: var(--success-soft); border-color: transparent; }
 .nm-badge--info { color: var(--info); background: var(--info-soft); border-color: transparent; }
 
+/* v7.26.0: 커스텀 API 연결 상태 배지 (연결/미연결/불안정/오류) */
+.api-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.api-status__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.api-status--ok { color: var(--success); background: var(--success-soft); }
+.api-status--warn { color: var(--warning); background: var(--warning-soft); }
+.api-status--err { color: var(--danger); background: var(--danger-soft); }
+.api-status--muted { color: var(--text-muted); background: var(--surface-2); }
+
+/* v7.24.0: 안내/경고 배너 — 증권·브리핑 화면에서 재사용한다. */
+.nm-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.nm-banner--warning { color: var(--warning); background: var(--warning-soft); border-color: transparent; }
+.nm-banner--danger { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.nm-banner--info { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.nm-banner a { color: inherit; text-decoration: underline; }
+
 .nm-progress {
   width: 100%;
   height: 10px;
@@ -242,11 +281,15 @@ a { color: var(--accent); }
 .nm-toggle--on::after { transform: translateX(20px); }
 
 /* ---- 모달 ---- */
+/* z-index 10100: 로그인 화면(.lo)이 z-index 9999로 화면 전체를 덮으므로,
+   모달은 그보다 항상 위에 떠야 한다. 그렇지 않으면 로그인 전에 개인정보
+   처리방침 같은 모달을 열어도 오버레이 뒤에 숨었다가 로그인 후에야 보인다.
+   (v7.26.0 수정: 이전에는 1000이라 로그인 전에 정책이 보이지 않았다.) */
 .nm-modal-backdrop {
   position: fixed; inset: 0;
   background: rgba(15, 20, 30, 0.5);
   display: flex; align-items: center; justify-content: center;
-  z-index: 1000;
+  z-index: 10100;
   padding: 16px;
 }
 .nm-modal {
@@ -288,12 +331,14 @@ a { color: var(--accent); }
 .nm-modal__body .stack { gap: 8px; }
 
 /* ---- 토스트 ---- */
+/* 모달(10100)보다 위에 떠서, 모달이 열려 있어도 알림이 가려지지 않는다.
+   로그인 화면(.lo, 9999) 위에서도 보여야 하므로 9999보다 크게 둔다. */
 .toast-host {
   position: fixed;
   bottom: 20px; left: 50%;
   transform: translateX(-50%);
   display: flex; flex-direction: column; gap: 8px;
-  z-index: 2000;
+  z-index: 10200;
 }
 .toast {
   background: var(--text);

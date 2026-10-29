@@ -136,5 +136,6 @@ test('sourceHealth: 성공했지만 오래됐으면 stale', () => {
 test('sourceHealth: 최근 성공이면 ok(경고 아님)', () => {
   const r = sourceHealth({ last_run_at: '2026-10-19T00:00:00Z', last_result: 'success' }, { now: NOW });
   assert.equal(r.level, 'ok');
-  assert.equal(isStaleSource({ last_run_at: '2026-10-19T00:00:00Z', last_result: 'success' }, 7), false);
+  // isStaleSource는 실제 현재 시각을 쓰므로 "하루 전"을 동적으로 만든다(고정 날짜는 시간이 지나면 깨진다).
+  assert.equal(isStaleSource({ last_run_at: new Date(Date.now() - 86400000).toISOString(), last_result: 'success' }, 7), false);
 });

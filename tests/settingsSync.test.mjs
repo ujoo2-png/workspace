@@ -21,9 +21,17 @@ const { decideLoad, mergeSettings, shouldDiscardLocal, shouldReload, createBatch
 
 const K = { cities: 'workspace:weatherCities', theme: 'workspace:theme', tmdb: 'workspace:tmdbApiKey' };
 
-test('동기화 키 목록: 요청된 14개 + v7.19.0 Health 2개(목표값·복약 알림)를 모두 포함하고 캐시/상태/세션 키는 없다', () => {
-  assert.equal(SYNCED_KEYS.length, 24);
+test('동기화 키 목록: 요청된 14개 + v7.19.0 Health 2개 + v7.24.0 증권 3개·브리핑 자동수집 3개 + v7.25.0 공급자 3개를 모두 포함하고 캐시/상태/세션 키는 없다', () => {
+  assert.equal(SYNCED_KEYS.length, 35); // v7.26.0: 환율 출처 2개 추가 → 32, v7.30.0: 합본에 OpenMAIC·디자인 레퍼런스·사용량 직접입력 3개 → 35
   assert.ok(SYNCED_KEYS.includes('workspace:health:targets') && SYNCED_KEYS.includes('workspace:health:medReminder'));
+  assert.ok(SYNCED_KEYS.includes('workspace:stocks:kisAppKey') && SYNCED_KEYS.includes('workspace:stocks:kisAppSecret') && SYNCED_KEYS.includes('workspace:stocks:kisEnv'));
+  assert.ok(SYNCED_KEYS.includes('workspace:stocks:provider') && SYNCED_KEYS.includes('workspace:stocks:customProvider'));
+  assert.ok(SYNCED_KEYS.includes('workspace:market:fxEnabled'));
+  assert.ok(SYNCED_KEYS.includes('workspace:market:fxSource') && SYNCED_KEYS.includes('workspace:market:fxCustomApiId'));
+  assert.ok(SYNCED_KEYS.includes('workspace:openmaic') && SYNCED_KEYS.includes('workspace:refboard') && SYNCED_KEYS.includes('workspace:usage:manual'));
+  // 연결 상태(기기별)는 동기화 대상이 아니어야 한다.
+  assert.ok(!SYNCED_KEYS.some((k) => k.includes('customApiStatus')), '연결 상태는 기기별이라 동기화하면 안 됩니다');
+  assert.ok(SYNCED_KEYS.includes('workspace:briefing:autoCollect') && SYNCED_KEYS.includes('workspace:briefing:autoCollectLastRun'));
   for (const k of ['workspace:weatherCities', 'workspace:customApis', 'workspace:publicData:dataGoKrKey', 'workspace:publicData:kopisKey',
     'workspace:publicData:opinetKey', 'workspace:publicData:enabled', 'workspace:tmdbApiKey', 'workspace:homeWidgetOrder',
     'workspace:clockTimezones', 'workspace:sidebarCollapsed', 'workspace:theme', 'workspace:schedule:hideDone',

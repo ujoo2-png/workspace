@@ -20,7 +20,7 @@ const MIGRATIONS = fs
   .readdirSync(path.join(root, 'supabase/migrations'))
   .filter((f) => f.endsWith('.sql'))
   .map((f) => path.join('supabase/migrations', f));
-const COMBINED = 'supabase/combined/all_migrations_0001_to_0029.sql';
+const COMBINED = 'supabase/combined/all_migrations_0001_to_0031.sql';
 
 /** 소스에서 `$$` 토큰의 위치(인덱스)를 전부 수집한다. */
 function dollarTagPositions(src) {
