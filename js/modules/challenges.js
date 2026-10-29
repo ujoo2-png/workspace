@@ -79,7 +79,8 @@
 
       container.append(ddayStrip());
 
-      const rows = appState.challenges.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      // v7.31.0: 끌어서 정한 순서가 있으면 그 순서를, 없으면 최근 등록순.
+      const rows = window.Reorder.sort('challenges', appState.challenges.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')));
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '진행 중인 챌린지가 없습니다. 운동, 독서, 습관 만들기 등을 등록해보세요.'));
         return;
@@ -99,10 +100,11 @@
         const mood = computeMood(checkins, today);
 
         grid.append(
-          el('div', { class: 'nm-card challenge-card' }, [
+          el('div', { class: 'nm-card challenge-card', 'data-rid': c.id }, [
             el('div', { class: 'row row--between wrap' }, [
               el('div', {}, [
                 el('div', { class: 'row wrap', style: 'gap:6px' }, [
+                  window.Reorder.grip(),
                   el('span', { class: `mood-emoji mood-emoji--${mood.kind}`, title: mood.label }, mood.emoji),
                   el('strong', { style: 'font-size:15px; word-break:keep-all' }, c.title),
                   el('span', { class: 'nm-badge' }, c.category || '기타'),
@@ -148,6 +150,7 @@
         );
       }
       container.append(grid);
+      window.Reorder.enable(grid, 'challenges');
     }
 
     // ---- 이번 주(월~일) 달성 알약 7칸 + 주간 달성률 링 ----

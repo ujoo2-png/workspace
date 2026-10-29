@@ -15,7 +15,7 @@
     let tagFilter = 'all';
     let typeFilter = 'all'; // all | link | memo
     let selected = new Set();
-    let sortKey = 'created_at';
+    let sortKey = (window.Reorder && window.Reorder.getOrder('knowledge').length) ? 'my_order' : 'created_at'; // v7.31.0: 내 순서
     let sortDir = 'desc';
 
     function draw() {
@@ -106,6 +106,10 @@
             el('span', { class: 'text-muted' }, '전체선택'),
           ]),
           el('button', {
+            class: `nm-btn ${sortKey === 'my_order' ? 'nm-btn--primary' : ''}`, id: 'knowledge-myorder', title: '켜면 ⠿ 손잡이를 끌어 내 마음대로 순서를 정할 수 있어요',
+            onclick: () => { sortKey = sortKey === 'my_order' ? 'created_at' : 'my_order'; sortDir = 'desc'; draw(); },
+          }, sortKey === 'my_order' ? '↕ 내 순서 (켜짐)' : '↕ 내 순서로 정렬'),
+          el('button', {
             class: 'nm-btn nm-btn--danger',
             disabled: selCount === 0 || undefined,
             onclick: async () => {
@@ -119,12 +123,13 @@
         ])
       );
 
+      const dragOn = sortKey === 'my_order' && !query.trim() && tagFilter === 'all' && typeFilter === 'all';
       const tableWrap = el('div', { class: 'data-table-wrap' });
       const table = el('table', { class: 'data-table' });
       table.append(
         el('colgroup', {}, [
           el('col', { style: 'width:34px' }),
-          el('col', { style: 'width:40px' }),
+          el('col', { style: dragOn ? 'width:66px' : 'width:40px' }),
           el('col', { style: 'width:34%' }),
           el('col', { style: 'width:10%' }),
           el('col', { style: 'width:24%' }),
@@ -159,7 +164,7 @@
       rows.forEach((d, idx) => {
         const attachCount = appState.getAttachments('knowledge_docs', d.id).length;
         tbody.append(
-          el('tr', {}, [
+          el('tr', { 'data-rid': d.id }, [
             el('td', {}, [
               el('input', {
                 type: 'checkbox',
@@ -167,7 +172,7 @@
                 onchange: (e) => { if (e.target.checked) selected.add(d.id); else selected.delete(d.id); draw(); },
               }),
             ]),
-            el('td', {}, String(idx + 1)),
+            el('td', {}, dragOn ? [window.Reorder.grip(), String(idx + 1)] : String(idx + 1)),
             el('td', { style: 'cursor:pointer', onclick: () => openViewModal(d) }, [
               el('strong', {}, escapeHtml(d.title)),
               d.memo ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap' }, escapeHtml(d.memo)) : null,
@@ -186,6 +191,7 @@
         );
       });
       table.append(tbody);
+      if (dragOn) window.Reorder.enable(tbody, 'knowledge');
       tableWrap.append(table);
       container.append(tableWrap);
     }
@@ -201,6 +207,7 @@
     }
 
     function sortKnowledgeRows(rows, key, dir) {
+      if (key === 'my_order') return window.Reorder.sort('knowledge', rows);
       const sorted = rows.slice().sort((a, b) => {
         let cmp;
         if (key === 'attach') cmp = appState.getAttachments('knowledge_docs', a.id).length - appState.getAttachments('knowledge_docs', b.id).length;

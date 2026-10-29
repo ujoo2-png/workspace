@@ -1,14 +1,15 @@
 // 증권 시세 서비스 (v7.25.0) — 여러 증권 API 공급자를 지원한다.
 //
 // 지원 공급자(provider):
+//   · 'naver'  : (v7.31.0, 기본값) 네이버 증권 비공식 JSON — 키·토큰이 필요 없어 카톡 알림이 오지 않는다. 조회 전용.
 //   · 'kis'    : 한국투자증권(KIS) 개발자 API(공식, 키 필요). 국내/해외 현재가 + 일봉 차트.
 //   · 'custom' : 사용자가 직접 등록하는 "아무 HTTP JSON API". URL 템플릿 + 응답 필드 경로만 지정하면
 //                어떤 증권사/개인 API든 연결할 수 있다(코드 수정 불필요). 프록시(/api/stock-proxy)를 거친다.
 //   · 'none'   : 외부 연동 없이 수동 입력만(기본값).
 //
 // 정직한 안내:
-//   · 네이버 금융은 공식 시세 API가 없다. api.finance.naver.com 등은 비공식 크롤링 엔드포인트로
-//     CORS를 막아두었고 약관상 보장이 없다 → 이 앱은 기본 제공하지 않는다. 필요하면 'custom'으로 직접 등록할 수 있다.
+//   · 네이버 증권은 공식 시세 API가 없다. 'naver' 공급자는 네이버 모바일 증권이 쓰는 비공식 주소를 서버 프록시
+//     (/api/market-proxy, 허용 호스트 고정)로 읽기만 한다. 주소가 바뀌면 동작이 멈출 수 있고 약관상 보장이 없다.
 //   · 야후 파이낸스(query1.finance.yahoo.com)는 키 없이 쓸 수 있는 비공식 JSON이지만 약관·차단 리스크가 있다.
 //     역시 'custom'으로 등록하도록 안내한다(기본 내장하지 않음).
 //
@@ -39,8 +40,8 @@
   const hasKisKey = () => !!(getKisAppKey() && getKisAppSecret());
 
   // ── 공급자 선택 ───────────────────────────────────────────────────────────
-  const getProvider = () => get(PROVIDER_STORAGE) || 'kis';
-  const setProvider = (p) => set(PROVIDER_STORAGE, ['kis', 'custom', 'none'].includes(p) ? p : 'kis');
+  const getProvider = () => get(PROVIDER_STORAGE) || 'naver'; // v7.31.0: 기본 네이버(KIS는 조회마다 카톡 알림이 와서)
+  const setProvider = (p) => set(PROVIDER_STORAGE, ['naver', 'kis', 'custom', 'none'].includes(p) ? p : 'naver');
   const getCustomProvider = () => getJson(CUSTOM_STORAGE);
   function setCustomProvider(cfg) {
     if (!cfg) { set(CUSTOM_STORAGE, ''); return; }
@@ -62,12 +63,14 @@
     const p = getProvider();
     if (p === 'custom') return hasCustomProvider();
     if (p === 'kis') return hasKisKey();
+    if (p === 'naver') return true;
     return false;
   }
   const providerLabel = () => {
     const p = getProvider();
     if (p === 'custom') return getCustomProvider()?.name || '커스텀 API';
     if (p === 'kis') return '한국투자증권(KIS)';
+    if (p === 'naver') return '네이버 증권(비공식)';
     return '수동 입력';
   };
 
@@ -75,12 +78,13 @@
     try {
       const raw = localStorage.getItem(CACHE_PREFIX + key);
       if (!raw) return null;
-      const { savedAt, price } = JSON.parse(raw);
-      return Date.now() - savedAt > CACHE_TTL_MS ? null : price;
+      const { savedAt, price, quote } = JSON.parse(raw);
+      if (Date.now() - savedAt > CACHE_TTL_MS) return null;
+      return quote || { price };
     } catch { return null; }
   }
-  function cacheSet(key, price) {
-    try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ savedAt: Date.now(), price })); } catch {}
+  function cacheSet(key, quote) {
+    try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ savedAt: Date.now(), price: quote.price, quote })); } catch {}
   }
   function cacheClear() {
     try {
@@ -93,12 +97,27 @@
   // 해외: /uapi/overseas-price/v1/quotations/price        (tr_id: HHDFS00000300)
   const MARKET_CODE = { KRX: 'J', US: 'NAS' }; // KIS 거래소 코드(국내 J=KRX, 해외 기본 나스닥)
 
-  async function callKis(path, trId, params) {
+  // v7.31.0: 서버리스는 콜드스타트마다 토큰을 새로 발급해 KIS가 매번 카톡 알림을 보냈다 → 발급받은 토큰을 이 브라우저에 보관했다가
+  //          재사용한다(KIS 토큰 유효 24시간, 여기선 20시간만 사용). 만료/거부되면 한 번만 새로 받는다.
+  const TOKEN_STORAGE = 'workspace:stocks:kisToken';
+  const TOKEN_TTL_MS = 20 * 3600 * 1000;
+  function readToken() {
+    const t = getJson(TOKEN_STORAGE);
+    if (!t || !t.token || Date.now() - t.at > TOKEN_TTL_MS || t.key !== getKisAppKey() || t.env !== getKisEnv()) return '';
+    return t.token;
+  }
+  const saveToken = (token) => set(TOKEN_STORAGE, token ? JSON.stringify({ token, at: Date.now(), key: getKisAppKey(), env: getKisEnv() }) : '');
+
+  async function callKis(path, trId, params, retried = false) {
+    const cached = readToken();
     const res = await fetch(
       `/api/kis-proxy?path=${encodeURIComponent(path)}&tr_id=${encodeURIComponent(trId)}&params=${encodeURIComponent(JSON.stringify(params))}`,
-      { headers: { 'x-kis-appkey': getKisAppKey(), 'x-kis-appsecret': getKisAppSecret(), 'x-kis-env': getKisEnv() }, signal: AbortSignal.timeout(12000) }
+      { headers: { 'x-kis-appkey': getKisAppKey(), 'x-kis-appsecret': getKisAppSecret(), 'x-kis-env': getKisEnv(), ...(cached ? { 'x-kis-token': cached } : {}) }, signal: AbortSignal.timeout(12000) }
     );
+    const issued = res.headers.get('x-kis-token');
+    if (issued) saveToken(issued);
     const text = await res.text();
+    if (cached && !retried && (res.status === 401 || /EGW00(121|123)/.test(text))) { saveToken(''); return callKis(path, trId, params, true); }
     let data;
     try { data = JSON.parse(text); } catch { throw new Error(`시세 응답을 읽지 못했습니다(HTTP ${res.status})`); }
     if (!res.ok) throw new Error(data.error || data.msg1 || `시세 조회 실패(HTTP ${res.status})`);
@@ -186,6 +205,7 @@
   /** 단일 종목 현재가(현재 선택된 공급자 사용). */
   async function fetchPrice(symbol, market = 'KRX') {
     const p = getProvider();
+    if (p === 'naver') return window.NaverService.fetchQuote(symbol, market);
     if (p === 'custom') return fetchCustomPrice(symbol, market);
     if (p === 'kis') return market === 'US' ? fetchOverseasPrice(symbol, market) : fetchDomesticPrice(symbol);
     throw new Error('시세 공급자가 설정되지 않았습니다.');
@@ -198,30 +218,43 @@
    */
   async function fetchPrices(holdings, { force = false } = {}) {
     const out = {};
+    const quotes = {};
     const errors = [];
-    if (!hasQuoteProvider()) return { prices: out, errors: [{ symbol: '*', message: `${providerLabel()} 시세 정보가 등록되지 않았습니다(설정 → 연동).` }] };
+    if (!hasQuoteProvider()) return { prices: out, quotes, errors: [{ symbol: '*', message: `${providerLabel()} 시세 정보가 등록되지 않았습니다(설정 → 연동).` }] };
+    const todo = [];
+    const seen = new Set();
     for (const h of holdings || []) {
       if (!h.symbol) continue;
       const key = `${h.market || 'KRX'}:${h.symbol}`;
+      if (seen.has(key)) continue; // 같은 종목이 여러 계좌에 있어도 한 번만 조회
+      seen.add(key);
       if (!force) {
         const cached = cacheGet(key);
-        if (cached !== null) { out[key] = cached; continue; }
+        if (cached) { out[key] = cached.price; quotes[key] = cached; continue; }
       }
-      try {
-        const r = await fetchPrice(h.symbol, h.market || 'KRX');
-        if (Number.isFinite(r.price) && r.price > 0) { out[key] = r.price; cacheSet(key, r.price); }
-        else errors.push({ symbol: h.symbol, message: '현재가를 받지 못했습니다.' });
-      } catch (e) {
-        errors.push({ symbol: h.symbol, message: e.message || String(e) });
-      }
+      todo.push({ h, key });
     }
-    return { prices: out, errors };
+    // 네이버는 키가 없어 가볍게 병렬(4개씩), KIS/커스텀은 호출 제한을 고려해 순차.
+    const width = getProvider() === 'naver' ? 4 : 1;
+    for (let i = 0; i < todo.length; i += width) {
+      await Promise.all(todo.slice(i, i + width).map(async ({ h, key }) => {
+        try {
+          const r = await fetchPrice(h.symbol, h.market || 'KRX');
+          if (Number.isFinite(r.price) && r.price > 0) { out[key] = r.price; quotes[key] = { ...r, at: Date.now() }; cacheSet(key, quotes[key]); }
+          else errors.push({ symbol: h.symbol, message: '현재가를 받지 못했습니다.' });
+        } catch (e) {
+          errors.push({ symbol: h.symbol, message: e.message || String(e) });
+        }
+      }));
+    }
+    return { prices: out, quotes, errors };
   }
 
   /** 종목명 자동 채움(현재 공급자). */
   async function lookupName(symbol, market = 'KRX') {
     const p = getProvider();
     try {
+      if (p === 'naver') return (await window.NaverService.fetchQuote(symbol, market)).name || '';
       if (p === 'custom') return await lookupNameCustom(symbol, market);
       if (p === 'kis') return (await (market === 'US' ? fetchOverseasPrice(symbol, market) : fetchDomesticPrice(symbol))).name || '';
     } catch { /* 무시 */ }
@@ -231,13 +264,18 @@
   /** 일봉 차트(현재 공급자). KIS만 공식 지원 — 커스텀은 미지원(빈 배열). */
   async function fetchDailyChart(symbol, opts = {}) {
     const p = getProvider();
-    if (p === 'kis') return fetchDailyChartKis(symbol, opts);
-    throw new Error('일봉 차트는 현재 한국투자증권(KIS) 공급자에서만 지원합니다.');
+    if (p === 'naver') return { symbol, rows: await window.NaverService.fetchChart(symbol, opts.market || 'KRX', opts.days || 120) };
+    if (p === 'kis' && (opts.market || 'KRX') === 'KRX') return fetchDailyChartKis(symbol, opts);
+    throw new Error('일봉 차트는 네이버 증권 또는 한국투자증권(국내)에서 지원합니다.');
   }
 
   /** 연결 테스트 — 설정 화면의 "연결 테스트" 버튼이 쓴다. */
   async function testConnection() {
     const p = getProvider();
+    if (p === 'naver') {
+      const r = await window.NaverService.fetchQuote('005930', 'KRX');
+      return `네이버 증권 응답 OK — ${r.name || '삼성전자'} 현재가 ${r.price}원 (비공식 주소: 변경되면 실패할 수 있음)`;
+    }
     if (p === 'custom') {
       const r = await fetchCustomPrice('005930', 'KRX');
       return `커스텀 API 응답 OK — 005930 현재가 ${r.price}${r.name ? ` (${r.name})` : ''}`;

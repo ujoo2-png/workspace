@@ -73,7 +73,7 @@
     let selectedBookmarks = new Set();
     let programQuery = '';
     let bookmarkQuery = '';
-    let programSort = { key: 'run_count', dir: 'desc' };
+    let programSort = { key: (window.Reorder && window.Reorder.getOrder('programs').length) ? 'my_order' : 'run_count', dir: 'desc' };
     let bookmarkSort = { key: 'sort_order', dir: 'asc' };
 
     function draw() {
@@ -181,6 +181,10 @@
         const q = programQuery.trim().toLowerCase();
         rows = rows.filter((p) => (p.name || '').toLowerCase().includes(q) || (p.url || '').toLowerCase().includes(q));
       }
+      // v7.31.0: "내 순서" 모드 — ⠿ 손잡이를 끌어 순서를 바꾼다(검색 중에는 끌기 비활성).
+      const myOrder = programSort.key === 'my_order';
+      const dragOn = myOrder && !programQuery.trim();
+      if (myOrder) rows = window.Reorder.sort('programs', rows);
       rows = sortTableRows(rows, programSort, {
         name: (r) => (r.name || '').toLowerCase(),
         url: (r) => (r.url || '').toLowerCase(),
@@ -197,6 +201,10 @@
       const wrap = el('div', {});
       wrap.append(
         el('div', { class: 'filter-bar', style: 'margin-bottom:8px' }, [
+          el('button', {
+            class: `nm-btn ${myOrder ? 'nm-btn--primary' : ''}`, id: 'program-myorder', title: '켜면 ⠿ 손잡이를 끌어 내 마음대로 순서를 정할 수 있어요',
+            onclick: () => { programSort = myOrder ? { key: 'run_count', dir: 'desc' } : { key: 'my_order', dir: 'desc' }; draw(); },
+          }, myOrder ? '↕ 내 순서 (켜짐)' : '↕ 내 순서로 정렬'),
           el('input', {
             class: 'nm-input program-search-input', style: 'max-width:240px', placeholder: '검색(이름/URL)', value: programQuery,
             oninput: (e) => { const pos = e.target.selectionStart; programQuery = e.target.value; draw(); restoreFocus('.program-search-input', pos); },
@@ -223,7 +231,7 @@
       table.append(
         el('colgroup', {}, [
           el('col', { style: 'width:34px' }),
-          el('col', { style: 'width:40px' }),
+          el('col', { style: dragOn ? 'width:66px' : 'width:40px' }),
           el('col', { style: 'width:22%' }),
           el('col', { style: 'width:22%' }),
           el('col', { style: 'width:10%' }),
@@ -250,9 +258,9 @@
         const devTool = pipeline.dev?.tool || '-';
         const project = p.project_id ? appState.projects.find((pr) => pr.id === p.project_id) : null;
         tbody.append(
-          el('tr', {}, [
+          el('tr', { 'data-rid': p.id }, [
             el('td', {}, [rowCheckbox(selectedPrograms, p.id, draw)]),
-            el('td', {}, String(idx + 1)),
+            el('td', {}, dragOn ? [window.Reorder.grip(), String(idx + 1)] : String(idx + 1)),
             el('td', {}, [
               el('div', { style: 'font-weight:700; display:flex; align-items:center; gap:6px' }, [
                 el('span', { class: 'program-icon', 'data-program-icon': p.id }, window.programIcon(p)),
@@ -281,6 +289,7 @@
         );
       });
       table.append(tbody);
+      if (dragOn) window.Reorder.enable(tbody, 'programs');
       tableWrap.append(table);
       wrap.append(tableWrap);
       return wrap;
@@ -589,6 +598,7 @@
         sort_order: (r) => r.sort_order || 0,
       });
       const customOrder = bookmarkSort.key === 'sort_order' && bookmarkSort.dir === 'asc';
+      const dragOn = customOrder && !bookmarkQuery.trim(); // v7.31.0: ⠿ 손잡이로 끌어 순서 변경
       if (!appState.bookmarks.length) {
         return el('div', { class: 'empty-state' }, '자주 방문하는 사이트를 즐겨찾기로 등록해보세요. 클릭하면 바로 이동합니다.');
       }
@@ -621,7 +631,7 @@
       table.append(
         el('colgroup', {}, [
           el('col', { style: 'width:34px' }),
-          el('col', { style: 'width:40px' }),
+          el('col', { style: dragOn ? 'width:66px' : 'width:40px' }),
           el('col', { style: 'width:28%' }),
           el('col', { style: 'width:32%' }),
           el('col', { style: 'width:14%' }),
@@ -645,9 +655,9 @@
         let hostname = '';
         try { hostname = new URL(b.url).hostname; } catch (e) { /* ignore */ }
         tbody.append(
-          el('tr', {}, [
+          el('tr', { 'data-rid': b.id }, [
             el('td', {}, [rowCheckbox(selectedBookmarks, b.id, draw)]),
-            el('td', {}, String(idx + 1)),
+            el('td', {}, dragOn ? [window.Reorder.grip(), String(idx + 1)] : String(idx + 1)),
             el('td', { style: 'cursor:pointer', onclick: () => appState.openBookmark(b.id) }, [
               el('span', { style: 'margin-right:6px' }, b.icon || '⭐'),
               el('strong', {}, escapeHtml(b.title)),
@@ -668,6 +678,7 @@
         );
       });
       table.append(tbody);
+      if (dragOn) window.Reorder.enable(tbody, 'bookmarks', { persist: (ids) => appState.reorderBookmarks(ids) });
       tableWrap.append(table);
       wrap.append(tableWrap);
       return wrap;

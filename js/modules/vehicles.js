@@ -129,7 +129,7 @@
         ])
       );
 
-      const rows = appState.vehicles.filter((v) => !v.deleted_at);
+      const rows = window.Reorder.sort('vehicles', appState.vehicles.filter((v) => !v.deleted_at)); // v7.31.0: 끌어서 순서 변경
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '등록된 차량이 없습니다.'));
         return;
@@ -154,10 +154,11 @@
         const aiSuggestions = buildMaintenanceSuggestions(v, maints, odometerSeries, dailyKm, today);
 
         stack.append(
-          el('div', { class: 'nm-card' }, [
+          el('div', { class: 'nm-card', 'data-rid': v.id }, [
             el('div', { class: 'row row--between wrap' }, [
               el('div', {}, [
                 el('div', { class: 'row wrap' }, [
+                  window.Reorder.grip(),
                   el('strong', { style: 'font-size:15px' }, escapeHtml(v.name)),
                   v.plate_number ? el('span', { class: 'nm-badge' }, escapeHtml(v.plate_number)) : null,
                   el('span', { class: 'nm-badge' }, FUEL_TYPE_LABEL[v.fuel_type] || FUEL_TYPE_LABEL.gasoline),
@@ -240,6 +241,7 @@
         );
       }
       container.append(stack);
+      window.Reorder.enable(stack, 'vehicles');
     }
 
     function chartBlock(title, svgNode) {

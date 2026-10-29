@@ -543,7 +543,7 @@
       }, '저장');
 
       const providerSel = el('select', { class: 'nm-select', name: 'stock_provider' });
-      for (const [v, label] of [['kis', '한국투자증권(KIS) — 공식, 앱키 필요'], ['custom', '커스텀 API — 내가 등록한 JSON API'], ['none', '사용 안 함(수동 입력)']]) {
+      for (const [v, label] of [['naver', '네이버 증권 — 키 불필요(비공식·기본)'], ['kis', '한국투자증권(KIS) — 공식, 앱키 필요(조회 시 카톡 알림 가능)'], ['custom', '커스텀 API — 내가 등록한 JSON API'], ['none', '사용 안 함(수동 입력)']]) {
         providerSel.append(el('option', { value: v, selected: window.getStockProvider() === v || undefined }, label));
       }
       const providerConfigHost = el('div', { style: 'margin-top:8px' });
@@ -557,6 +557,10 @@
         providerConfigHost.replaceChildren();
         const p = window.getStockProvider();
         if (p === 'none') { providerConfigHost.append(el('p', { class: 'text-muted', style: 'font-size:11px' }, '외부 시세 연동을 쓰지 않습니다. 증권 화면에서 보유 정보만 수동으로 관리합니다.')); return; }
+        if (p === 'naver') {
+          providerConfigHost.append(el('p', { class: 'text-muted', style: 'font-size:11px' }, '네이버 증권 화면이 쓰는 비공식 주소를 서버 프록시(/api/market-proxy)로 읽기만 합니다(조회 전용, 키·토큰·카톡 알림 없음). 공식 API가 아니라 네이버가 주소를 바꾸면 중단될 수 있습니다. 해외 종목은 AAPL 또는 AAPL.O 형태로 입력하세요.'), el('div', { class: 'row', style: 'margin:6px 0' }, [testBtn]));
+          return;
+        }
         if (p === 'kis') {
           providerConfigHost.append(
             el('p', { class: 'text-muted', style: 'font-size:11px' }, [

@@ -118,12 +118,19 @@
   async function fetchExchangeRates({ date } = {}) {
     const source = getFxSource();
     const cacheKey = `fx:${source}:${source === 'custom' ? getFxCustomApiId() : 'public'}:${date || 'today'}`;
-    const cached = cacheGet(cacheKey, 1000 * 60 * 60 * 3); // 3시간 캐시(환율은 하루 몇 번 고시)
+    const cached = cacheGet(cacheKey, 1000 * 60 * 30); // 30분 캐시(환율은 하루 몇 번 고시)
     if (cached) return cached;
 
-    const rows = source === 'custom'
-      ? await fetchExchangeRatesCustom()
-      : await fetchExchangeRatesPublic({ date });
+    let rows;
+    if (source === 'custom') rows = await fetchExchangeRatesCustom();
+    else {
+      // v7.31.0: 공공데이터 키가 없거나 호출이 실패하면 키 없는 Frankfurter(ECB 참조환율)로 자동 대체한다.
+      try { rows = await fetchExchangeRatesPublic({ date }); }
+      catch (e) {
+        try { rows = await window.FxService.fetchOverview(); }
+        catch (e2) { throw new Error(`${e.message} / 대체 환율(Frankfurter)도 실패: ${e2.message}`); }
+      }
+    }
     cacheSet(cacheKey, rows);
     return rows;
   }
@@ -182,9 +189,10 @@
     const cached = cacheGet(cacheKey, 1000 * 60 * 5); // 5분 캐시(장중에는 자주 바뀜)
     if (cached) return cached;
 
-    const provider = window.getStockProvider ? window.getStockProvider() : 'kis';
+    const provider = window.getStockProvider ? window.getStockProvider() : 'naver';
     let rows = [];
-    if (provider === 'kis' && window.hasKisKey()) rows = await fetchIndicesKis();
+    if (provider === 'naver') rows = await window.NaverService.fetchIndices();
+    else if (provider === 'kis' && window.hasKisKey()) rows = await fetchIndicesKis();
     else if (provider === 'custom') rows = await fetchIndicesCustom();
 
     if (!rows.length) throw new Error('시황(지수)을 표시하려면 설정 → 증권 시세 API에서 KIS 키 또는 커스텀 지수 API를 등록하세요.');

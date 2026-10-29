@@ -15,8 +15,37 @@
     root.append(container);
     // 시세는 화면에 들어올 때 한 번 받아 메모리에 둔다(수동 새로고침 전까지 유지).
     let prices = {};
+    let quotes = {};          // v7.31.0: 전일대비 등 상세 시세 { 'KRX:005930': {price, change, changeRate, ...} }
     let pricesLoaded = false;
     let loadingPrices = false;
+    let lastUpdated = null;   // 마지막 시세 갱신 시각
+    let lastError = '';
+    const AUTO_KEY = 'workspace:stocks:autoRefresh';
+    const autoOn = () => { try { return localStorage.getItem(AUTO_KEY) === '1'; } catch { return false; } };
+    let timer = null;
+    // 장중(평일 09:00~15:40 KST)에만 자동 갱신 — 장 마감 후 불필요한 호출을 하지 않는다.
+    const marketOpenNow = (d = new Date()) => {
+      const k = new Date(d.getTime() + (d.getTimezoneOffset() + 540) * 60000);
+      const day = k.getDay(), m = k.getHours() * 60 + k.getMinutes();
+      return day >= 1 && day <= 5 && m >= 540 && m <= 940;
+    };
+    function schedule() {
+      clearInterval(timer); timer = null;
+      if (!autoOn()) return;
+      timer = setInterval(() => {
+        if (!container.isConnected) { clearInterval(timer); timer = null; return; }
+        if (document.hidden || !marketOpenNow()) return;
+        loadPrices(true);
+      }, 60000);
+    }
+
+    const tried = new Set();
+    function loadMissing() {
+      if (loadingPrices || !window.hasQuoteProvider()) return;
+      const k = (h) => `${h.market || 'KRX'}:${h.symbol}`;
+      const fresh = appState.stockHoldings.filter((h) => !h.deleted_at && h.symbol && !tried.has(k(h)) && !(k(h) in prices));
+      if (fresh.length) { fresh.forEach((h) => tried.add(k(h))); loadPrices(false); }
+    }
 
     async function loadPrices(force = false) {
       if (loadingPrices) return;
@@ -24,10 +53,14 @@
       if (!holdings.length) { prices = {}; pricesLoaded = true; return; }
       if (!window.hasQuoteProvider()) { prices = {}; pricesLoaded = true; return; }
       loadingPrices = true;
+      lastError = '';
       draw();
       try {
-        const { prices: p, errors } = await window.fetchPrices(holdings, { force });
+        const { prices: p, quotes: q, errors } = await window.fetchPrices(holdings, { force });
         prices = p;
+        quotes = q || {};
+        if (Object.keys(p).length) lastUpdated = new Date();
+        lastError = errors.length ? errors[0].message : '';
         if (errors.length && errors[0].symbol !== '*') {
           toast(`일부 종목 시세를 받지 못했습니다: ${errors.slice(0, 2).map((e) => e.symbol).join(', ')}${errors.length > 2 ? ' 외' : ''}`, 'error');
         }
@@ -37,6 +70,7 @@
         loadingPrices = false;
         pricesLoaded = true;
         draw();
+        loadMissing(); // 조회 중에 새로 등록된 종목이 있으면 이어서 조회
       }
     }
 
@@ -52,6 +86,20 @@
           ]),
         ])
       );
+
+      container.append(el('div', { class: 'stock-toolbar' }, [
+        el('span', { class: 'stock-chip', title: '설정 → 증권 시세 API에서 바꿀 수 있습니다' }, `시세: ${window.stockProviderLabel()}`),
+        lastUpdated
+          ? el('span', { class: 'stock-chip stock-chip--ok' }, `갱신 ${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`)
+          : null,
+        lastError && !loadingPrices ? el('span', { class: 'stock-chip stock-chip--warn', title: lastError }, '일부 시세 실패') : null,
+        el('label', { style: 'display:inline-flex; gap:4px; align-items:center; cursor:pointer' }, [
+          el('input', { type: 'checkbox', checked: autoOn() || undefined, onchange: (e) => { try { localStorage.setItem(AUTO_KEY, e.target.checked ? '1' : '0'); } catch { /* 무시 */ } schedule(); draw(); } }),
+          '장중 1분 자동 갱신',
+        ]),
+        autoOn() && !marketOpenNow() ? el('span', {}, '(지금은 장외 시간이라 대기)') : null,
+        el('span', {}, '종목을 클릭하면 시세·차트를 볼 수 있습니다.'),
+      ]));
 
       if (!window.hasQuoteProvider()) {
         const label = window.stockProviderLabel ? window.stockProviderLabel() : '증권 API';
@@ -101,7 +149,7 @@
       const stack = el('div', { class: 'stack' });
       const noAccount = holdings.filter((h) => !h.account_id);
       if (noAccount.length) stack.append(accountSection(null, noAccount));
-      for (const acc of accounts) {
+      for (const acc of window.Reorder.sort('stock-accounts', accounts)) {
         const list = appState.stockHoldings.filter((h) => !h.deleted_at && h.account_id === acc.id);
         stack.append(accountSection(acc, list));
       }
@@ -109,6 +157,7 @@
         stack.append(el('div', { class: 'nm-card text-muted', style: 'font-size:13px' }, '표시할 보유 종목이 없습니다.'));
       }
       container.append(stack);
+      window.Reorder.enable(stack, 'stock-accounts'); // v7.31.0: 증권사 카드를 끌어 순서 변경
     }
 
     // ② 총자산 카드(v7.26.0) — 총 평가금액을 크게 강조 + 기존 지표 유지.
@@ -139,10 +188,13 @@
       return el('div', { class: 'nm-card asset-card' }, [head, grid]);
     }
 
-    // v7.25.0: 오늘의 시황(지수) + 환율 카드. 값이 없으면 지어내지 않고 안내만 한다.
-    let marketData = null;      // { indices:[], fx:{majors,rest} }
+    // v7.31.0: 오늘의 시황(지수) + 환율 카드(기간별 차트). 값이 없으면 지어내지 않고 이유를 안내한다.
+    let marketData = null;      // { indices:[], fx:{majors,rest}, rows:[] }
     let marketLoading = false;
     let marketTried = false;
+    let fxCode = 'USD';
+    let fxPeriod = '1m';
+    const fxSeriesCache = {};   // `${code}:${period}` → rows
     function buildMarketCard() {
       const card = el('div', { class: 'nm-card market-card' });
       const body = el('div', { class: 'market-card__body' });
@@ -151,13 +203,35 @@
         el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', disabled: marketLoading || undefined, onclick: () => loadMarket(true) }, marketLoading ? '⏳' : '🔄'),
       ]);
       card.append(head, body);
+      const chartHost = el('div', {});
+      function paintChart() {
+        chartHost.replaceChildren(el('div', { class: 'text-muted', style: 'font-size:12px; padding:10px' }, '차트를 불러오는 중…'));
+        const key = `${fxCode}:${fxPeriod}`;
+        const done = (rows) => {
+          const st = window.PriceChart.stats(rows);
+          const cur = window.FxService.CURRENCIES.find((c) => c.code === fxCode);
+          const f = (v) => Number(v).toLocaleString('ko-KR', { maximumFractionDigits: 2 });
+          chartHost.replaceChildren(
+            window.PriceChart.render(rows, { fmt: f, height: 200 }),
+            el('div', { class: 'chart-stats' }, [
+              el('div', {}, ['기간 변화', el('b', { class: `stock-pnl--${pnlClass(st.change)}` }, `${st.change > 0 ? '+' : ''}${f(st.change)} (${st.changeRate > 0 ? '+' : ''}${st.changeRate.toFixed(2)}%)`)]),
+              el('div', {}, ['최고', el('b', {}, `${f(st.high.v)} · ${st.high.date.slice(5)}`)]),
+              el('div', {}, ['최저', el('b', {}, `${f(st.low.v)} · ${st.low.date.slice(5)}`)]),
+              el('div', {}, ['평균', el('b', {}, f(st.avg))]),
+            ]),
+            el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, `${cur ? cur.label : fxCode} → 원(KRW). 출처: 유럽중앙은행(ECB) 참조환율 · 영업일 기준 하루 1회 고시, 은행 매매기준율과 다를 수 있습니다.`)
+          );
+        };
+        if (fxSeriesCache[key]) { done(fxSeriesCache[key]); return; }
+        window.FxService.fetchSeries(fxCode, fxPeriod).then((rows) => { fxSeriesCache[key] = rows; if (chartHost.isConnected || true) done(rows); })
+          .catch((e) => chartHost.replaceChildren(el('div', { class: 'nm-banner nm-banner--warning' }, `환율 차트를 불러오지 못했습니다: ${e.message}`)));
+      }
       function paint() {
         body.replaceChildren();
         if (!marketData) {
           body.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '시황·환율을 불러오는 중입니다…'));
           return;
         }
-        // 지수
         const idx = marketData.indices || [];
         body.append(el('div', { class: 'market-sec' }, [
           el('div', { class: 'market-sec__label' }, '지수'),
@@ -165,27 +239,35 @@
             ? el('div', { class: 'market-chips' }, idx.map((r) => el('div', { class: 'market-chip' }, [
                 el('span', { class: 'market-chip__name' }, r.label),
                 el('strong', { class: 'market-chip__val' }, num(r.value)),
-                el('span', { class: `market-chip__chg ${pnlClass(r.changeRate)}` }, r.changeRate === null || r.changeRate === undefined ? '' : `${r.changeRate > 0 ? '▲' : r.changeRate < 0 ? '▼' : ''}${Math.abs(r.changeRate).toFixed(2)}%`),
+                el('span', { class: `market-chip__chg stock-pnl--${pnlClass(r.changeRate)}` }, r.changeRate === null || r.changeRate === undefined ? '' : `${r.changeRate > 0 ? '▲' : r.changeRate < 0 ? '▼' : ''}${Math.abs(r.changeRate).toFixed(2)}%`),
               ])))
             : el('span', { class: 'text-muted', style: 'font-size:12px' }, marketData.indexNote || '지수 정보를 불러오지 못했습니다.'),
         ]));
-        // 환율
-        const fx = marketData.fx;
-        const fxSrc = window.getFxSource && window.getFxSource() === 'custom'
-          ? (() => { const id = window.getFxCustomApiId && window.getFxCustomApiId(); const a = (window.listCustomApis ? window.listCustomApis() : []).find((x) => x.id === id); return a ? a.name : '커스텀 API'; })()
-          : '공공데이터포털';
-        body.append(el('div', { class: 'market-sec' }, [
-          el('div', { class: 'market-sec__label' }, [
-            '환율(매매기준율)',
-            el('span', { class: 'text-muted', style: 'font-weight:400; margin-left:6px; text-transform:none' }, `출처: ${escapeHtml(fxSrc)}`),
-          ]),
-          fx && fx.majors && fx.majors.length
-            ? el('div', { class: 'market-chips' }, fx.majors.map((r) => el('div', { class: 'market-chip' }, [
-                el('span', { class: 'market-chip__name' }, r.name || r.unit),
-                el('strong', { class: 'market-chip__val' }, num(r.rate)),
-              ])))
-            : el('span', { class: 'text-muted', style: 'font-size:12px' }, marketData.fxNote || '환율 정보를 불러오지 못했습니다.'),
+        const rows = marketData.rows || [];
+        const ecb = rows.length && rows[0].src === 'ecb';
+        body.append(el('div', { class: 'market-sec__label' }, [
+          '환율',
+          el('span', { class: 'text-muted', style: 'font-weight:400; margin-left:6px; text-transform:none' }, ecb ? '출처: ECB 참조환율(Frankfurter)' : '출처: 매매기준율(공공데이터/커스텀)'),
         ]));
+        if (!rows.length) {
+          body.append(el('div', { class: 'nm-banner nm-banner--warning' }, marketData.fxNote || '환율 정보를 불러오지 못했습니다.'));
+          return;
+        }
+        const tiles = (marketData.fx.majors.length ? marketData.fx.majors : rows).map((r) => {
+          const code = String(r.unit).replace(/\(.*\)/, '');
+          return el('button', { type: 'button', class: 'fx-tile', 'aria-pressed': code === fxCode ? 'true' : 'false', 'data-fx': code, onclick: () => { fxCode = code; paint(); } }, [
+            el('span', { class: 'market-chip__name' }, r.name || r.unit),
+            el('span', { class: 'fx-tile__rate' }, num(r.rate)),
+            r.changeRate !== null && r.changeRate !== undefined
+              ? el('span', { class: `market-chip__chg stock-pnl--${pnlClass(r.changeRate)}` }, `${r.changeRate > 0 ? '▲' : r.changeRate < 0 ? '▼' : ''}${Math.abs(r.changeRate).toFixed(2)}%`)
+              : null,
+          ]);
+        });
+        body.append(el('div', { class: 'fx-grid' }, tiles));
+        body.append(el('div', { class: 'period-tabs' }, window.FxService.PERIODS.map((pd) =>
+          el('button', { type: 'button', class: 'nm-btn', 'aria-pressed': pd.key === fxPeriod ? 'true' : 'false', 'data-period': pd.key, onclick: () => { fxPeriod = pd.key; paint(); } }, pd.label))));
+        body.append(chartHost);
+        paintChart();
       }
       paint();
       if (!marketTried) { marketTried = true; loadMarket(false); }
@@ -195,20 +277,98 @@
     async function loadMarket(force) {
       if (marketLoading) return;
       marketLoading = true;
-      if (force) { marketData = null; draw(); }
+      if (force) { marketData = null; for (const k of Object.keys(fxSeriesCache)) delete fxSeriesCache[k]; draw(); }
       const indices = [];
       let indexNote = '';
-      let fx = null;
+      let rows = [];
       let fxNote = '';
       try { indices.push(...await window.fetchIndices()); }
       catch (e) { indexNote = e.message; }
       if (window.getFxEnabled()) {
-        try { const rows = await window.fetchExchangeRates(); fx = window.orderMajorFx(rows); }
+        try { rows = await window.fetchExchangeRates(); }
         catch (e) { fxNote = e.message; }
       } else { fxNote = '환율 표시가 꺼져 있습니다(설정에서 켤 수 있습니다).'; }
-      marketData = { indices, indexNote, fx, fxNote };
+      marketData = { indices, indexNote, rows, fx: window.orderMajorFx(rows), fxNote };
       marketLoading = false;
       draw();
+    }
+
+    // v7.31.0: 보유 종목 클릭 → 시세 상세(현재가·전일대비·차트·내 평단/목표/손절선·손익).
+    function openQuoteDetail(h) {
+      const key = `${h.market || 'KRX'}:${h.symbol}`;
+      openModal({
+        title: `${h.name || h.symbol} 시세`,
+        width: '640px',
+        contentBuilder(body) {
+          const head = el('div', { class: 'quote-head' }, [el('span', { class: 'text-muted' }, '시세를 불러오는 중…')]);
+          const grid = el('div', { class: 'quote-grid' });
+          const tabs = el('div', { class: 'period-tabs' });
+          const chartHost = el('div', {});
+          const foot = el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:8px' });
+          body.append(head, grid, tabs, chartHost, foot);
+          let chartRows = null;
+          let period = 90;
+          const PERIODS = [[10, '10일'], [30, '1개월'], [90, '3개월'], [180, '6개월'], [365, '1년']];
+          const money = (v) => formatMoney(v, h.currency);
+
+          function paintChart() {
+            tabs.replaceChildren(...PERIODS.map(([d, label]) => el('button', { type: 'button', class: 'nm-btn', 'aria-pressed': d === period ? 'true' : 'false', 'data-days': String(d), onclick: () => { period = d; paintChart(); } }, label)));
+            if (!chartRows) return;
+            const cut = new Date(Date.now() - period * 86400000).toISOString().slice(0, 10);
+            const rows = chartRows.filter((r) => r.date >= cut);
+            const st = window.PriceChart.stats(rows);
+            const refs = [{ value: h.avg_price, label: '평단', cls: 'is-avg' }];
+            if (h.target_price) refs.push({ value: Number(h.target_price), label: '목표', cls: 'is-target' });
+            if (h.stop_price) refs.push({ value: Number(h.stop_price), label: '손절', cls: 'is-stop' });
+            const f = (v) => (h.currency === 'USD' ? Number(v).toFixed(2) : Math.round(v).toLocaleString('ko-KR'));
+            chartHost.replaceChildren(window.PriceChart.render(rows, { fmt: f, refLines: refs, height: 240 }));
+            if (st) chartHost.append(el('div', { class: 'chart-stats' }, [
+              el('div', {}, ['기간 수익률', el('b', { class: `stock-pnl--${pnlClass(st.change)}` }, `${st.changeRate > 0 ? '+' : ''}${st.changeRate.toFixed(2)}%`)]),
+              el('div', {}, ['기간 최고', el('b', {}, money(st.high.v))]),
+              el('div', {}, ['기간 최저', el('b', {}, money(st.low.v))]),
+              el('div', {}, ['평균', el('b', {}, money(st.avg))]),
+            ]));
+          }
+          paintChart();
+
+          function paintQuote(q) {
+            const ev = evaluateHolding(h, q.price);
+            const cls = pnlClass(q.change ?? q.changeRate ?? 0);
+            head.replaceChildren(
+              el('span', { class: 'quote-head__price' }, money(q.price)),
+              q.change !== null && q.change !== undefined
+                ? el('span', { class: `quote-head__chg stock-pnl--${cls}` }, `${q.change > 0 ? '▲' : q.change < 0 ? '▼' : ''}${money(Math.abs(q.change))}${q.changeRate !== null && q.changeRate !== undefined ? ` (${q.changeRate > 0 ? '+' : ''}${q.changeRate.toFixed(2)}%)` : ''}`)
+                : null,
+              el('span', { class: 'text-muted' }, `${MARKET_LABEL[h.market] || h.market} ${h.symbol}`)
+            );
+            const cell = (label, value, c) => el('div', {}, [label, el('b', { class: c ? `stock-pnl--${c}` : '' }, value)]);
+            grid.replaceChildren(
+              cell('내 평단', money(h.avg_price)),
+              cell('보유 수량', `${num(h.quantity)}주`),
+              cell('평가금액', ev.marketValue === null ? '—' : money(ev.marketValue)),
+              cell('평가손익', ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`, ev.pnl === null ? '' : pnlClass(ev.pnl)),
+              q.prevClose ? cell('전일 종가', money(q.prevClose)) : null,
+              q.high ? cell('고가', money(q.high)) : null,
+              q.low ? cell('저가', money(q.low)) : null,
+              h.target_price ? cell('목표가', money(h.target_price)) : null,
+              h.stop_price ? cell('손절가', money(h.stop_price)) : null
+            );
+            const code = q.naverCode || h.symbol;
+            const url = h.market === 'US' ? `https://m.stock.naver.com/worldstock/stock/${encodeURIComponent(code)}/total` : `https://m.stock.naver.com/domestic/stock/${encodeURIComponent(h.symbol)}/total`;
+            foot.replaceChildren(`시세 공급: ${window.stockProviderLabel()} · 조회 전용(주문 기능 없음) · 지연/오차 가능 · `, el('a', { href: url, target: '_blank', rel: 'noopener' }, '네이버 증권에서 보기 ↗'));
+          }
+
+          const cached = quotes[key];
+          if (cached) paintQuote(cached);
+          if (!window.hasQuoteProvider()) { head.replaceChildren(el('span', { class: 'text-muted' }, '시세 공급자가 설정되지 않았습니다(설정 → 증권 시세 API).')); return; }
+          window.fetchStockPrice(h.symbol, h.market || 'KRX')
+            .then((q) => { quotes[key] = { ...q, at: Date.now() }; prices[key] = q.price; paintQuote(q); })
+            .catch((e) => { if (!cached) head.replaceChildren(el('div', { class: 'nm-banner nm-banner--warning' }, `시세를 불러오지 못했습니다: ${e.message}`)); });
+          window.fetchDailyChart(h.symbol, { market: h.market || 'KRX', days: 365 })
+            .then((r) => { chartRows = r.rows; paintChart(); })
+            .catch((e) => chartHost.replaceChildren(el('div', { class: 'text-muted', style: 'font-size:12px; padding:10px' }, `차트를 불러오지 못했습니다: ${e.message}`)));
+        },
+      });
     }
 
     // v7.26.0: 계좌별 보유 현황을 "list 형태"로 깔끔하게 개선.
@@ -221,11 +381,12 @@
         ? el('div', { class: 'broker-head' }, [
             el('div', { class: 'broker-head__left' }, [
               el('div', { class: 'broker-head__name' }, [
+                window.Reorder.grip(),
                 el('span', { class: 'broker-head__dot' }),
-                `${escapeHtml(acc.broker)}${acc.nickname ? ' · ' + escapeHtml(acc.nickname) : ''}`,
+                `${acc.broker}${acc.nickname ? ' · ' + acc.nickname : ''}`,
               ]),
               el('div', { class: 'broker-head__meta' }, [
-                acc.account_no ? escapeHtml(maskAccount(acc.account_no)) : null,
+                acc.account_no ? maskAccount(acc.account_no) : null,
                 el('span', { class: `nm-badge ${acc.currency === 'USD' ? 'nm-badge--info' : ''}` }, acc.currency === 'USD' ? '해외 USD' : '국내 KRW'),
                 el('span', { class: 'text-muted' }, `${holdings.length}종목`),
               ]),
@@ -253,11 +414,13 @@
             el('div', { class: 'broker-head__left' }, [el('div', { class: 'broker-head__name' }, '계좌 미지정')]),
           ]);
 
+      const listKey = `stockHoldings:${acc ? acc.id : 'none'}`;
       const body = holdings.length
-        ? el('div', { class: 'holding-list' }, holdings.map(holdingRow))
+        ? el('div', { class: 'holding-list' }, window.Reorder.sort(listKey, holdings).map(holdingRow))
         : el('div', { class: 'holding-list__empty' }, '보유 종목이 없습니다.');
+      if (holdings.length) window.Reorder.enable(body, listKey);
 
-      return el('div', { class: 'nm-card broker-card' }, [header, body]);
+      return el('div', { class: 'nm-card broker-card', ...(acc ? { 'data-rid': acc.id } : {}) }, [header, body]);
     }
 
     function holdingRow(h) {
@@ -267,16 +430,22 @@
       // v7.24.0(아이디어 3): 이 종목이 목표가/손절가에 도달했으면 이름 옆에 배지로 표시한다.
       const alert = priceAlerts([h], Object.prototype.hasOwnProperty.call(prices, key) ? prices : {})[0];
       const pnlText = ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`;
-      return el('div', { class: 'holding-item' }, [
+      const q = quotes[key];
+      const day = q && q.changeRate !== null && q.changeRate !== undefined
+        ? el('span', { class: `holding-item__day stock-pnl--${pnlClass(q.changeRate)}` }, `오늘 ${q.changeRate > 0 ? '▲' : q.changeRate < 0 ? '▼' : ''}${Math.abs(q.changeRate).toFixed(2)}%`)
+        : null;
+      const row = el('div', { class: 'holding-item', 'data-rid': h.id, role: 'button', tabindex: '0', title: '클릭하면 시세·차트 상세' }, [
         el('div', { class: 'holding-item__main' }, [
           el('div', { class: 'holding-item__name' }, [
-            `${escapeHtml(h.name || h.symbol)}`,
+            window.Reorder.grip(),
+            `${h.name || h.symbol}`,
             alert ? el('span', { class: `nm-badge ${alert.kind === 'target' ? 'nm-badge--success' : 'nm-badge--critical'}`, style: 'margin-left:6px' }, alert.kind === 'target' ? '🎯 목표가' : '🛑 손절가') : null,
           ]),
           el('div', { class: 'holding-item__sub' }, [
-            el('span', { class: 'holding-item__sym' }, `${MARKET_LABEL[h.market] || h.market} ${escapeHtml(h.symbol)}`),
+            el('span', { class: 'holding-item__sym' }, `${MARKET_LABEL[h.market] || h.market} ${h.symbol}`),
             el('span', {}, `${num(h.quantity)}주 · 평단 ${formatMoney(h.avg_price, h.currency)}`),
             el('span', {}, `현재가 ${cur === undefined ? '—' : formatMoney(cur, h.currency)}`),
+            day,
             h.target_price ? el('span', { class: 'text-muted' }, `목표 ${formatMoney(h.target_price, h.currency)}`) : null,
             h.stop_price ? el('span', { class: 'text-muted' }, `손절 ${formatMoney(h.stop_price, h.currency)}`) : null,
           ]),
@@ -292,6 +461,11 @@
           el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeHolding(h) }, '🗑'),
         ]),
       ]);
+      // 행 클릭 → 시세 상세. 버튼·손잡이 클릭은 제외(손잡이 클릭은 Reorder가 별도로 막는다).
+      const open = (e) => { if (e.target.closest('button, a, input, .rd-grip')) return; openQuoteDetail(h); };
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); openQuoteDetail(h); } });
+      return row;
     }
 
     // ---- 계좌 등록/수정 ----
@@ -487,7 +661,7 @@
               host.append(el('div', { class: 'row row--between', style: 'align-items:center; padding:6px 0; border-bottom:1px solid var(--border)' }, [
                 el('div', {}, [
                   el('div', {}, `${formatMoney(d.amount, d.currency || h.currency)}${d.tax ? ` (세금 ${formatMoney(d.tax, d.currency || h.currency)})` : ''}`),
-                  el('div', { class: 'text-muted', style: 'font-size:12px' }, `${d.paid_at || ''}${d.memo ? ` · ${escapeHtml(d.memo)}` : ''}`),
+                  el('div', { class: 'text-muted', style: 'font-size:12px' }, `${d.paid_at || ''}${d.memo ? ` · ${d.memo}` : ''}`),
                 ]),
                 el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: async () => { await appState.deleteStockDividend(d.id); drawDividends(); } }, '🗑'),
               ]));
@@ -535,10 +709,12 @@
     }
 
     draw();
-    appState.addEventListener('change', draw);
+    const onChange = () => { draw(); loadMissing(); };
+    appState.addEventListener('change', onChange);
     // 첫 진입 시 시세를 한 번 받아 둔다(키가 있을 때만).
     loadPrices(false);
-    return () => appState.removeEventListener('change', draw);
+    schedule();
+    return () => { clearInterval(timer); appState.removeEventListener('change', onChange); };
   }
 
   // ---- 작은 헬퍼 ----

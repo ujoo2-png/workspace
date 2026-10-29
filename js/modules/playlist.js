@@ -54,7 +54,7 @@
 
       let rows = appState.playlistItems.filter((p) => !p.deleted_at);
       if (filter !== 'all') rows = rows.filter((p) => p.status === filter);
-      rows = rows.slice().sort((a, b) => (b.event_date || b.created_at || '').localeCompare(a.event_date || a.created_at || ''));
+      rows = window.Reorder.sort('playlist', rows.slice().sort((a, b) => (b.event_date || b.created_at || '').localeCompare(a.event_date || a.created_at || ''))); // v7.31.0: 끌어서 순서 변경(기본은 최신순)
 
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '기록된 문화생활이 없습니다. 보고 싶은 영화나 다녀온 공연을 등록해보세요.'));
@@ -71,10 +71,10 @@
         if (!p.poster_url && attachedImage && !appState.peekAttachmentData(attachedImage.id)) appState.prefetchAttachmentData([attachedImage]);
         const posterSrc = p.poster_url || (attachedImage ? appState.peekAttachmentData(attachedImage.id) : null) || null;
         grid.append(
-          el('div', { class: 'nm-card playlist-card' }, [
+          el('div', { class: 'nm-card playlist-card', 'data-rid': p.id }, [
             // 항목(종류)을 카드 맨 위 헤더에 크게 표기 — 상태 배지는 오른쪽에 나란히.
             el('div', { class: 'row row--between playlist-card__header' }, [
-              el('span', { class: 'nm-badge playlist-card__type' }, `${TYPE_ICON[p.content_type] || '🎫'} ${TYPE_LABEL[p.content_type] || p.content_type}`),
+              el('span', { class: 'nm-badge playlist-card__type' }, [window.Reorder.grip(), ` ${TYPE_ICON[p.content_type] || '🎫'} ${TYPE_LABEL[p.content_type] || p.content_type}`]),
               el('span', { class: `nm-badge ${p.status === 'watched' ? 'nm-badge--success' : p.status === 'abandoned' ? 'nm-badge--warning' : ''}` }, STATUS_LABEL[p.status] || p.status),
             ]),
             // 포스터 영역은 항상 카드 안에 존재한다 — 실제 포스터가 없으면 종류 아이콘을 큼직하게 보여주는 플레이스홀더.
@@ -106,6 +106,7 @@
         );
       }
       container.append(grid);
+      window.Reorder.enable(grid, 'playlist');
     }
 
     // "이번 주 인기 영화"(TMDB 연동). 설정 화면에서 API 키를 입력해야 보인다.

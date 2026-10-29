@@ -296,7 +296,7 @@
 
     function drawTopics() {
       container.append(el('button', { class: 'nm-btn nm-btn--primary', style: 'margin-bottom:12px', onclick: () => openTopicWizard() }, '🪄 관심주제 마법사로 등록'));
-      const rows = appState.briefingTopics;
+      const rows = window.Reorder.sort('briefingTopics', appState.briefingTopics); // v7.31.0: ⠿ 손잡이로 끌어 순서 변경
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '등록된 관심주제가 없습니다. (최대 10개)'));
         return;
@@ -304,7 +304,8 @@
       const list = el('div', { class: 'item-list' });
       for (const t of rows) {
         list.append(
-          el('div', { class: 'item-row' }, [
+          el('div', { class: 'item-row', 'data-rid': t.id }, [
+            window.Reorder.grip(),
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'item-row__title' }, `${t.name} ${t.active === false ? '(비활성)' : ''}`),
               el('div', { class: 'item-row__meta' }, [
@@ -321,11 +322,12 @@
         );
       }
       container.append(list);
+      window.Reorder.enable(list, 'briefingTopics');
     }
 
     function drawSources() {
       container.append(el('button', { class: 'nm-btn nm-btn--primary', style: 'margin-bottom:12px', onclick: () => openSourceForm() }, '+ 피드 소스 등록'));
-      const rows = appState.feedSources;
+      const rows = window.Reorder.sort('feedSources', appState.feedSources); // v7.31.0
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '등록된 피드 소스가 없습니다. RSS 주소를 등록해보세요. (예: 각 언론사/블로그의 RSS 주소)'));
         return;
@@ -360,8 +362,8 @@
       for (const s of rows) {
         // 소스 관제: 사용자 제어(활성/비활성)와 시스템 판단(정상/불안정/오류/미실행)을 분리해서 보여준다.
         const status = !s.last_run_at ? { label: '미실행', cls: '' } : s.last_result === 'success' ? { label: '정상', cls: 'nm-badge--success' } : s.last_result === 'empty' ? { label: '불안정(0건)', cls: 'nm-badge--warning' } : { label: '오류', cls: 'nm-badge--critical' };
-        const rowEl = el('div', { class: 'source-table__row', role: 'button', tabindex: '0', title: '클릭하면 상세 팝업이 열립니다' }, [
-          el('div', { class: 'source-table__name' }, `${s.name} ${s.enabled === false ? '(비활성)' : ''}`),
+        const rowEl = el('div', { class: 'source-table__row', role: 'button', tabindex: '0', title: '클릭하면 상세 팝업이 열립니다', 'data-rid': s.id }, [
+          el('div', { class: 'source-table__name' }, [window.Reorder.grip(), ` ${s.name} ${s.enabled === false ? '(비활성)' : ''}`]),
           el('div', {}, [el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS')]),
           el('div', {}, [el('span', { class: `nm-badge ${status.cls}` }, status.label)]),
           el('div', { class: 'source-table__date' }, fmt(s.created_at)),
@@ -378,6 +380,7 @@
         table.append(rowEl);
       }
       container.append(table);
+      window.Reorder.enable(table, 'feedSources');
     }
 
     // 피드 소스 상세 팝업 — 주소 전체·마지막 수집 결과·등록일을 보여주고 수정/삭제로 이어진다.

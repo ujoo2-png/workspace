@@ -78,7 +78,8 @@
         );
       }
       if (tagFilter !== 'all') rows = rows.filter((p) => (p.tags || []).includes(tagFilter));
-      rows = rows.slice().sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999'));
+      // v7.31.0: 끌어서 정한 순서가 있으면 우선, 없으면 마감 임박순. (태그 필터 중에는 끌기 비활성)
+      rows = window.Reorder.sort('projects', rows.slice().sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999')));
 
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '등록된 프로젝트가 없습니다.'));
@@ -97,7 +98,8 @@
 
     function listPane(rows) {
       const today = todayISO();
-      return el(
+      const dragOn = tagFilter === 'all';
+      const pane = el(
         'div',
         { class: 'project-list-pane' },
         rows.map((p) => {
@@ -107,11 +109,12 @@
             'div',
             {
               class: `project-list-item ${p.id === selectedId ? 'project-list-item--active' : ''}`,
+              'data-rid': p.id,
               onclick: () => { selectedId = p.id; draw(); },
             },
             [
               el('div', { class: 'row row--between' }, [
-                el('span', { class: 'project-list-item__name' }, p.name),
+                el('span', { class: 'project-list-item__name', style: 'display:flex; align-items:center; gap:4px' }, [dragOn ? window.Reorder.grip() : null, p.name]),
                 el('span', { class: 'nm-badge' }, STATUS_LABEL[p.status] || p.status),
               ]),
               el('div', { class: 'project-list-item__meta' }, [
@@ -123,6 +126,8 @@
           );
         })
       );
+      if (dragOn) window.Reorder.enable(pane, 'projects');
+      return pane;
     }
 
     // 태그 기반 Knowledge 연동(1.2) — 이 프로젝트의 태그와 겹치는 Knowledge 자료가 있으면
