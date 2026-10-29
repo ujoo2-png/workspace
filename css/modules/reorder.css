@@ -1,0 +1,9 @@
+/* 공통 끌어서 순서 변경(v7.31.0) */
+.rd-grip { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 20px; align-self: center; cursor: grab; user-select: none; touch-action: none; opacity: 0.5; font-size: 16px; line-height: 1; color: var(--text-muted); border-radius: 6px; }
+.rd-grip:hover, .rd-grip:focus-visible { opacity: 1; color: var(--accent, #6d5dfc); outline: none; background: var(--surface); }
+.rd-dragging { opacity: 0.55; outline: 2px dashed var(--accent, #6d5dfc); outline-offset: -2px; }
+body.rd-active, body.rd-active * { cursor: grabbing !important; user-select: none !important; }
+.rd-by { box-shadow: 0 -3px 0 0 var(--accent, #6d5dfc); }
+.rd-ay { box-shadow: 0 3px 0 0 var(--accent, #6d5dfc); }
+.rd-bx { box-shadow: -3px 0 0 0 var(--accent, #6d5dfc); }
+.rd-ax { box-shadow: 3px 0 0 0 var(--accent, #6d5dfc); }

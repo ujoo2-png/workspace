@@ -53,7 +53,10 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const token = await getAccessToken(env, appkey, appsecret);
+    // v7.31.0: 브라우저가 보관한 토큰(x-kis-token)이 있으면 재사용 → 새 토큰 발급(=KIS 카톡 알림)을 피한다.
+    const given = req.headers['x-kis-token'];
+    const token = (typeof given === 'string' && given.length > 20) ? given : await getAccessToken(env, appkey, appsecret);
+    if (token !== given) res.setHeader('x-kis-token', token);
     const host = KIS_HOST[env];
     const url = new URL(host + path);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
@@ -73,7 +76,7 @@ module.exports = async function handler(req, res) {
     res.status(upstream.status);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     // 시세는 짧게 캐시(30초) — 같은 화면을 여러 번 새로고침해도 KIS 호출을 아끼기 위함.
-    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'private, no-store'); // v7.31.0: 응답 헤더에 토큰이 실릴 수 있어 공유 캐시 금지
     res.send(text);
   } catch (e) {
     res.status(502).json({ error: e.message || '한국투자증권 서버에 연결하지 못했습니다.' });
