@@ -546,7 +546,13 @@
       ]);
       render();
       wrap.refresh = render;
-      wrap.setDisabled = () => {};
+      wrap.setDisabled = (on, note) => {
+        input.disabled = on;
+        presets.querySelectorAll('button').forEach((b) => { b.disabled = on; });
+        wrap.querySelectorAll('.offset-chip__x').forEach((b) => { b.disabled = on; });
+        msg.textContent = on ? note || '' : '';
+        wrap.style.opacity = on ? '0.55' : '';
+      };
       return wrap;
     }
 
@@ -574,6 +580,7 @@
           endInput.addEventListener('input', refreshEnd);
           refreshEnd();
           let offsetsNode = null;
+          let repeatNode = null;
           if (isChild) {
             form.append(el('div', { class: 'link-banner' }, [
               el('div', {}, `↳ "${parent ? parent.title : '원본 일정'}"에서 ${window.offsetLabel(existing.offset_days)} 날짜로 자동 생성된 일정입니다.`),
@@ -598,12 +605,31 @@
             field('메모', el('textarea', { class: 'nm-textarea', name: 'memo' }, existing?.memo || ''))
           );
           if (!isChild) {
+            repeatNode = existing ? null : repeatField();
             offsetsNode = offsetsField(existing?.repeat_offsets, () => dateInput.value, () => childCount);
             dateInput.addEventListener('input', () => offsetsNode.refresh());
+            if (repeatNode) {
+              // 기존 반복(매일/매주/매월 × 횟수)과 "N일 후"는 함께 쓰지 않는다 — 같은 일정을 두 번 만들게 되기 때문.
+              const sel = repeatNode.querySelector('select');
+              sel.addEventListener('change', () => offsetsNode.setDisabled(sel.value !== 'none', '위의 반복 등록(매일/매주/매월)과 "N일 후"는 함께 쓸 수 없어요'));
+              form.append(repeatNode);
+            }
             form.append(offsetsNode);
             if (childCount) form.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `이 일정을 수정하면 연결된 자동 생성 일정 ${childCount}건의 제목/날짜/시간/장소/구분도 함께 바뀝니다(완료 여부는 그대로).`));
           }
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.24.0: 저장하기 "전에" 파일을 드래그해 담아둘 수 있는 영역. 저장이 끝나면
+          // (신규 등록으로 실제 id가 생기면) 담아둔 파일이 자동으로 첨부된다.
+          const pendingAttachHost = el('div', {});
+          const pendingAttach = !isChild ? window.createPendingAttachments(pendingAttachHost, 'schedules') : null;
+          if (pendingAttach) {
+            form.append(
+              el('div', { class: 'nm-field' }, [
+                el('label', {}, '파일 첨부 (저장 전에 담아두기 — 선택)'),
+                pendingAttachHost,
+              ])
+            );
+          }
           form.append(submitBtn);
           // 신규 등록(반복 없이 1건만 생성되는 경우) 직후 바로 첨부할 수 있도록, 저장되면
           // 폼 자리에 첨부 패널을 보여준다(Knowledge/문화생활과 동일한 흐름).
@@ -636,25 +662,50 @@
                 if (isChild) Object.assign(data, { parent_schedule_id: null, is_generated: false, offset_days: null });
                 appState.schemaWarning = null;
                 await appState.updateSchedule(existing.id, data);
+                if (pendingAttach) await pendingAttach.flush(existing.id);
                 const w = warn();
                 toast(w ? `저장했습니다. (${w})` : isChild ? '독립 일정으로 저장했습니다.' : '일정을 저장했습니다.', 'success');
                 close();
                 return;
               }
-              // 반복(매일/매주/매월)과 "N일 전/후"는 하나의 입력("반복·알림")으로 통합되었다 — 기준 일정 1건 + 연결된 자동 생성 일정들.
+              // 벤치마크: Google Calendar류의 간단 반복 등록 — 반복 규칙 테이블 없이,
+              // 등록 시점에 개별 일정 여러 건으로 즉시 생성한다(각 건은 독립적으로 완료/수정 가능).
+              const repeat = fd.get('repeat') || 'none';
+              const count = Math.min(52, Math.max(1, Number(fd.get('repeat_count')) || 1));
+              const stepDays = repeat === 'daily' ? 1 : repeat === 'weekly' ? 7 : repeat === 'monthly' ? 30 : repeat === 'yearly' ? 0 : 0;
+              // 매년 반복은 "같은 월·일"을 유지해야 하므로 365일 더하기 대신 연도를 직접 올린다
+              // (윤년 2/29 → 다음 연도 2/29가 없으면 2/28로 보정). shiftYear()는 js/utils/date.js 참고.
+              const isYearly = repeat === 'yearly';
               appState.schemaWarning = null;
-              const row = await appState.addSchedule(data);
-              const n = (data.repeat_offsets || []).length;
-              const w = warn();
-              toast(w ? `저장했습니다. (${w})` : n ? `저장했습니다. 연결된 일정 ${n}건도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                el('div', { id: 'new-schedule-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
+              if (repeat === 'none' || (stepDays === 0 && !isYearly)) {
+                const row = await appState.addSchedule(data);
+                const n = (data.repeat_offsets || []).length;
+                // 저장 전에 담아둔 파일이 있으면 방금 만들어진 일정에 바로 첨부한다.
+                const attached = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+                const w = warn();
+                toast(w ? `저장했습니다. (${w})` : attached ? `저장했습니다. 담아둔 파일 ${attached}개를 첨부했어요.` : n ? `저장했습니다. ${n}건의 "N일 후" 일정도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
+                submitBtn.style.display = 'none';
+                attachHost.append(
+                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
+                  el('div', { id: 'new-schedule-attach-box' }),
+                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
+                );
+                window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
+              } else {
+                // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
+                // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).
+                delete data.repeat_offsets;
+                for (let i = 0; i < count; i++) {
+                  const offset = isYearly
+                    ? { date: window.shiftYear(data.date, i), end_date: data.end_date ? window.shiftYear(data.end_date, i) : null }
+                    : { date: window.addDays(data.date, stepDays * i), end_date: data.end_date ? window.addDays(data.end_date, stepDays * i) : null };
+                  await appState.addSchedule({ ...data, ...offset });
+                }
+                const w = warn();
+                toast(w ? `저장했습니다. (${w})` : '일정을 저장했습니다.', 'success');
+                close();
+              }
             } catch (err) {
               toast(`저장하지 못했습니다: ${err.message || err}`, 'error');
             }
@@ -674,6 +725,21 @@
       const select = el('select', { class: 'nm-select', name: 'priority' });
       for (const [value, label] of Object.entries(PRIORITY_LABEL)) select.append(el('option', { value, selected: value === selected || undefined }, label));
       return select;
+    }
+
+    function repeatField() {
+      const repeatSelect = el('select', { class: 'nm-select', name: 'repeat' }, [
+        el('option', { value: 'none' }, '반복 안 함'),
+        el('option', { value: 'daily' }, '매일'),
+        el('option', { value: 'weekly' }, '매주'),
+        el('option', { value: 'monthly' }, '매월(30일 간격)'),
+        el('option', { value: 'yearly' }, '매년(같은 월·일)'),
+      ]);
+      const countInput = el('input', { class: 'nm-input', type: 'number', name: 'repeat_count', min: '1', max: '52', value: '1', style: 'width:80px' });
+      return el('div', { class: 'nm-field' }, [
+        el('label', {}, '반복(선택)'),
+        el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [repeatSelect, el('span', { class: 'text-muted', style: 'font-size:12px' }, '× 횟수'), countInput]),
+      ]);
     }
 
     function projectSelect(selectedId) {

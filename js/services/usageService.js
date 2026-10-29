@@ -2,7 +2,7 @@
 // 일반 <script>(Node 테스트에서는 globalThis). config.js, utils/date.js 뒤, settingsSync.js 뒤에 로드한다.
 //
 // 측정 방식(정직하게):
-//  · DB 크기 / Storage 크기 / 테이블별 크기 / 가입자 수 → 0027 마이그레이션의 app_usage_stats() RPC로 "서버에서 정확히" 읽는다.
+//  · DB 크기 / Storage 크기 / 테이블별 크기 / 가입자 수 → 0031 마이그레이션의 app_usage_stats() RPC로 "서버에서 정확히" 읽는다.
 //  · 이그레스 → Supabase는 DB로 조회할 방법을 주지 않는다. 이 브라우저가 Supabase에서 받은 응답 크기를 직접 세어(Content-Length, 없으면 본문 크기)
 //    테이블/메뉴별로 쌓는 "추정치"다. 다른 기기·다른 브라우저·이미지 태그(<img>)로 받은 용량은 빠진다 → 실제 값은 직접 입력으로 덮어쓸 수 있다.
 //  · 로그 수집/조회, Realtime, Edge Function 등 → 서버에 공개된 조회 수단이 없어 직접 입력(Supabase 대시보드 Usage 화면의 값을 옮겨 적기).
@@ -48,7 +48,7 @@
   const ROUTE_MENU = {
     '/home': '🏠 홈', '/schedule': '🗓️ 일정', '/projects': '📁 프로젝트', '/challenges': '🏆 챌린저', '/briefing': '📰 관심주제', '/playlist': '🎬 문화생활', '/vehicles': '🚗 차량관리',
     '/health': '💪 Health', '/devlog': '🛠️ Devlog', '/knowledge': '📓 Knowledge', '/career': '📋 이력/경력', '/automation': '🤖 Automation', '/integrations': '🔗 Integrations',
-    '/analytics': '📊 리포트', '/programs': '🧩 프로그램', '/settings': '⚙️ 설정', '/usage': '📈 사용량',
+    '/stocks': '📈 증권', '/analytics': '📊 리포트', '/programs': '🧩 프로그램', '/settings': '⚙️ 설정', '/usage': '📊 사용량',
   };
   const menuForTable = (t) => TABLE_MENU[t] || '기타';
   const menuForOwner = (t) => OWNER_MENU[t] || '📎 첨부(기타)';

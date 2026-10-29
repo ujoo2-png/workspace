@@ -12,6 +12,7 @@
     { path: '/briefing', label: '관심주제', icon: '📰' },
     { path: '/playlist', label: '문화생활', icon: '🎬' },
     { path: '/vehicles', label: '차량관리', icon: '🚗' },
+    { path: '/stocks', label: '증권', icon: '📈' },
     { path: '/health', label: 'Health', icon: '💪' },
     { path: '/devlog', label: 'Devlog', icon: '🛠️' },
     { path: '/knowledge', label: 'Knowledge', icon: '📓' },
@@ -19,7 +20,7 @@
     { path: '/automation', label: 'Automation', icon: '🤖' },
     { path: '/integrations', label: 'Integrations', icon: '🔗' },
     { path: '/analytics', label: '리포트', icon: '📊' },
-    { path: '/usage', label: '사용량', icon: '📈' },
+    { path: '/usage', label: '사용량', icon: '📊' },
     { path: '/programs', label: '프로그램', icon: '🧩' },
     { path: '/settings', label: '설정', icon: '⚙️' },
   ];
@@ -79,6 +80,14 @@
       console.warn('자동화 규칙 실행 실패(계속 진행):', e);
     }
 
+    // v7.24.0(아이디어 1): 로그인 직후 브리핑 자동 수집(하루 1회). 실패해도 앱 진입을 막지 않는다.
+    let briefingAuto = { ran: false, newCount: 0 };
+    try {
+      briefingAuto = await window.autoCollectBriefing();
+    } catch (e) {
+      console.warn('브리핑 자동 수집 건너뜀(계속 진행):', e);
+    }
+
     registerRoutes();
     window.startRouter();
     if (window.startMedReminder) window.startMedReminder(); // 복약 시간 알림(앱이 열려 있을 때만)
@@ -101,6 +110,7 @@
         projects: appState.projects,
         progressByProject: appState.progressByProject,
         newAlerts,
+        briefingNewCount: briefingAuto.ran ? briefingAuto.newCount : null,
         weather,
       });
       window.showLoginBriefing(briefing);
@@ -243,6 +253,7 @@
     window.registerRoute('/briefing', window.renderBriefing);
     window.registerRoute('/playlist', window.renderPlaylist);
     window.registerRoute('/vehicles', window.renderVehicles);
+    window.registerRoute('/stocks', window.renderStocks);
     window.registerRoute('/health', window.renderHealth);
     window.registerRoute('/devlog', window.renderDevlog);
     window.registerRoute('/knowledge', window.renderKnowledge);

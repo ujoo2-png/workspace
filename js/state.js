@@ -46,9 +46,10 @@
   const STAGE_NEW_COLS = ['parent_id', 'progress', 'is_milestone', 'depends_on', 'baseline_start', 'baseline_end', 'legacy_group', 'memo'];
   const BRIEFING_TOPIC_NEW_COLS = ['search_terms', 'priority_keywords', 'site_urls'];
   const CHALLENGE_NEW_COLS = ['freq_type', 'freq_days', 'freq_times'];
-  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0027.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0028_HINT = '0028 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
   // 첨부 목록용 메타 컬럼(본문 data 제외) + 본문 메모리 캐시 상한(LRU)
   const ATTACH_META_COLS = 'id,user_id,owner_table,owner_id,name,mime_type,size,created_at';
   const ATTACH_CACHE_MAX_CHARS = 60 * 1024 * 1024;
@@ -78,6 +79,14 @@
       this.maintenanceByVehicle = {}; // vehicleId -> [row]
       this.fuelLogsByVehicle = {}; // vehicleId -> [row]
       this.odometerLogsByVehicle = {}; // vehicleId -> [row]
+      // v7.24.0: 증권
+      this.brokerageAccounts = [];
+      this.stockHoldings = [];
+      this.stockTrades = [];
+      this.stockDividends = [];
+      this.holdingsByAccount = {}; // accountId -> [row]
+      this.tradesByHolding = {}; // holdingId -> [row]
+      this.dividendsByHolding = {}; // holdingId -> [row]
 
       // Health
       this.healthMetrics = [];
@@ -173,6 +182,11 @@
         ddayRows,
         careerDocRows,
         careerBasicRows,
+        // v7.24.0: 증권(계좌/보유종목/체결). 0027 미실행(테이블 없음)이어도 빈 목록으로 폴백한다.
+        brokerageAccounts,
+        stockHoldings,
+        stockTrades,
+        stockDividends,
         // 기기 간 설정 동기화(원격 우선 pull). 실패해도 던지지 않으며(settingsSync가 내부에서 폴백),
         // 다른 조회와 병렬이라 첫 화면을 추가로 지연시키지 않는다.
         // 적용된 값은 아래 emit('change') 이전에 localStorage 캐시에 반영된다.
@@ -219,6 +233,11 @@
         // 0025 미실행(테이블 없음)이어도 빈 목록으로 폴백한다.
         this.store.list('career_documents', TABLE_STATE.career_documents.opts(uid)).catch(() => []),
         this.store.list('career_basic_info', TABLE_STATE.career_basic_info.opts(uid)).catch(() => []),
+        this.store.list('brokerage_accounts', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
+        this.store.list('stock_holdings', { where: { user_id: uid }, orderBy: 'created_at' }).catch(() => []),
+        this.store.list('stock_trades', { where: { user_id: uid }, orderBy: 'traded_at' }).catch(() => []),
+        // 0028 미실행이어도 빈 목록으로 폴백한다(목표가/손절가 컬럼이 없어도 저장은 시도 후 안내).
+        this.store.list('stock_dividends', { where: { user_id: uid }, orderBy: 'paid_at', ascending: false }).catch(() => []),
         window.settingsSync.load(uid).catch(() => ({ changed: [] })),
       ]);
 
@@ -262,6 +281,15 @@
       this.ddays = ddayRows;
       this._setRows('career_documents', careerDocRows);
       this._setRows('career_basic_info', careerBasicRows);
+
+      // v7.24.0: 증권
+      this.brokerageAccounts = brokerageAccounts;
+      this.stockHoldings = stockHoldings;
+      this.stockTrades = stockTrades;
+      this.stockDividends = stockDividends;
+      this.holdingsByAccount = this._groupBy(stockHoldings, 'account_id');
+      this.tradesByHolding = this._groupBy(stockTrades, 'holding_id');
+      this.dividendsByHolding = this._groupBy(stockDividends, 'holding_id');
       this.attachmentsByOwner = this._groupBy(
         attachments.map((a) => ({ ...a, _ownerKey: `${a.owner_table}:${a.owner_id}` })),
         '_ownerKey'
@@ -612,6 +640,70 @@
     }
     async deleteFuelLog(id) {
       await this.store.remove('vehicle_fuel_logs', id);
+      return this.refreshAll();
+    }
+
+    // ---- 증권 (v7.24.0) ----
+    // 계좌/보유종목은 소프트 삭제(softDelete)해 기록을 보존하고, 체결 기록은 하드 삭제한다.
+    async addBrokerageAccount(data) {
+      const row = await this.store.create('brokerage_accounts', { ...data, user_id: this.user.id });
+      await this.refreshAll();
+      return row;
+    }
+    async updateBrokerageAccount(id, patch) {
+      await this.store.update('brokerage_accounts', id, patch);
+      return this.refreshAll();
+    }
+    async deleteBrokerageAccount(id) {
+      await this.store.softDelete('brokerage_accounts', id);
+      return this.refreshAll();
+    }
+    async addStockHolding(data) {
+      try {
+        const row = await this.store.create('stock_holdings', { ...data, user_id: this.user.id });
+        await this.refreshAll();
+        return row;
+      } catch (e) {
+        if (this._isMissingColumnError(e, ['target_price', 'stop_price'])) throw new Error(`목표가·손절가를 저장하려면 ${MIGRATION_0028_HINT}`);
+        throw e;
+      }
+    }
+    async updateStockHolding(id, patch) {
+      try {
+        await this.store.update('stock_holdings', id, patch);
+      } catch (e) {
+        if (this._isMissingColumnError(e, ['target_price', 'stop_price'])) throw new Error(`목표가·손절가를 저장하려면 ${MIGRATION_0028_HINT}`);
+        throw e;
+      }
+      return this.refreshAll();
+    }
+
+    async deleteStockHolding(id) {
+      await this.store.softDelete('stock_holdings', id);
+      return this.refreshAll();
+    }
+    async addStockTrade(data) {
+      const row = await this.store.create('stock_trades', { ...data, user_id: this.user.id });
+      await this.refreshAll();
+      return row;
+    }
+    async deleteStockTrade(id) {
+      await this.store.remove('stock_trades', id);
+      return this.refreshAll();
+    }
+    async addStockDividend(data) {
+      try {
+        const row = await this.store.create('stock_dividends', { ...data, user_id: this.user.id });
+        await this.refreshAll();
+        return row;
+      } catch (e) {
+        const msg = e?.message || String(e);
+        if (/stock_dividends/i.test(msg) && /(relation|schema cache|does not exist|find|42P01)/i.test(msg)) throw new Error(`배당 기록을 쓰려면 ${MIGRATION_0028_HINT}`);
+        throw e;
+      }
+    }
+    async deleteStockDividend(id) {
+      await this.store.remove('stock_dividends', id);
       return this.refreshAll();
     }
 
@@ -1012,6 +1104,13 @@
           // 소스 관제(개발계획서 9.3): 시스템이 판단하는 상태(정상/오류/미실행)를 사용자 on/off와 분리해 기록한다.
           await this.store.update('feed_sources', source.id, { last_result: 'error', last_run_at: new Date().toISOString() }).catch(() => {});
           continue;
+        }
+        // v7.24.0: 마크다운 소스가 0건이면 "왜"인지 알려준다. 예전에는 상태만 '불안정(0건)'으로
+        // 찍고 끝나서 사용자가 원인을 알 수 없었다(파싱이 안 되는 것처럼 보임).
+        if (source.type === 'markdown' && !items.length) {
+          const body = String(source.endpoint || '');
+          const hasHttp = /https?:\/\//i.test(body);
+          errors.push(`${source.name}: 링크를 찾지 못했습니다(${hasHttp ? '주소는 있지만 [제목](주소) 형식이 아닙니다' : '본문에 http(s) 주소가 없습니다'}).`);
         }
         fetchedCount += items.length;
         await this.store

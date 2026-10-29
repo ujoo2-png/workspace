@@ -106,6 +106,7 @@
       return el('div', {}, [
         form,
         el('button', { type: 'button', class: 'lo-forgot-link', onclick: () => forgotPassword(idInput.value) }, '비밀번호를 잊으셨나요?'),
+        buildPolicyConsent(false),
         el('div', { class: 'lo-hint' },
           isLocal
             ? '로컬 데모 모드 — 이 브라우저에만 데이터가 저장됩니다. 첫 회원가입자는 즉시 관리자로 활성화되고, 이후 가입자는 관리자 승인이 필요합니다.'
@@ -132,16 +133,25 @@
     function buildSignupPanel() {
       const idInput = el('input', { type: isLocal ? 'text' : 'email', name: 'username', placeholder: isLocal ? '사용할 아이디' : 'you@example.com', required: true, autofocus: true, autocomplete: 'username' });
       const nameInput = el('input', { type: 'text', name: 'name', placeholder: '이름(선택)', autocomplete: 'name' });
-      const pwInput = el('input', { type: 'password', name: 'password', placeholder: '비밀번호(4자 이상)', required: true, minlength: '4', autocomplete: 'new-password' });
+      const pwInput = el('input', { type: 'password', name: 'password', placeholder: '비밀번호(6자 이상)', required: true, minlength: '6', autocomplete: 'new-password' });
       const pwConfirmInput = el('input', { type: 'password', name: 'passwordConfirm', placeholder: '비밀번호 확인', required: true, autocomplete: 'new-password' });
       const errMsg = el('div', { class: 'lo-errmsg', id: 'errSignup' });
-      const submitBtn = el('button', { class: 'lo-btn', type: 'submit' }, '회원가입');
+      const submitBtn = el('button', { class: 'lo-btn', type: 'submit', disabled: true }, '회원가입');
+      // 개인정보 처리방침 동의(필수). 체크해야 가입 버튼이 활성화된다(표준 관행).
+      const agreeCb = el('input', { type: 'checkbox', id: 'agree-privacy' });
+      agreeCb.addEventListener('change', () => { submitBtn.disabled = !agreeCb.checked; });
+      const agreeRow = el('label', { class: 'lo-agree' }, [
+        agreeCb,
+        el('span', {}, ['개인정보 처리방침에 동의합니다. (필수) ']),
+        el('button', { type: 'button', class: 'lo-policy-link', onclick: (e) => { e.preventDefault(); window.openPrivacyPolicy(); } }, '보기'),
+      ]);
 
       const form = el('form', { class: 'lo-panel on' }, [
         el('div', { class: 'lfg' }, [el('label', {}, idLabel), el('div', { class: 'lo-input-wrap' }, [idInput])]),
         el('div', { class: 'lfg' }, [el('label', {}, '이름(선택)'), el('div', { class: 'lo-input-wrap' }, [nameInput])]),
         el('div', { class: 'lfg' }, [el('label', {}, '비밀번호'), el('div', { class: 'lo-input-wrap' }, [pwInput])]),
         el('div', { class: 'lfg' }, [el('label', {}, '비밀번호 확인'), el('div', { class: 'lo-input-wrap' }, [pwConfirmInput]), errMsg]),
+        agreeRow,
         submitBtn,
       ]);
 
@@ -175,6 +185,22 @@
       return el('div', {}, [
         form,
         el('div', { class: 'lo-hint' }, '가입 후 관리자(맨 처음 가입한 계정)가 설정 화면에서 승인해야 로그인할 수 있습니다.'),
+      ]);
+    }
+
+    // 로그인 폼 아래에 붙는 "개인정보 처리방침" 안내 + 링크.
+    // 로그인 "전"에도 누르면 바로 모달이 열려야 한다(v7.26.0에서 z-index 수정, css/base.css 참고).
+    function buildPolicyConsent() {
+      const link = el('button', {
+        type: 'button',
+        class: 'lo-policy-link',
+        // type=button 이라 폼 제출을 유발하지 않는다. 클릭 즉시 모달을 연다.
+        onclick: (e) => { e.preventDefault(); window.openPrivacyPolicy(); },
+      }, '개인정보 처리방침');
+      return el('div', { class: 'lo-policy' }, [
+        el('span', {}, '로그인하면 '),
+        link,
+        el('span', {}, '에 동의한 것으로 봅니다.'),
       ]);
     }
 
