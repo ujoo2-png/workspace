@@ -20,10 +20,13 @@ as $$
 $$;
 
 drop policy if exists profiles_own_rows on profiles;
+drop policy if exists profiles_select on profiles;
 create policy profiles_select on profiles for select to authenticated
   using (id = (select auth.uid()) or is_admin());
+drop policy if exists profiles_insert on profiles;
 create policy profiles_insert on profiles for insert to authenticated
   with check (id = (select auth.uid()));
+drop policy if exists profiles_update on profiles;
 create policy profiles_update on profiles for update to authenticated
   using (id = (select auth.uid()) or is_admin())
   with check (id = (select auth.uid()) or is_admin());

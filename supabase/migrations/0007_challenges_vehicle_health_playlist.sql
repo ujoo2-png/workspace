@@ -6,7 +6,7 @@
 -- ---------------------------------------------------------------
 -- 챌린저
 -- ---------------------------------------------------------------
-create table challenges (
+create table if not exists challenges (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -20,7 +20,7 @@ create table challenges (
   updated_at timestamptz not null default now()
 );
 
-create table challenge_checkins (
+create table if not exists challenge_checkins (
   id uuid primary key default gen_random_uuid(),
   challenge_id uuid references challenges(id) on delete cascade not null,
   checkin_date date not null,
@@ -30,14 +30,16 @@ create table challenge_checkins (
   unique (challenge_id, checkin_date)
 );
 
-create index idx_challenges_user on challenges(user_id, status);
-create index idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
+create index if not exists idx_challenges_user on challenges(user_id, status);
+create index if not exists idx_challenge_checkins_challenge on challenge_checkins(challenge_id, checkin_date desc);
 
 alter table challenges enable row level security;
+drop policy if exists challenges_own_rows on challenges;
 create policy challenges_own_rows on challenges for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table challenge_checkins enable row level security;
+drop policy if exists challenge_checkins_own_rows on challenge_checkins;
 create policy challenge_checkins_own_rows on challenge_checkins for all to authenticated
   using (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())))
   with check (exists (select 1 from challenges c where c.id = challenge_id and c.user_id = (select auth.uid())));
@@ -45,7 +47,7 @@ create policy challenge_checkins_own_rows on challenge_checkins for all to authe
 -- ---------------------------------------------------------------
 -- 차량관리
 -- ---------------------------------------------------------------
-create table vehicles (
+create table if not exists vehicles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   name text not null,
@@ -56,7 +58,7 @@ create table vehicles (
   deleted_at timestamptz
 );
 
-create table vehicle_maintenance (
+create table if not exists vehicle_maintenance (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   item text not null,
@@ -69,7 +71,7 @@ create table vehicle_maintenance (
   created_at timestamptz not null default now()
 );
 
-create table vehicle_fuel_logs (
+create table if not exists vehicle_fuel_logs (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references vehicles(id) on delete cascade not null,
   logged_at date not null,
@@ -79,21 +81,24 @@ create table vehicle_fuel_logs (
   created_at timestamptz not null default now()
 );
 
-create index idx_vehicles_user on vehicles(user_id) where deleted_at is null;
-create index idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
-create index idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
-create index idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
+create index if not exists idx_vehicles_user on vehicles(user_id) where deleted_at is null;
+create index if not exists idx_vehicle_maintenance_vehicle on vehicle_maintenance(vehicle_id, service_date desc);
+create index if not exists idx_vehicle_maintenance_due on vehicle_maintenance(next_due_date) where next_due_date is not null;
+create index if not exists idx_vehicle_fuel_vehicle on vehicle_fuel_logs(vehicle_id, logged_at desc);
 
 alter table vehicles enable row level security;
+drop policy if exists vehicles_own_rows on vehicles;
 create policy vehicles_own_rows on vehicles for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table vehicle_maintenance enable row level security;
+drop policy if exists vehicle_maintenance_own_rows on vehicle_maintenance;
 create policy vehicle_maintenance_own_rows on vehicle_maintenance for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
 
 alter table vehicle_fuel_logs enable row level security;
+drop policy if exists vehicle_fuel_logs_own_rows on vehicle_fuel_logs;
 create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authenticated
   using (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())))
   with check (exists (select 1 from vehicles v where v.id = vehicle_id and v.user_id = (select auth.uid())));
@@ -101,7 +106,7 @@ create policy vehicle_fuel_logs_own_rows on vehicle_fuel_logs for all to authent
 -- ---------------------------------------------------------------
 -- Health (일반 웰니스 지표만 — 진단명·복약 등 민감 의료정보는 다루지 않는다)
 -- ---------------------------------------------------------------
-create table health_metrics (
+create table if not exists health_metrics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   metric_type text not null check (metric_type in ('weight', 'exercise', 'sleep', 'steps', 'condition')),
@@ -111,7 +116,7 @@ create table health_metrics (
   recorded_at timestamptz not null default now()
 );
 
-create table health_appointments (
+create table if not exists health_appointments (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   title text not null,
@@ -123,21 +128,23 @@ create table health_appointments (
   created_at timestamptz not null default now()
 );
 
-create index idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
-create index idx_health_appointments_user on health_appointments(user_id, appointment_date);
+create index if not exists idx_health_metrics_user_type on health_metrics(user_id, metric_type, recorded_at desc);
+create index if not exists idx_health_appointments_user on health_appointments(user_id, appointment_date);
 
 alter table health_metrics enable row level security;
+drop policy if exists health_metrics_own_rows on health_metrics;
 create policy health_metrics_own_rows on health_metrics for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 alter table health_appointments enable row level security;
+drop policy if exists health_appointments_own_rows on health_appointments;
 create policy health_appointments_own_rows on health_appointments for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- ---------------------------------------------------------------
 -- 문화생활(PlayList) — 영화/음악/연극/음악회 등
 -- ---------------------------------------------------------------
-create table playlist_items (
+create table if not exists playlist_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id),
   content_type text not null check (content_type in ('movie','music','theater','concert','musical','exhibition','book','etc')),
@@ -154,10 +161,11 @@ create table playlist_items (
   deleted_at timestamptz
 );
 
-create index idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
-create index idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
+create index if not exists idx_playlist_user_status on playlist_items(user_id, status) where deleted_at is null;
+create index if not exists idx_playlist_event_date on playlist_items(event_date) where event_date is not null;
 
 alter table playlist_items enable row level security;
+drop policy if exists playlist_own_rows on playlist_items;
 create policy playlist_own_rows on playlist_items for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 

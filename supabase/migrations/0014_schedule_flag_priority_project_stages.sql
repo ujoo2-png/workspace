@@ -21,6 +21,7 @@ create table if not exists project_stages (
 create index if not exists idx_project_stages_project on project_stages(project_id, seq);
 
 alter table project_stages enable row level security;
+drop policy if exists project_stages_own_rows on project_stages;
 create policy project_stages_own_rows on project_stages for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 

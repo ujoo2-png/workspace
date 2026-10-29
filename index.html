@@ -7,6 +7,9 @@
   <meta name="description" content="일정·프로젝트·프로그램을 한 곳에서 관리하는 개인용 Neumorphism 대시보드" />
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8C%82%3C/text%3E%3C/svg%3E" />
+  <!-- v7.26.0: 모달(.nm-modal-backdrop)/토스트 z-index를 로그인 오버레이(9999) 위로 올려,
+       로그인 전에도 개인정보 처리방침 모달이 즉시 보이게 함 -->
+  <!-- v7.27.0: 커스텀 API 연결 상태/프리셋, 환율 소스 선택 (js/services/customApiService.js·marketService.js) -->
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/layout.css" />
   <link rel="stylesheet" href="css/modules/auth.css" />
@@ -23,6 +26,7 @@
   <link rel="stylesheet" href="css/modules/health.css" />
   <link rel="stylesheet" href="css/modules/programs.css" />
   <link rel="stylesheet" href="css/modules/career.css" />
+  <link rel="stylesheet" href="css/modules/stocks.css" />
 </head>
 <body>
   <div id="app"></div>
@@ -62,11 +66,20 @@
   <script src="js/services/automationService.js"></script>
   <script src="js/services/weatherTheme.js"></script>
   <script src="js/services/briefingService.js"></script>
+  <!-- v7.24.0: RSS/Atom 원본 XML을 직접 파싱하기 위해 무손실 XML 파서를 feedService보다 먼저 로드한다 -->
+  <script src="js/utils/xmlTree.js"></script>
   <script src="js/services/feedService.js"></script>
+  <!-- v7.24.0: 증권 손익 계산(순수 함수)과 KIS 시세 서비스 -->
+  <script src="js/utils/stockCalc.js"></script>
+  <script src="js/services/stockService.js"></script>
+  <!-- v7.24.0: 로그인 직후 브리핑 자동 수집(하루 1회) -->
+  <script src="js/services/briefingAutoCollect.js"></script>
   <script src="js/services/tmdbService.js"></script>
   <script src="js/services/clockService.js"></script>
   <script src="js/services/publicDataService.js"></script>
   <script src="js/services/kmaService.js"></script>
+  <!-- v7.25.0: 오늘의 시황·환율 서비스(공공데이터포털 환율 키 + 증권 공급자 지수) — stockService/publicDataService 뒤에 로드 -->
+  <script src="js/services/marketService.js"></script>
   <script src="js/services/customApiService.js"></script>
   <script src="js/services/medReminder.js"></script>
   <!-- v7.22.0: 양식 문서 도구(ExcelJS/JSZip/formTemplate/formEngine/careerDocs)는 탭을 열 때 이 로더가 지연 로딩한다 -->
@@ -78,6 +91,8 @@
   <script src="js/components/homeFx.js"></script>
   <script src="js/components/customApiWidget.js"></script>
   <script src="js/components/briefingModal.js"></script>
+  <!-- v7.25.0: 로그인 화면의 개인정보 처리방침(클릭 시 모달) — auth.js보다 먼저 로드 -->
+  <script src="js/components/privacyPolicy.js"></script>
   <script src="js/modules/auth.js"></script>
   <script src="js/modules/home.js"></script>
   <script src="js/modules/schedule.js"></script>
@@ -86,6 +101,8 @@
   <script src="js/modules/challenges.js"></script>
   <script src="js/modules/playlist.js"></script>
   <script src="js/modules/vehicles.js"></script>
+  <!-- v7.24.0: 증권 -->
+  <script src="js/modules/stocks.js"></script>
   <script src="js/modules/health.js"></script>
   <script src="js/modules/briefing.js"></script>
   <script src="js/modules/devlog.js"></script>

@@ -36,6 +36,7 @@ create table if not exists bookmarks (
 create index if not exists idx_bookmarks_user on bookmarks(user_id, sort_order);
 
 alter table bookmarks enable row level security;
+drop policy if exists bookmarks_own_rows on bookmarks;
 create policy bookmarks_own_rows on bookmarks for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 

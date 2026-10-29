@@ -7,10 +7,13 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_projects_updated_at on projects;
 create trigger trg_projects_updated_at before update on projects
   for each row execute function set_updated_at();
+drop trigger if exists trg_schedules_updated_at on schedules;
 create trigger trg_schedules_updated_at before update on schedules
   for each row execute function set_updated_at();
+drop trigger if exists trg_programs_updated_at on programs;
 create trigger trg_programs_updated_at before update on programs
   for each row execute function set_updated_at();
 
@@ -82,6 +85,7 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
+drop trigger if exists trg_predict_completion on project_progress;
 create trigger trg_predict_completion
   after insert on project_progress
   for each row execute function calc_predicted_completion();
