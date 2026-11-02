@@ -1,0 +1,32 @@
+/* 다이어그램 스튜디오 (v7.32.0) */
+.dg-intro { color: var(--text-muted); margin: 0 0 12px; font-size: 13px; }
+.dg-det { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; margin: 10px 0; background: var(--surface); }
+.dg-det > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.dg-set { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; margin-top: 10px; align-items: end; }
+.dg-set__f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); }
+.dg-set__f--chk { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+.dg-set__f--c { flex-direction: row; align-items: center; gap: 6px; }
+.dg-set__pal, .dg-set__prof { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; border-top: 1px dashed var(--border); padding-top: 8px; }
+.dg-filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; }
+.dg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.dg-card2 { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
+.dg-card2__thumb { background: var(--surface-2); height: 150px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
+.dg-card2__thumb svg { pointer-events: none; }
+.dg-card2__b { padding: 10px 12px 12px; font-size: 13px; }
+.dg-card2__b h4 { margin: 2px 0 0; display: inline; font-size: 15px; }
+.dg-card2__b small { color: var(--text-muted); margin-left: 4px; }
+.dg-card2__b p { margin: 4px 0; color: var(--text-muted); }
+.dg-card2__fam { display: block; font-size: 10px; letter-spacing: .08em; color: var(--accent); }
+.dg-viewer { display: flex; flex-direction: column; gap: 10px; }
+.dg-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dg-tab--on { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.dg-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; }
+@media (max-width: 860px) { .dg-main { grid-template-columns: 1fr; } }
+.dg-stage { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; overflow: auto; max-height: 68vh; background: var(--surface); }
+.dg-exp { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dg-meta h3 { margin: 0 0 6px; font-size: 16px; }
+.dg-meta p { margin: 4px 0; font-size: 13px; }
+.dg-meta__s { color: var(--text-muted); }
+.dg-edit { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; }
+.dg-note { font-size: 12px; background: var(--info-soft); color: var(--text); border-radius: var(--radius-sm); padding: 6px 10px; margin-top: 6px; }
+.dg-note--w { background: var(--warning-soft); }
