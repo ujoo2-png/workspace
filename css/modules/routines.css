@@ -1,0 +1,27 @@
+/* 루틴 트래킹 (v7.33.0) */
+.rt-top { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 4px; }
+.rt-tile { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
+.rt-tile b { font-size: 22px; }
+.rt-tile--bad b { color: var(--danger, #c0392b); }
+.rt-tile--good b { color: var(--success, #2e7d32); }
+.rt-list { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; }
+.rt-line { display: flex; align-items: center; gap: 8px; padding: 6px 2px; border-bottom: 1px dashed var(--border); }
+.rt-line:last-child { border-bottom: 0; }
+.rt-line__title { flex: 1; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-line__title:hover { text-decoration: underline; }
+.rt-line__meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.rt-line--overdue .rt-line__title { color: var(--danger, #c0392b); font-weight: 600; }
+.rt-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.rt-stat { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; display: flex; flex-direction: column; font-size: 12px; }
+.rt-stat b { font-size: 15px; }
+.rt-hist { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
+.rt-hist__h { text-align: center; font-size: 11px; color: var(--text-muted); }
+.rt-cell { border: 1px solid var(--border); border-radius: 6px; padding: 6px 0; font-size: 11px; cursor: pointer; background: var(--surface); color: var(--text-muted); }
+.rt-cell--done { background: var(--success, #2e7d32); color: #fff; border-color: transparent; }
+.rt-cell--missed { background: var(--danger-soft, #fdecea); color: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
+.rt-cell--pending { border-style: dashed; color: var(--text); }
+.rt-cell--off, .rt-cell--future { opacity: .45; cursor: default; }
+.rt-cell--today { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rt-home__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rt-bar { height: 6px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
+.rt-bar > i { display: block; height: 100%; background: var(--accent); }

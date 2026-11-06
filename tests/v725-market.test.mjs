@@ -18,7 +18,7 @@ class FakeLocalStorage {
 
 globalThis.localStorage = new FakeLocalStorage();
 globalThis.window = globalThis;
-globalThis.settingsSync = { get: () => '', set: () => {} };
+globalThis.settingsSync = { get: (k) => localStorage.getItem(k), set: (k, v) => { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } };
 // fetch는 호출되지 않도록 기본 스텁(개별 테스트에서 교체).
 globalThis.fetch = async () => { throw new Error('fetch not stubbed'); };
 

@@ -72,7 +72,7 @@
 .asset-card__sub { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
 
 /* v7.25.0: 오늘의 시황 · 환율 카드 */
-.market-card { margin-bottom: 14px; }
+.market-card, .asset-trend { margin-bottom: 14px; }
 .market-card__body { margin-top: 8px; display: grid; gap: 10px; }
 .market-sec { display: grid; gap: 6px; }
 .market-sec__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }

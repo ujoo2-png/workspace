@@ -119,7 +119,7 @@ test('marketService: 환율 소스(공공데이터포털/커스텀) 선택을 �
 test('marketService: 커스텀 소스는 편집 가능한 환율 배열을 관대하게 파싱한다', async () => {
   globalThis.localStorage = new FakeLocalStorage();
   globalThis.window = globalThis;
-  globalThis.settingsSync = { get: () => '', set: () => {} };
+  globalThis.settingsSync = { get: (k) => localStorage.getItem(k), set: (k, v) => { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } };
   globalThis.fetch = async () => { throw new Error('not stubbed'); };
   (0, eval)(read('js/services/marketService.js'));
 
