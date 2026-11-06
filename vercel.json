@@ -1,4 +1,5 @@
 {
+  "regions": ["icn1"],
   "functions": {
     "api/dart-proxy.js": { "maxDuration": 60 }
   }

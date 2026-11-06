@@ -1,10 +1,12 @@
-# 나만의 Work Space (v7.33.1)
+# 나만의 Work Space (v7.33.2)
 
 HTML + CSS + Vanilla JavaScript로 만든 개인용 통합 대시보드입니다.
 네오모피즘(Neumorphism) 디자인, 예측(Predictive) 로직, 자동 워크플로우(규칙 엔진), 로그인 시 브리핑 알림을 갖췄고,
 개발계획서 v3.2의 전체 메뉴(일정·프로젝트·프로그램·챌린저·관심주제 브리핑·문화생활·차량관리·증권·Health·Devlog·
 Knowledge·Automation·Integrations·Analytics)를 구현했습니다. 앱 버전은 `js/config.js`의 `CONFIG.version`
 한 곳에서 관리되며 로그인 화면·사이드바·설정 화면에 동일하게 표시됩니다.
+
+v7.33.2 — **전자공시 502 재수정**: 함수 실행 지역을 서울(`vercel.json` regions: icn1)로 고정(미국 서버→DART 다운로드가 느렸을 가능성), 큰 종목표는 "데이터가 오는 동안" 기다리는 방식으로 변경(총 52초), 오류 문구에 원인(응답 지연 등)을 표시. 설정의 [연결 테스트]가 종목표 준비 시간까지 확인합니다. 재배포 시 `vercel.json` 필수.
 
 v7.33.1 — **전자공시 수정 + korean-dart-mcp 기능 재구현**:
 - 🐛 "This operation was aborted"(공시 안 나옴) 수정: DART 종목표(corpCode.zip, 약 3MB)를 받다가 제한시간에 걸리던 것이 원인. 서버 대기 45초·함수 60초(`vercel.json`)로 늘리고, 종목코드↔corp_code 매핑을 브라우저에 저장해 두 번째부터는 다운로드 없이 조회(공시는 병렬 조회).
