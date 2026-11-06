@@ -644,8 +644,8 @@
       } }, '저장');
       const dartTest = el('button', { class: 'nm-btn', type: 'button', onclick: async () => {
         if (dartInput.value.trim() !== window.DartService.getKey()) window.DartService.setKey(dartInput.value.trim());
-        const old = dartTest.textContent; dartTest.disabled = true; dartTest.textContent = '확인 중…';
-        try { await window.DartService.testDart(); toast('OpenDART 연결 성공', 'success'); dartStatus.textContent = '연결 확인됨'; }
+        const old = dartTest.textContent; dartTest.disabled = true; dartTest.textContent = '확인 중(최대 1분)…';
+        try { const r = await window.DartService.testDart(); toast(`OpenDART 연결 성공 · 종목표 준비 ${r && r.corpSec != null ? r.corpSec + '초' : '완료'}`, 'success'); dartStatus.textContent = '연결·종목표 확인됨'; }
         catch (e) { toast('OpenDART 연결 실패: ' + (e.message || e), 'error'); }
         dartTest.disabled = false; dartTest.textContent = old;
       } }, '연결 테스트');

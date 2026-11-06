@@ -45,9 +45,10 @@
   const fetchFinancials = (symbol, year, reprt = '11011', opts) => call({ op: 'fin', stock_code: symbol, ...(year ? { year: String(year) } : {}), reprt }, opts);
   const filingUrl = (rceptNo) => `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${encodeURIComponent(rceptNo)}`;
   async function testDart() {
-    const d = await call({ op: 'ping' }, { force: true });
+    const d = await call({ op: 'ping', warm: '1' }, { force: true });
     if (!d.ok) throw new Error(`${d.message || '키 확인 실패'} (${d.status})`);
-    return true;
+    if (d.corpError) throw new Error(`키는 정상이지만 종목표를 받지 못했습니다: ${d.corpError}`);
+    return d; // { corpSec } — 종목표 준비에 걸린 시간
   }
   const searchCorp = (q) => call({ op: 'search', q });
   const insider = (code, days = 365, o) => call({ op: 'insider', stock_code: code, days: String(days) }, o);
