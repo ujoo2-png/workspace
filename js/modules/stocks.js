@@ -130,7 +130,7 @@
       const divTotal = divSum.byCurrency.KRW || 0;
       container.append(buildAssetCard(total, { allTrades, realized, divSum, divTotal }));
       container.append(buildTrendCard());
-      if (window.DartService.hasDartKey() && holdings.some(window.DartService.isKrx)) { container.append(buildDisclosureCard()); if (!disclosures && !discLoading && !discError) setTimeout(() => loadDisclosures(false), 0); }
+      if (window.DartService.hasDartKey()) { container.append(buildDisclosureCard()); if (!disclosures && holdings.some(window.DartService.isKrx) && !discLoading && !discError) setTimeout(() => loadDisclosures(false), 0); }
       if (total.evaluatedCount < total.count) {
         container.append(el('div', { class: 'text-muted', style: 'font-size:12px; margin:-4px 0 10px' }, `※ ${total.count - total.evaluatedCount}개 종목은 시세가 없어 평가에서 제외했습니다.`));
       }
@@ -215,10 +215,10 @@
       all.sort((a, b) => (a.date < b.date ? 1 : -1));
       card.append(el('div', { class: 'row row--between', style: 'align-items:center' }, [
         el('strong', { style: 'font-size:14px' }, `📑 보유 종목 최근 공시(30일)${all.length ? ` · ${all.length}건` : ''}`),
-        el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', disabled: discLoading || undefined, onclick: () => loadDisclosures(true) }, discLoading ? '⏳' : '🔄')]));
+        el('div', { class: 'row', style: 'gap:4px' }, [el('button', { class: 'nm-btn', style: 'padding:2px 10px; font-size:12px', onclick: () => window.openDartTools() }, '🧭 공시 분석·종목 검색'), el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', disabled: discLoading || undefined, onclick: () => loadDisclosures(true) }, discLoading ? '⏳' : '🔄')])]));
       if (discError) card.append(el('div', { class: 'nm-banner nm-banner--warning', style: 'margin-top:6px' }, `공시를 불러오지 못했습니다: ${discError}`));
       else if (disclosures && !all.length) card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '최근 30일 공시가 없습니다.'));
-      else if (!disclosures) card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '불러오는 중…'));
+      else if (!disclosures) card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, appState.stockHoldings.some((h) => !h.deleted_at && window.DartService.isKrx(h)) ? '불러오는 중… (처음 한 번은 DART 종목표를 받느라 30초쯤 걸릴 수 있어요)' : '보유한 국내 종목이 없습니다. 오른쪽 🧭 버튼으로 다른 종목을 검색해 보세요.'));
       const dt = (d) => `${String(d).slice(4, 6)}-${String(d).slice(6, 8)}`;
       for (const it of all.slice(0, 5)) card.append(el('div', { style: 'font-size:13px; padding:3px 0' }, [el('span', { class: 'text-muted' }, `${dt(it.date)} `), el('b', {}, it.name), ' ', el('a', { href: window.DartService.filingUrl(it.rcept_no), target: '_blank', rel: 'noopener' }, it.title)]));
       if (all.length > 5) card.append(el('details', {}, [el('summary', { style: 'cursor:pointer; font-size:12px' }, `나머지 ${all.length - 5}건 더 보기`),
@@ -406,7 +406,7 @@
             const cut = new Date(Date.now() - period * 86400000).toISOString().slice(0, 10);
             const rows = chartRows.filter((r) => r.date >= cut);
             const st = window.PriceChart.stats(rows);
-            const refs = [{ value: h.avg_price, label: '평단', cls: 'is-avg' }];
+            const refs = h._lookup ? [] : [{ value: h.avg_price, label: '평단', cls: 'is-avg' }];
             if (h.target_price) refs.push({ value: Number(h.target_price), label: '목표', cls: 'is-target' });
             if (h.stop_price) refs.push({ value: Number(h.stop_price), label: '손절', cls: 'is-stop' });
             const f = (v) => (h.currency === 'USD' ? Number(v).toFixed(2) : Math.round(v).toLocaleString('ko-KR'));
@@ -432,10 +432,10 @@
             );
             const cell = (label, value, c) => el('div', {}, [label, el('b', { class: c ? `stock-pnl--${c}` : '' }, value)]);
             grid.replaceChildren(
-              cell('내 평단', money(h.avg_price)),
-              cell('보유 수량', `${num(h.quantity)}주`),
-              cell('평가금액', ev.marketValue === null ? '—' : money(ev.marketValue)),
-              cell('평가손익', ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`, ev.pnl === null ? '' : pnlClass(ev.pnl)),
+              h._lookup ? cell('현재가', q.price === null || q.price === undefined ? '—' : money(q.price)) : cell('내 평단', money(h.avg_price)),
+              h._lookup ? null : cell('보유 수량', `${num(h.quantity)}주`),
+              h._lookup ? null : cell('평가금액', ev.marketValue === null ? '—' : money(ev.marketValue)),
+              h._lookup ? null : cell('평가손익', ev.pnl === null ? '—' : `${formatPnl(ev.pnl)} (${formatPnlRate(ev.pnlRate)})`, ev.pnl === null ? '' : pnlClass(ev.pnl)),
               q.prevClose ? cell('전일 종가', money(q.prevClose)) : null,
               q.high ? cell('고가', money(q.high)) : null,
               q.low ? cell('저가', money(q.low)) : null,
@@ -798,6 +798,7 @@
     }
 
     draw();
+    window.openStockQuote = openQuoteDetail; // v7.33.1: 조회(미보유) 종목 시세 상세에서도 재사용
     const onChange = () => { draw(); loadMissing(); };
     appState.addEventListener('change', onChange);
     // 첫 진입 시 시세를 한 번 받아 둔다(키가 있을 때만).

@@ -23,7 +23,8 @@
       }
       trending = { loading: true, items: null };
       draw();
-      const items = await window.fetchTrendingMovies();
+      let items = [];
+      try { items = (await window.fetchTrendingMovies()) || []; } catch { items = []; }
       trending = { loading: false, items };
       draw();
     }
@@ -121,7 +122,7 @@
         ]);
       }
       if (trending.items === null) {
-        loadTrending();
+        if (!trending.loading) loadTrending(); // loading 중 draw()가 다시 호출해도 재진입하지 않는다(무한 재귀 방지)
         return el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [el('div', { class: 'text-muted' }, '이번 주 인기 영화를 불러오는 중…')]);
       }
       if (!trending.items.length) {
