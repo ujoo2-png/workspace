@@ -28,6 +28,8 @@
     // v7.25.0 — 증권 시세 공급자 선택 + 커스텀(사용자 정의) API 설정.
     'workspace:stocks:provider',
     'workspace:stocks:customProvider',
+    // v7.33.0 — OpenDART(전자공시) API 키.
+    'workspace:stocks:dartKey',
     // v7.25.0 — 오늘의 시황·환율 표시 on/off.
     'workspace:market:fxEnabled',
     // v7.26.0 — 환율 데이터 출처(공공데이터포털 / 커스텀 API)와 선택한 커스텀 API id.

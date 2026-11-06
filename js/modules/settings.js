@@ -633,6 +633,23 @@
       ]);
       renderProviderConfig();
 
+      // v7.33.0: OpenDART(전자공시) 키 — 다른 키와 같은 방식(설정 동기화)으로 저장한다.
+      const dartInput = el('input', { class: 'nm-input', type: 'password', autocomplete: 'off', placeholder: 'OpenDART 인증키(40자리)', value: window.DartService.getKey(), style: 'flex:1; min-width:220px' });
+      const dartStatus = el('span', { class: 'text-muted', style: 'font-size:12px' }, window.DartService.hasDartKey() ? '키 등록됨' : '미등록');
+      const dartSave = el('button', { class: 'nm-btn', type: 'button', onclick: () => {
+        const v = dartInput.value.trim();
+        if (v && !/^[0-9a-fA-F]{40}$/.test(v)) { toast('OpenDART 인증키는 영문·숫자 40자리입니다.', 'error'); return; }
+        window.DartService.setKey(v); window.DartService.clearDartCache();
+        dartStatus.textContent = v ? '키 등록됨' : '미등록'; toast(v ? 'OpenDART 키를 저장했습니다.' : 'OpenDART 키를 지웠습니다.', 'success');
+      } }, '저장');
+      const dartTest = el('button', { class: 'nm-btn', type: 'button', onclick: async () => {
+        if (dartInput.value.trim() !== window.DartService.getKey()) window.DartService.setKey(dartInput.value.trim());
+        const old = dartTest.textContent; dartTest.disabled = true; dartTest.textContent = '확인 중…';
+        try { await window.DartService.testDart(); toast('OpenDART 연결 성공', 'success'); dartStatus.textContent = '연결 확인됨'; }
+        catch (e) { toast('OpenDART 연결 실패: ' + (e.message || e), 'error'); }
+        dartTest.disabled = false; dartTest.textContent = old;
+      } }, '연결 테스트');
+
       // v7.26.0: 환율 데이터 출처(공공데이터포털 기본 / 커스텀 API 선택 — 둘 다 지원).
       // "커스텀 API 관리"에 한국수출입은행 API를 등록해도 기본값은 공공데이터포털이라 증권 화면과
       // 연결되지 않던 문제를 해결한다. 여기서 소스를 고르면 증권 화면의 환율 카드에 바로 반영된다.
@@ -719,6 +736,15 @@
         el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
           el('strong', { style: 'font-size:13px' }, '공급자 설정'),
           providerConfigHost,
+        ]),
+        el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
+          el('div', { class: 'row row--between' }, [el('strong', { style: 'font-size:13px' }, '전자공시(OpenDART)'), dartStatus]),
+          el('p', { class: 'text-muted', style: 'font-size:11px' }, [
+            '보유 국내 종목의 최근 공시와 주요 재무를 증권 화면에 보여 줍니다(무료, 키 발급: ',
+            el('a', { href: 'https://opendart.fss.or.kr', target: '_blank', rel: 'noopener' }, 'opendart.fss.or.kr'),
+            '). korean-dart-mcp는 PC용이라 웹앱에 직접 못 붙여서 같은 OpenDART API를 서버 프록시로 호출합니다. 키는 요청 때만 서버를 거치고 저장·기록하지 않습니다.',
+          ]),
+          el('div', { class: 'row', style: 'gap:8px; margin:6px 0; flex-wrap:wrap' }, [dartInput, dartSave, dartTest]),
         ]),
         el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)' }, [
           el('strong', { style: 'font-size:13px' }, '오늘의 시황 · 환율'),

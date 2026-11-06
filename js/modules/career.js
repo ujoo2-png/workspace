@@ -607,6 +607,10 @@
             form.append(el('div', { class: 'nm-field' }, [el('label', {}, f.label), input]));
           }
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, tableOf(cat.key));
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 신규 등록 직후 바로 파일을 첨부할 수 있도록(Knowledge/문화생활과 동일한 흐름),
           // 저장되면 폼 자리에 첨부 패널을 보여준다.
@@ -629,15 +633,10 @@
                 close();
               } else {
                 const row = await appState.addCareerRecord(cat.key, data);
-                toast('등록했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-                submitBtn.style.display = 'none';
-                attachHost.append(
-                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                  el('div', { id: 'new-career-attach-box' }),
-                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-                );
-                window.renderAttachmentsPanel(attachHost.querySelector('#new-career-attach-box'), tableOf(cat.key), row.id);
+                toast('등록했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
               }
             } catch (err) {
               toast(`저장에 실패했습니다: ${err.message || err}`, 'error');

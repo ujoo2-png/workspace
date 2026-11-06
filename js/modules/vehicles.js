@@ -510,6 +510,10 @@
             field('등록/검사 만료일(선택)', el('input', { class: 'nm-input', type: 'date', name: 'registration_expiry', value: existing?.registration_expiry || '' }))
           );
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, 'vehicles');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 신규 등록 직후 바로 첨부(보험증서/등록증 등)할 수 있도록 저장되면 폼 자리에 첨부 패널을 보여준다.
           const attachHost = el('div', {});
@@ -533,15 +537,10 @@
                 close();
               } else {
                 const row = await appState.addVehicle(data);
-                toast('저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-                submitBtn.style.display = 'none';
-                attachHost.append(
-                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                  el('div', { id: 'new-vehicle-attach-box' }),
-                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-                );
-                window.renderAttachmentsPanel(attachHost.querySelector('#new-vehicle-attach-box'), 'vehicles', row.id);
+                toast('저장했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
               }
             } catch (err) {
               toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
@@ -568,6 +567,10 @@
             field('메모(선택)', el('textarea', { class: 'nm-textarea', name: 'memo' }))
           );
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = window.createPendingAttachments(pendingHost, 'vehicle_maintenance');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 신규 등록 직후 바로 첨부(영수증 등)할 수 있도록 저장되면 폼 자리에 첨부 패널을 보여준다.
           const attachHost = el('div', {});
@@ -586,15 +589,10 @@
                 next_due_odometer: fd.get('next_due_odometer') ? Number(fd.get('next_due_odometer')) : null,
                 memo: fd.get('memo') || null,
               });
-              toast('정비 기록을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                el('div', { id: 'new-maintenance-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-maintenance-attach-box'), 'vehicle_maintenance', row.id);
+              toast('정비 기록을 저장했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
             } catch (err) {
               toast(`저장에 실패했습니다: ${err.message || err}`, 'error');
             }

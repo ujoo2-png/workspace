@@ -36,6 +36,11 @@
     ddays: { field: 'ddays', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'target_date' }), cmp: byStr('target_date') },
     // v7.22.0 — 이력/경력 양식 문서(수정일 최신순)와 기본 인적사항(사용자당 1행; careerBasic으로 파생)
     career_documents: { field: 'careerDocuments', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'updated_at', ascending: false }), cmp: (a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')) },
+    // v7.33.0 — 일별 자산 스냅샷 / 루틴 / 루틴 수행 기록 / 주간 브리핑(0032).
+    stock_asset_snapshots: { field: 'assetSnapshots', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'snap_date' }), cmp: byStr('snap_date') },
+    routines: { field: 'routines', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'sort_order' }), cmp: (a, b) => (a.sort_order || 0) - (b.sort_order || 0) },
+    routine_logs: { field: 'routineLogs', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'log_date', ascending: false }), cmp: byStr('log_date', -1) },
+    weekly_briefings: { field: 'weeklyBriefings', opts: (uid) => ({ where: { user_id: uid }, orderBy: 'week_start', ascending: false }), cmp: byStr('week_start', -1) },
     career_basic_info: {
       field: 'careerBasicRows', opts: (uid) => ({ where: { user_id: uid } }), cmp: null,
       derive: (st) => { st.careerBasic = st.careerBasicRows[0] || null; },
@@ -129,6 +134,10 @@
       this.projectStages = []; // v7.20.0: 평평한 목록(트리는 WBS.buildTree로 만든다). projectStagesByProject는 여기서 파생된다.
       this.challengeCheckins = []; // v7.20.0: 평평한 목록. checkinsByChallenge는 여기서 파생된다.
       this.ddays = []; // v7.20.0: D-day(최대 5개)
+      this.assetSnapshots = []; // v7.33.0: 일별 마감 자산
+      this.routines = []; // v7.33.0: 루틴
+      this.routineLogs = [];
+      this.weeklyBriefings = [];
 
       // 파일 첨부(모든 메뉴 공통): key = `${owner_table}:${owner_id}` -> [row]
       this.attachmentsByOwner = {};
@@ -187,6 +196,11 @@
         stockHoldings,
         stockTrades,
         stockDividends,
+        // v7.33.0(0032): 미실행이어도 빈 목록으로 폴백한다.
+        assetSnapshotRows,
+        routineRows,
+        routineLogRows,
+        weeklyBriefingRows,
         // 기기 간 설정 동기화(원격 우선 pull). 실패해도 던지지 않으며(settingsSync가 내부에서 폴백),
         // 다른 조회와 병렬이라 첫 화면을 추가로 지연시키지 않는다.
         // 적용된 값은 아래 emit('change') 이전에 localStorage 캐시에 반영된다.
@@ -238,6 +252,10 @@
         this.store.list('stock_trades', { where: { user_id: uid }, orderBy: 'traded_at' }).catch(() => []),
         // 0028 미실행이어도 빈 목록으로 폴백한다(목표가/손절가 컬럼이 없어도 저장은 시도 후 안내).
         this.store.list('stock_dividends', { where: { user_id: uid }, orderBy: 'paid_at', ascending: false }).catch(() => []),
+        this.store.list('stock_asset_snapshots', TABLE_STATE.stock_asset_snapshots.opts(uid)).catch(() => []),
+        this.store.list('routines', TABLE_STATE.routines.opts(uid)).catch(() => []),
+        this.store.list('routine_logs', TABLE_STATE.routine_logs.opts(uid)).catch(() => []),
+        this.store.list('weekly_briefings', TABLE_STATE.weekly_briefings.opts(uid)).catch(() => []),
         window.settingsSync.load(uid).catch(() => ({ changed: [] })),
       ]);
 
@@ -281,6 +299,10 @@
       this.ddays = ddayRows;
       this._setRows('career_documents', careerDocRows);
       this._setRows('career_basic_info', careerBasicRows);
+      this._setRows('stock_asset_snapshots', assetSnapshotRows);
+      this._setRows('routines', routineRows);
+      this._setRows('routine_logs', routineLogRows);
+      this._setRows('weekly_briefings', weeklyBriefingRows);
 
       // v7.24.0: 증권
       this.brokerageAccounts = brokerageAccounts;
@@ -607,6 +629,46 @@
     }
     async deleteDday(id) {
       return this._optimisticRemove('ddays', [id], () => this.store.remove('ddays', id));
+    }
+
+    // ---- v7.33.0: 일별 자산 스냅샷 · 루틴 · 주간 브리핑 (테이블은 0032) ----
+    _missingTable(e, table, what) {
+      const msg = String(e?.message || e);
+      if (new RegExp(table, 'i').test(msg) && /(relation|schema cache|does not exist|find|42P01)/i.test(msg)) return new Error(`${what} 테이블이 없습니다. 0032 마이그레이션(supabase/combined/all_migrations_0001_to_0032.sql)을 Supabase SQL Editor에서 실행해 주세요.`);
+      return e;
+    }
+    /** 같은 날짜가 있으면 갱신, 없으면 추가(하루 1행). */
+    async saveAssetSnapshot(data) {
+      const ex = this.assetSnapshots.find((r) => r.snap_date === data.snap_date);
+      try {
+        if (ex) { await this._optimisticUpdate('stock_asset_snapshots', ex.id, data, () => this.store.update('stock_asset_snapshots', ex.id, data)); return ex; }
+        return (await this._optimisticCreate('stock_asset_snapshots', [{ ...data, user_id: this.user.id }]))[0];
+      } catch (e) { throw this._missingTable(e, 'stock_asset_snapshots', '일별 자산'); }
+    }
+    async deleteAssetSnapshot(id) { return this._optimisticRemove('stock_asset_snapshots', [id], () => this.store.remove('stock_asset_snapshots', id)); }
+    async addRoutine(data) {
+      const maxOrder = this.routines.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+      try { return (await this._optimisticCreate('routines', [{ ...data, user_id: this.user.id, sort_order: maxOrder + 1 }]))[0]; }
+      catch (e) { throw this._missingTable(e, 'routines', '루틴'); }
+    }
+    async updateRoutine(id, patch) { return this._optimisticUpdate('routines', id, patch, () => this.store.update('routines', id, patch)); }
+    async deleteRoutine(id) { return this._optimisticRemove('routines', [id], () => this.store.softDelete('routines', id)); }
+    /** 루틴 수행 체크(이미 있으면 그대로). */
+    async setRoutineDone(routineId, dateISO, done = true) {
+      const ex = this.routineLogs.find((l) => l.routine_id === routineId && l.log_date === dateISO);
+      try {
+        if (done) { if (ex) return ex; return (await this._optimisticCreate('routine_logs', [{ routine_id: routineId, log_date: dateISO, user_id: this.user.id }]))[0]; }
+        if (ex) await this._optimisticRemove('routine_logs', [ex.id], () => this.store.remove('routine_logs', ex.id));
+        return null;
+      } catch (e) { throw this._missingTable(e, 'routine_logs', '루틴 기록'); }
+    }
+    async saveWeeklyBriefing(weekStart, content) {
+      const ex = this.weeklyBriefings.find((r) => r.week_start === weekStart);
+      const row = { week_start: weekStart, content, generated_at: new Date().toISOString() };
+      try {
+        if (ex) { await this._optimisticUpdate('weekly_briefings', ex.id, row, () => this.store.update('weekly_briefings', ex.id, row)); return ex; }
+        return (await this._optimisticCreate('weekly_briefings', [{ ...row, user_id: this.user.id }]))[0];
+      } catch (e) { throw this._missingTable(e, 'weekly_briefings', '주간 브리핑'); }
     }
 
     // ---- 차량관리 ----

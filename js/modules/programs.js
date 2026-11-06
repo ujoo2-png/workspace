@@ -504,6 +504,10 @@
             '잠금 암호는 서버에 저장되지 않으며, 잊으면 저장된 값을 복구할 수 없습니다.'));
 
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, 'programs');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 신규 등록 직후 바로 첨부할 수 있도록(기존엔 "상세" 모달에서만 가능했음), 저장되면
           // 폼 자리에 첨부 패널을 보여준다.
@@ -562,15 +566,10 @@
                 close();
               } else {
               const row = await appState.addProgram(data);
-              toast('저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                el('div', { id: 'new-program-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-program-attach-box'), 'programs', row.id);
+              toast('저장했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
               }
             } catch (err) {
               // 저장 실패를 삼키지 않는다 — DB 제약/네트워크 오류를 사용자가 읽을 수 있는 문장으로 보여 준다.

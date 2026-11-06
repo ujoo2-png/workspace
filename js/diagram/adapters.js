@@ -80,6 +80,7 @@
       const nodes = new Map(); const links = []; for (const h of hv.slice(0, 12)) { nodes.set(`a:${h.acc}`, { id: `a:${h.acc}`, label: lbl(h.acc, 10) }); nodes.set(`h:${h.label}`, { id: `h:${h.label}`, label: h.label }); links.push({ from: `a:${h.acc}`, to: `h:${h.label}`, value: Math.round(h.value / 10000) || 1 }); }
       return [
         P('stk-treemap', '보유 종목 비중(매수금액)', 'treemap', hv.length ? { title: '보유 종목 비중(매수금액 기준)', unit: '원', items: hv.slice(0, 20).map((h, i) => ({ label: h.label, value: h.value, focal: i === 0 })) } : null, '큰 종목이 얼마나 큰지'),
+        P('stk-asset', '총자산 추이(마감)', 'line', (() => { const sn = live(s.assetSnapshots).slice().sort((a, b) => (a.snap_date < b.snap_date ? -1 : 1)).slice(-14); return sn.length > 1 ? { title: '총자산 추이(마감 기준)', x: sn.map((r) => String(r.snap_date).slice(5)), series: [{ name: '총자산', values: sn.map((r) => num(r.total_value)), focal: true }] } : null; })(), '일별 마감 자산 변화'),
         P('stk-bar', '종목별 매수금액', 'bar', hv.length ? { title: '종목별 매수금액', unit: '원', orientation: 'h', items: hv.slice(0, 12).map((h, i) => ({ label: h.label, value: h.value, focal: i === 0 })) } : null, '순위 비교'),
         P('stk-sankey', '계좌 → 종목 배분', 'sankey', links.length ? { title: '계좌 → 종목 배분(만원)', unit: '만', nodes: [...nodes.values()], links } : null, '어느 증권사에 무엇이 있는지'),
         P('stk-org', '계좌 → 종목 구조', 'tree', A.length ? { root: { label: '내 증권', focal: true, children: A.slice(0, 5).map((a) => ({ label: lbl(a.name, 10), children: H.filter((h) => h.account_id === a.id).slice(0, 4).map((h) => ({ label: lbl(h.name || h.symbol, 10) })) })) } } : null, '계좌별 보유 종목'),
@@ -111,6 +112,13 @@
         P('car-gantt', '경력 기간', 'gantt', ex.length ? { title: '경력 기간', today: new Date().toISOString().slice(0, 10), tasks: ex.slice(0, 12).map((x) => ({ label: lbl(x.company_name || x.title || x.name, 14), start: s10(x.start_date || x.created_at), end: s10(x.end_date || x.updated_at || x.created_at), progress: 100, group: '문서' })) } : null, '언제 어디서 일했는지'),
         P('car-timeline', '경력 타임라인', 'timeline', timelineOf('경력 타임라인', ex.map((x) => ({ date: s10(x.start_date || x.created_at), title: x.company_name || x.title || x.name, sub: x.position || x.kind }))), '이력 흐름'),
         P('car-nested', '역량 범위(빈 틀)', 'nested', null, '경력 → 역량 → 프로젝트 포함 관계'),
+      ]; },
+    '/routines': (s) => { const sum = window.routineSummary ? window.routineSummary() : { items: [], active: [] }; const A2 = sum.active || [];
+      const st = cnt(A2, (x) => ({ overdue: '미진', due: '오늘 할 일', ok: '정상' }[x.state] || x.state));
+      return [
+        P('rt-state', '루틴 상태', 'bar', bars('루틴 상태', st), '미진·오늘 할 일·정상 비율'),
+        P('rt-streak', '루틴별 연속 달성', 'bar', A2.length ? { title: '루틴별 연속 달성(일/주)', unit: '회', orientation: 'h', items: A2.slice().sort((a, b) => b.streak - a.streak).slice(0, 10).map((x, i) => ({ label: lbl(x.routine.title, 12), value: x.streak, focal: i === 0 })) } : null, '꾸준한 정도 비교'),
+        P('rt-cadence', '주기 구성', 'bar', bars('주기 구성', cnt(A2, (x) => ({ daily: '매일', weekdays: '요일 지정', weekly: '주 N회', monthly: '매월', interval: 'N일마다' }[x.routine.cadence]))), '어떤 주기가 많은지'),
       ]; },
     '/automation': (s) => { const R = live(s.automationRules);
       return [

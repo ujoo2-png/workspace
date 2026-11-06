@@ -70,6 +70,8 @@
         loadingPrices = false;
         pricesLoaded = true;
         draw();
+        // v7.33.0: 시세가 들어오면 마감 자산을 기록(조건이 안 맞으면 알아서 건너뜀)
+        if (window.AssetSnapshot && Object.keys(prices).length) window.AssetSnapshot.ensure({ prices }).then((r) => { if (r && r.saved && r.saved.length) draw(); });
         loadMissing(); // 조회 중에 새로 등록된 종목이 있으면 이어서 조회
       }
     }
@@ -127,6 +129,8 @@
       const divSum = sumDividends(appState.stockDividends || []);
       const divTotal = divSum.byCurrency.KRW || 0;
       container.append(buildAssetCard(total, { allTrades, realized, divSum, divTotal }));
+      container.append(buildTrendCard());
+      if (window.DartService.hasDartKey() && holdings.some(window.DartService.isKrx)) { container.append(buildDisclosureCard()); if (!disclosures && !discLoading && !discError) setTimeout(() => loadDisclosures(false), 0); }
       if (total.evaluatedCount < total.count) {
         container.append(el('div', { class: 'text-muted', style: 'font-size:12px; margin:-4px 0 10px' }, `※ ${total.count - total.evaluatedCount}개 종목은 시세가 없어 평가에서 제외했습니다.`));
       }
@@ -193,6 +197,74 @@
     let marketLoading = false;
     let marketTried = false;
     let fxCode = 'USD';
+    let disclosures = null; // [{stock_code, corp_name, items|error}] 또는 null(미조회)
+    let discLoading = false, discError = '';
+    async function loadDisclosures(force = false) {
+      if (!window.DartService.hasDartKey() || discLoading) return;
+      const hs = appState.stockHoldings.filter((h) => !h.deleted_at);
+      if (!hs.some(window.DartService.isKrx)) return;
+      discLoading = true; discError = ''; draw();
+      try { disclosures = await window.DartService.fetchDisclosures(hs, { days: 30, force }); } catch (e) { discError = e.message || String(e); }
+      discLoading = false; draw();
+    }
+    function buildDisclosureCard() {
+      const card = el('div', { class: 'nm-card asset-trend' });
+      const nameOf = (code) => { const h = appState.stockHoldings.find((x) => x.symbol === code); return (h && h.name) || code; };
+      const all = [];
+      for (const r of disclosures || []) for (const it of r.items || []) all.push({ ...it, name: r.corp_name || nameOf(r.stock_code) });
+      all.sort((a, b) => (a.date < b.date ? 1 : -1));
+      card.append(el('div', { class: 'row row--between', style: 'align-items:center' }, [
+        el('strong', { style: 'font-size:14px' }, `📑 보유 종목 최근 공시(30일)${all.length ? ` · ${all.length}건` : ''}`),
+        el('button', { class: 'nm-btn nm-btn--icon', title: '새로고침', disabled: discLoading || undefined, onclick: () => loadDisclosures(true) }, discLoading ? '⏳' : '🔄')]));
+      if (discError) card.append(el('div', { class: 'nm-banner nm-banner--warning', style: 'margin-top:6px' }, `공시를 불러오지 못했습니다: ${discError}`));
+      else if (disclosures && !all.length) card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '최근 30일 공시가 없습니다.'));
+      else if (!disclosures) card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 2px' }, '불러오는 중…'));
+      const dt = (d) => `${String(d).slice(4, 6)}-${String(d).slice(6, 8)}`;
+      for (const it of all.slice(0, 5)) card.append(el('div', { style: 'font-size:13px; padding:3px 0' }, [el('span', { class: 'text-muted' }, `${dt(it.date)} `), el('b', {}, it.name), ' ', el('a', { href: window.DartService.filingUrl(it.rcept_no), target: '_blank', rel: 'noopener' }, it.title)]));
+      if (all.length > 5) card.append(el('details', {}, [el('summary', { style: 'cursor:pointer; font-size:12px' }, `나머지 ${all.length - 5}건 더 보기`),
+        ...all.slice(5, 40).map((it) => el('div', { style: 'font-size:12px; padding:2px 0' }, [el('span', { class: 'text-muted' }, `${dt(it.date)} `), el('b', {}, it.name), ' ', el('a', { href: window.DartService.filingUrl(it.rcept_no), target: '_blank', rel: 'noopener' }, it.title)]))]));
+      const bad = (disclosures || []).filter((r) => r.error);
+      if (bad.length) card.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:4px' }, `조회 실패 ${bad.length}종목: ${bad.slice(0, 3).map((r) => `${r.corp_name || r.stock_code}(${r.error})`).join(', ')}`));
+      card.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:4px' }, '출처: 금융감독원 전자공시(OpenDART). 제목을 누르면 DART 원문이 열립니다.'));
+      return card;
+    }
+    let trendDays = 30;
+    function buildTrendCard() {
+      const card = el('div', { class: 'nm-card asset-trend' });
+      const all = [...(appState.assetSnapshots || [])].sort((a, b) => (a.snap_date < b.snap_date ? -1 : 1));
+      const f = (v) => Math.round(Number(v)).toLocaleString('ko-KR') + '원';
+      const ch = window.AssetSnapshot.dayChange(all);
+      const delBtn = (r) => el('button', { class: 'nm-btn nm-btn--icon', title: '이 날 기록 삭제', onclick: async () => { if (confirmDialog(`${r.snap_date} 기록을 삭제할까요?`)) { await appState.deleteAssetSnapshot(r.id); draw(); } } }, '🗑️');
+      const head = el('div', { class: 'row row--between', style: 'align-items:center; flex-wrap:wrap; gap:6px' }, [
+        el('strong', { style: 'font-size:14px' }, '📊 자산 추이(마감 기준)'),
+        el('div', { class: 'row', style: 'gap:4px' }, [[30, '1개월'], [90, '3개월'], [365, '1년'], [0, '전체']].map(([d, l]) =>
+          el('button', { class: `nm-btn ${trendDays === d ? 'nm-btn--primary' : ''}`, style: 'padding:2px 8px; font-size:12px', onclick: () => { trendDays = d; draw(); } }, l))),
+      ]);
+      card.append(head);
+      if (all.length < 2) {
+        card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:10px 2px' },
+          all.length ? `${all[0].snap_date} 마감 ${f(all[0].total_value)} 기록됨. 다음 마감부터 추이가 그려집니다.` : '아직 기록이 없습니다. 시세 API가 연결돼 있으면 장 마감(15:40) 후 앱을 열 때 자동으로 쌓입니다.'));
+        return card;
+      }
+      let rows = all.map((r) => ({ date: r.snap_date, v: Number(r.total_value) }));
+      if (trendDays) { const cut = new Date(Date.now() - trendDays * 86400000).toISOString().slice(0, 10); const sub = rows.filter((r) => r.date >= cut); if (sub.length >= 2) rows = sub; }
+      const st = window.PriceChart.stats(rows);
+      const est = all.filter((r) => r.source === 'backfill').length;
+      const last = all[all.length - 1];
+      card.append(
+        ch ? el('div', { style: 'margin:6px 0' }, ['전일 대비 ', el('b', { class: `stock-pnl--${pnlClass(ch.diff)}` }, `${ch.diff > 0 ? '+' : ''}${f(ch.diff)}${ch.rate === null ? '' : ` (${ch.rate > 0 ? '+' : ''}${ch.rate.toFixed(2)}%)`}`), el('span', { class: 'text-muted' }, ` · ${last.snap_date} 마감 ${f(last.total_value)}`)]) : null,
+        window.PriceChart.render(rows, { fmt: (v) => Math.round(v).toLocaleString('ko-KR'), height: 180 }),
+        el('div', { class: 'chart-stats' }, [
+          el('div', {}, ['기간 변화', el('b', { class: `stock-pnl--${pnlClass(st.change)}` }, `${st.change > 0 ? '+' : ''}${f(st.change)}`)]),
+          el('div', {}, ['최고', el('b', {}, `${f(st.high.v)} · ${st.high.date.slice(5)}`)]),
+          el('div', {}, ['최저', el('b', {}, `${f(st.low.v)} · ${st.low.date.slice(5)}`)]),
+        ]),
+        el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, `원화 환산 합계(해외는 당시 환율). 앱을 연 날 기록되므로 안 연 날은 일봉 종가로 보충한 추정치(${est}건)가 섞일 수 있습니다. 시세가 없는 종목은 제외됩니다.`),
+        el('details', { style: 'margin-top:6px' }, [el('summary', { style: 'cursor:pointer; font-size:12px' }, '일별 기록 보기'),
+          el('div', {}, [...all].reverse().slice(0, 60).map((r) => el('div', { class: 'row row--between', style: 'font-size:12px; padding:2px 0' }, [
+            el('span', {}, `${r.snap_date}${r.source === 'backfill' ? ' (추정)' : ''}`), el('span', {}, f(r.total_value)), delBtn(r)])))]));
+      return card;
+    }
     let fxPeriod = '1m';
     const fxSeriesCache = {};   // `${code}:${period}` → rows
     function buildMarketCard() {
@@ -306,6 +378,23 @@
           const chartHost = el('div', {});
           const foot = el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:8px' });
           body.append(head, grid, tabs, chartHost, foot);
+          if (window.DartService.hasDartKey() && window.DartService.isKrx(h)) {
+            const fin = el('details', { style: 'margin-top:10px' }, [el('summary', { style: 'cursor:pointer; font-size:13px; font-weight:600' }, '📑 주요 재무(OpenDART)')]);
+            const finBody = el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 0' }, '펼치면 불러옵니다.');
+            fin.append(finBody); body.append(fin);
+            let loaded = false;
+            fin.addEventListener('toggle', async () => {
+              if (!fin.open || loaded) return; loaded = true; finBody.textContent = '불러오는 중…';
+              try {
+                let d = await window.DartService.fetchFinancials(h.symbol);
+                if (!(d.list || []).length) d = await window.DartService.fetchFinancials(h.symbol, new Date().getFullYear() - 2);
+                if (!(d.list || []).length) { finBody.textContent = d.message ? `${d.message}` : '재무 자료가 없습니다.'; return; }
+                const fmt = (v) => { const n = Number(String(v || '').replace(/,/g, '')); return Number.isFinite(n) ? (Math.abs(n) >= 1e8 ? `${(n / 1e8).toLocaleString('ko-KR', { maximumFractionDigits: 0 })}억` : n.toLocaleString('ko-KR')) : '-'; };
+                finBody.replaceChildren(el('div', { class: 'text-muted', style: 'font-size:11px; margin-bottom:4px' }, `${d.year}년 ${({ '11011': '사업보고서', '11012': '반기', '11013': '1분기', '11014': '3분기' })[d.reprt]} · 연결 기준`),
+                  ...d.list.map((x) => el('div', { class: 'row row--between', style: 'font-size:12px; padding:2px 0' }, [el('span', {}, x.account), el('span', {}, `${fmt(x.current)} (전기 ${fmt(x.prev)})`)])));
+              } catch (e) { loaded = false; finBody.textContent = `불러오지 못했습니다: ${e.message || e}`; }
+            });
+          }
           let chartRows = null;
           let period = 90;
           const PERIODS = [[10, '10일'], [30, '1개월'], [90, '3개월'], [180, '6개월'], [365, '1년']];

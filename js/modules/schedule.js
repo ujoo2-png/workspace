@@ -683,15 +683,10 @@
                 // 저장 전에 담아둔 파일이 있으면 방금 만들어진 일정에 바로 첨부한다.
                 const attached = pendingAttach ? await pendingAttach.flush(row.id) : 0;
                 const w = warn();
-                toast(w ? `저장했습니다. (${w})` : attached ? `저장했습니다. 담아둔 파일 ${attached}개를 첨부했어요.` : n ? `저장했습니다. ${n}건의 "N일 후" 일정도 만들었어요. 이제 파일을 첨부할 수 있어요.` : '일정을 저장했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
-                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-                submitBtn.style.display = 'none';
-                attachHost.append(
-                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                  el('div', { id: 'new-schedule-attach-box' }),
-                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-                );
-                window.renderAttachmentsPanel(attachHost.querySelector('#new-schedule-attach-box'), 'schedules', row.id);
+                toast(w ? `저장했습니다. (${w})` : attached ? `저장했습니다. 담아둔 파일 ${attached}개를 첨부했어요.` : n ? `저장했습니다. ${n}건의 "N일 후" 일정도 만들었어요.` : '일정을 저장했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
               } else {
                 // 반복 등록은 여러 건이 한 번에 생기므로 특정 한 건에만 첨부하는 것이 의미가
                 // 없어 첨부 단계 없이 바로 닫는다(각 일정은 목록의 📎 버튼으로 개별 첨부 가능).

@@ -936,6 +936,10 @@
           );
           syncType();
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, 'health_medications');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           const attachHost = el('div', {});
           body.append(form, attachHost);
@@ -980,15 +984,10 @@
             submitBtn.disabled = true;
             try {
               const row = await appState.addHealthMedication(data);
-              toast('약을 등록했습니다. 처방전 사진 등을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일(처방전 사진 등)'),
-                el('div', { id: 'new-med-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', type: 'button', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-med-attach-box'), 'health_medications', row.id);
+              toast('약을 등록했습니다.', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
             } catch (err) {
               submitBtn.disabled = false;
               toast(errText(err, '약 등록'), 'error');
@@ -1362,6 +1361,10 @@
             ? '저장하면 "일정" 메뉴에 연동된 일정(제목·날짜·시간·장소)도 함께 수정됩니다.'
             : '저장하면 "일정" 메뉴에도 자동으로 함께 등록됩니다.'));
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, 'health_appointments');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 신규 등록 직후 바로 첨부(진료의뢰서 등)할 수 있도록 저장되면 폼 자리에 첨부 패널을 보여준다.
           // 수정할 때는 이미 저장된 레코드이므로 처음부터 첨부 패널을 함께 보여준다.
@@ -1388,15 +1391,10 @@
             submitBtn.disabled = true;
             try {
               const row = await appState.addHealthAppointment(data);
-              toast('일정을 저장했습니다. (일정 메뉴에도 추가됨) 이제 파일을 첨부할 수 있어요.', 'success');
-              Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-              submitBtn.style.display = 'none';
-              attachHost.append(
-                el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                el('div', { id: 'new-appt-attach-box' }),
-                el('button', { class: 'nm-btn nm-btn--primary', type: 'button', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-              );
-              window.renderAttachmentsPanel(attachHost.querySelector('#new-appt-attach-box'), 'health_appointments', row.id);
+              toast('일정을 저장했습니다. (일정 메뉴에도 추가됨)', 'success');
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
             } catch (err) {
               submitBtn.disabled = false;
               toast(`일정 저장 실패: ${err.message || err}`, 'error');

@@ -317,6 +317,10 @@
             field('한줄평(선택)', el('textarea', { class: 'nm-textarea', name: 'review' }, existing?.review || ''))
           );
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
+          // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
+          const pendingHost = el('div', {});
+          const pendingAttach = existing ? null : window.createPendingAttachments(pendingHost, 'playlist_items');
+          if (pendingAttach) form.append(el('div', { class: 'nm-field' }, [el('label', {}, '파일 첨부 (선택)'), pendingHost]));
           form.append(submitBtn);
           // 등록(신규) 시에도 파일을 바로 첨부할 수 있도록, 저장 직후 폼 자리에 첨부 패널을 보여준다
           // (기존에는 저장→모달 닫힘 이후 다시 열어야만 📎 버튼으로 첨부할 수 있었다).
@@ -344,16 +348,11 @@
                 close();
               } else {
                 const row = await appState.addPlaylistItem(data);
-                toast('등록했습니다. 이제 파일을 첨부할 수 있어요.', 'success');
+                toast('등록했습니다.', 'success');
                 // 폼 입력을 잠그고 첨부 패널 + 닫기 버튼으로 전환한다(중복 등록 방지).
-                Array.from(form.elements).forEach((elm) => { elm.disabled = true; });
-                submitBtn.style.display = 'none';
-                attachHost.append(
-                  el('h3', { style: 'margin:16px 0 8px' }, '첨부파일'),
-                  el('div', { id: 'new-item-attach-box' }),
-                  el('button', { class: 'nm-btn nm-btn--primary', style: 'width:100%; margin-top:12px', onclick: close }, '완료')
-                );
-                window.renderAttachmentsPanel(attachHost.querySelector('#new-item-attach-box'), 'playlist_items', row.id);
+              const attachedN = pendingAttach ? await pendingAttach.flush(row.id) : 0;
+              if (attachedN) toast(`첨부 ${attachedN}개도 함께 저장했습니다.`, 'success');
+              close();
               }
             } catch (err) {
               toast(`저장에 실패했습니다: ${err.message || err}`, 'error');

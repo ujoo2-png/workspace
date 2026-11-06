@@ -7,6 +7,7 @@
   const NAV_ITEMS = [
     { path: '/home', label: '홈', icon: '🏠' },
     { path: '/schedule', label: '일정', icon: '🗓️' },
+    { path: '/routines', label: '루틴', icon: '🔁' },
     { path: '/projects', label: '프로젝트', icon: '📁' },
     { path: '/challenges', label: '챌린저', icon: '🏆' },
     { path: '/briefing', label: '관심주제', icon: '📰' },
@@ -103,6 +104,11 @@
       location.reload();
     });
 
+    // v7.33.0: 금요일 9시 이후 주간 요약 생성, 마감 자산 기록(백그라운드, 실패해도 진행)
+    let weeklyNew = null;
+    try { weeklyNew = window.WeeklyBriefing ? await window.WeeklyBriefing.ensure() : null; } catch { /* 무시 */ }
+    if (window.AssetSnapshot && window.hasQuoteProvider && window.hasQuoteProvider()) window.AssetSnapshot.ensure().catch(() => {});
+
     if (showBriefing) {
       const weather = await window.fetchWeatherSafe(window.getWeatherCities()[0]);
       const briefing = window.buildLoginBriefing({
@@ -114,6 +120,8 @@
         briefingNewCount: briefingAuto.ran ? briefingAuto.newCount : null,
         weather,
       });
+      briefing.weekly = weeklyNew;
+      briefing.routines = window.routineSummary ? window.routineSummary() : null; // v7.33.0
       window.showLoginBriefing(briefing);
     }
   }
@@ -264,6 +272,7 @@
     window.registerRoute('/usage', window.renderUsage);
     window.registerRoute('/analytics', window.renderAnalytics);
     window.registerRoute('/programs', window.renderPrograms);
+    window.registerRoute('/routines', window.renderRoutines);
     window.registerRoute('/diagrams', window.renderDiagrams);
     window.registerRoute('/settings', window.renderSettings);
   }

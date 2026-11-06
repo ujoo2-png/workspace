@@ -43,6 +43,7 @@
     'brokerage_accounts', 'stock_holdings',
     // v7.24.0 (0028): 배당 기록도 소프트 삭제(수익 요약에서 조용히 빠지지 않게).
     'stock_dividends',
+    'routines', // v7.33.0 (0032) — 루틴은 소프트 삭제(수행 기록 보존). 스냅샷/로그/주간 브리핑은 hard delete.
   ]);
 
   class SupabaseStore {

@@ -15,8 +15,11 @@
   const FX_SOURCE_STORAGE = 'workspace:market:fxSource';        // 'public' | 'custom'
   const FX_CUSTOM_ID_STORAGE = 'workspace:market:fxCustomApiId'; // 커스텀 API 관리에 등록한 API id
 
-  const get = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
-  const set = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
+  // v7.33.0: 설정성 값은 settingsSync(localStorage 캐시 + Supabase user_settings)를 거쳐 저장한다.
+  //   예전에는 localStorage에만 직접 써서 서버에 올라가지 않았고, 다음 로그인 때 서버의 옛 값(예: 한국투자증권)이 덮어썼다.
+  const sync = () => (typeof window !== 'undefined' && window.settingsSync) || null;
+  const get = (k) => { try { const s = sync(); return (s ? s.get(k) : localStorage.getItem(k)) || ''; } catch { return ''; } };
+  const set = (k, v) => { try { const s = sync(); if (s) s.set(k, v ? String(v) : ''); else if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch { /* 무시 */ } };
   const getJson = (k) => { try { return JSON.parse(get(k)) || null; } catch { return null; } };
 
   const getFxEnabled = () => get(FX_INDEX_STORAGE) !== '0';

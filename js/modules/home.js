@@ -13,7 +13,7 @@
     clock: '🕒 시계', kpi: '📌 요약 지표', weather: '☀️ 날씨', alert: '⚠️ 기상특보', summary: '📅 이번 주 활동 요약',
     density: '📊 일정 밀집도 예측', urgent: '⏰ 마감 임박 프로젝트', noti: '🔔 자동 알림', shortcuts: '⭐ 즐겨찾기 바로가기',
     recent: '🕘 최근 본 항목', programs: '🧩 내 프로그램', knowledge: '📚 최근 Knowledge', dday: '📆 D-day',
-    stocks: '📈 증권 요약',
+    stocks: '📈 증권 요약', routines: '🔁 오늘의 루틴·미진',
   };
   const WIDGET_KEYS = Object.keys(WIDGET_LABELS);
   // 시계 셀별로 "직전에 보여 준 테마"를 기억해 홈이 다시 그려져도 배경이 끊기지 않고 크로스페이드되게 한다.
@@ -27,6 +27,8 @@
         if (Array.isArray(parsed) && parsed.length) {
           const known = parsed.filter((k) => WIDGET_KEYS.includes(k));
           const missing = WIDGET_KEYS.filter((k) => !known.includes(k));
+          // v7.33.0: 새 위젯 '루틴'은 맨 뒤가 아니라 요약 지표(kpi) 바로 아래에 둔다(로그인하면 바로 보이도록).
+          if (missing.includes('routines')) { missing.splice(missing.indexOf('routines'), 1); const at = known.indexOf('kpi'); known.splice(at >= 0 ? at + 1 : 0, 0, 'routines'); }
           return [...known, ...missing];
         }
       }
@@ -637,6 +639,32 @@
           el('div', { class: 'row row--between' }, [el('h3', {}, '📚 최근 Knowledge'), el('button', { class: 'nm-btn nm-btn--icon', title: 'Knowledge 화면으로', onclick: () => navigate('/knowledge') }, '→')]),
           kList,
         ]);
+      }
+
+      // v7.33.0: 오늘의 루틴 + 미진 항목(한 화면에 요약, 항목을 누르면 상세 모달).
+      if (window.routineSummary) {
+        const RS = window.routineSummary();
+        if (appState.routines.length) {
+          const shown = [...RS.overdue, ...RS.due, ...RS.active.filter((x) => x.doneToday && !RS.overdue.includes(x))].slice(0, 7);
+          const pct = RS.todayTotal ? Math.round((RS.todayDone / RS.todayTotal) * 100) : 100;
+          widgets.routines = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+            el('div', { class: 'rt-home__head' }, [
+              el('h3', {}, '오늘의 루틴'),
+              el('span', { class: 'row', style: 'gap:6px; align-items:center' }, [
+                RS.overdue.length ? el('span', { class: 'nm-badge nm-badge--danger', title: '놓친 루틴' }, `미진 ${RS.overdue.length}`) : el('span', { class: 'nm-badge nm-badge--success' }, '미진 없음'),
+                el('button', { class: 'nm-btn nm-btn--sm', onclick: () => navigate('/routines') }, '전체 ›'),
+              ]),
+            ]),
+            el('div', { class: 'rt-bar', title: `오늘 ${RS.todayDone}/${RS.todayTotal}` }, [el('i', { style: `width:${pct}%` })]),
+            el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, `오늘 ${RS.todayDone}/${RS.todayTotal} 완료 · 항목을 누르면 상세(놓친 날 보충 체크)`),
+            ...(shown.length ? shown.map((x) => window.routineLine(x)) : [el('div', { class: 'text-muted', style: 'font-size:13px' }, '오늘 남은 루틴이 없어요 🎉')]),
+          ]);
+        } else {
+          widgets.routines = el('div', { class: 'nm-card', style: 'margin-bottom:16px' }, [
+            el('div', { class: 'rt-home__head' }, [el('h3', {}, '오늘의 루틴'), el('button', { class: 'nm-btn nm-btn--sm nm-btn--primary', onclick: () => navigate('/routines') }, '+ 루틴 만들기')]),
+            el('div', { class: 'text-muted', style: 'font-size:13px' }, '매일·주기적으로 해야 하는 일을 등록하면 놓친 것만 알려 드려요.'),
+          ]);
+        }
       }
 
       const order = getHomeWidgetOrder();
