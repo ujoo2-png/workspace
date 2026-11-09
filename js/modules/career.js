@@ -151,6 +151,22 @@
     },
   ];
 
+  // v7.34.0 사용자 컬럼: 기본 카테고리 설정에 사용자 정의 필드/컬럼/검색 대상을 덧붙인 "유효 설정"을 만든다(멱등).
+  function effective(cat) {
+    const CC = window.CareerCols;
+    if (!cat || cat._eff || !CC) return cat;
+    const list = CC.active(cat.key);
+    if (!list.length) return cat;
+    const cf = list.map((d) => ({ name: CC.fieldName(d.id), label: d.label, type: d.type, options: d.options, custom: true, def: d }));
+    return {
+      ...cat, _eff: true, base: cat, customFields: cf,
+      fields: [...cat.fields.filter((f) => f.name !== 'note'), ...cf, ...cat.fields.filter((f) => f.name === 'note')],
+      columns: [...cat.columns, ...cf.filter((f) => f.def.list).map((f) => ({ key: f.name, label: f.label, custom: true }))],
+      searchFields: [...cat.searchFields, ...cf.map((f) => f.name)],
+    };
+  }
+  const cv = (r, key) => (window.CareerCols && window.CareerCols.isCustomName(key) ? ((r.extra && r.extra[key.slice(2)]) ?? '') : r[key]);
+
   function tableOf(key) {
     return window.CAREER_TABLES[key];
   }
@@ -339,18 +355,19 @@
       ]);
     }
 
-    function categorySection(cat) {
+    function categorySection(baseCat) {
+      const cat = effective(baseCat);
       const state = ui[cat.key];
       const allRows = appState.career[cat.key] || [];
       let rows = allRows.slice();
       if (state.query.trim()) {
         const q = state.query.trim().toLowerCase();
-        rows = rows.filter((r) => cat.searchFields.some((f) => String(r[f] || '').toLowerCase().includes(q)));
+        rows = rows.filter((r) => cat.searchFields.some((f) => String(cv(r, f) || '').toLowerCase().includes(q)));
       }
       rows = rows.slice().sort((a, b) => {
         const key = state.sort.key;
-        let av = key === 'sort_order' ? (a.sort_order || 0) : (a[key] || '');
-        let bv = key === 'sort_order' ? (b.sort_order || 0) : (b[key] || '');
+        let av = key === 'sort_order' ? (a.sort_order || 0) : (cv(a, key) || '');
+        let bv = key === 'sort_order' ? (b.sort_order || 0) : (cv(b, key) || '');
         let cmp;
         if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
         else cmp = String(av).localeCompare(String(bv));
@@ -365,6 +382,7 @@
             class: `nm-input career-search-${cat.key}`, style: 'max-width:240px', placeholder: '검색', value: state.query,
             oninput: (e) => { const pos = e.target.selectionStart; state.query = e.target.value; draw(); restoreFocus(`.career-search-${cat.key}`, pos); },
           }),
+          el('button', { class: 'nm-btn career-colmgr-btn', title: '이 항목에 양식별로 필요한 컬럼을 최대 5개까지 추가', onclick: () => openColumnManager(baseCat) }, `⚙ 컬럼 설정${window.CareerCols.active(cat.key).length ? ` (${window.CareerCols.active(cat.key).length}/${window.CareerCols.MAX})` : ''}`),
         ])
       );
 
@@ -456,7 +474,7 @@
           ...cat.columns.map((c) => {
             if (c.key === '_thumb') return el('td', {}, [photoThumb(r, cat)]);
             const isTitle = c.key === cat.titleField;
-            const val = r[c.key];
+            const val = cv(r, c.key);
             const text = val ? escapeHtml(String(val)) : '-';
             if (cat.key === 'certifications' && c.key === 'expiry_date') {
               const st = window.CareerLogic.certExpiryStatus(r, todayISO());
@@ -543,7 +561,8 @@
     }
 
     // ---- 열람(읽기 전용) 모달: 전체 필드 + 첨부파일 미리보기 + 첨부 관리 ----
-    function openViewModal(cat, r) {
+    function openViewModal(baseCat, r) {
+      const cat = effective(baseCat);
       openModal({
         title: `${cat.icon} ${cat.label} 열람`,
         contentBuilder(body) {
@@ -556,7 +575,7 @@
           const detail = el('div', { class: 'stack', style: 'gap:6px; font-size:13px' });
           for (const f of cat.fields) {
             if (f.name === cat.titleField && !cat.isPhoto) continue;
-            const val = r[f.name];
+            const val = cv(r, f.name);
             detail.append(
               el('div', { class: 'row', style: 'gap:8px' }, [
                 el('span', { class: 'text-muted', style: 'min-width:120px; font-weight:600' }, f.label.replace(/\(선택.*?\)/, '').trim()),
@@ -582,12 +601,13 @@
 
     // ---- 등록/수정 폼 ----
     function buildFieldInput(f, existing) {
-      const value = existing ? existing[f.name] : (f.default ?? '');
+      const value = existing ? cv(existing, f.name) : (f.default ?? '');
       if (f.type === 'textarea') return el('textarea', { class: 'nm-textarea', name: f.name }, value || '');
       if (f.type === 'select') {
         const select = el('select', { class: 'nm-select', name: f.name });
         if (!f.required) select.append(el('option', { value: '' }, '(선택 안 함)'));
-        for (const opt of f.options) select.append(el('option', { value: opt, selected: opt === value || undefined }, opt));
+        const opts = f.custom && value && !f.options.includes(value) ? [...f.options, value] : f.options; // 목록에서 빠진 옛 값도 잃지 않게 유지
+        for (const opt of opts) select.append(el('option', { value: opt, selected: opt === value || undefined }, opt));
         return select;
       }
       if (f.type === 'number') return el('input', { class: 'nm-input', type: 'number', name: f.name, value: value ?? '' });
@@ -595,7 +615,107 @@
       return el('input', { class: 'nm-input', type: 'text', name: f.name, required: f.required || undefined, value: value || '' });
     }
 
-    function openRecordForm(cat, existing) {
+
+    // ================================================================
+    // v7.34.0 ⚙ 컬럼 설정 — 이력서 양식에 따라 필요한 컬럼을 카테고리마다 최대 5개 추가(코드 수정·SQL 불필요)
+    // ================================================================
+    async function builtinFor(cat) {
+      const CC = window.CareerCols; const out = [];
+      try { await window.loadFormCore(); if (window.FormTemplate && window.FormTemplate.CATS[cat.key]) out.push(...window.FormTemplate.builtinTerms(cat.key)); } catch { /* 사전을 못 불러와도 화면 라벨 기준 검사는 한다 */ }
+      for (const f of cat.fields) { const label = String(f.label).replace(/\(선택.*?\)/, '').trim(); const term = CC.norm(label); if (term) out.push({ term, label, fromLabel: true }); }
+      return out;
+    }
+    function openColumnManager(baseCat) {
+      const CC = window.CareerCols;
+      openModal({
+        title: `⚙ ${baseCat.label} 컬럼 설정`, width: '680px',
+        contentBuilder(body) {
+          const host = el('div', {}); body.append(host);
+          let builtin = null;
+          builtinFor(baseCat).then((b) => { builtin = b; });
+          const usage = (id) => (appState.career[baseCat.key] || []).filter((r) => r.extra && r.extra[id] !== undefined && r.extra[id] !== null && r.extra[id] !== '').length;
+          const commit = (map) => {
+            CC.save(map);
+            if (window.FormTemplate) window.FormTemplate.registerCustom(Object.fromEntries(Object.keys(window.FormTemplate.CATS).map((k) => [k, CC.defs(k, map)])));
+            draw(); paint();
+          };
+          async function addColumn(label, type, options) {
+            if (!builtin) builtin = await builtinFor(baseCat);
+            const map = CC.load();
+            if (CC.active(baseCat.key, map).length >= CC.MAX) { toast(`컬럼은 항목마다 최대 ${CC.MAX}개입니다. 안 쓰는 컬럼을 숨김 보관하세요.`, 'error'); return false; }
+            const chk = CC.checkLabel(baseCat.key, label, builtin, map);
+            if (chk.level === 'block') { toast(chk.msg, 'error'); return false; }
+            if (chk.level === 'warn' && !confirmDialog(`${chk.msg}\n\n그래도 새 컬럼으로 만들까요?`)) return false;
+            const arr = CC.defs(baseCat.key, map);
+            arr.push(CC.clean({ id: CC.newId(map), label, type, options, list: true, aliases: [], archived: false }));
+            map[baseCat.key] = arr; commit(map); toast(`"${label}" 컬럼을 추가했습니다.`, 'success'); return true;
+          }
+          function patchDef(id, fn) { const map = CC.load(); map[baseCat.key] = CC.defs(baseCat.key, map).map((d) => (d.id === id ? CC.clean(fn({ ...d })) : d)); commit(map); }
+
+          function paint() {
+            host.innerHTML = '';
+            const map = CC.load(); const act = CC.active(baseCat.key, map); const arch = CC.archived(baseCat.key, map);
+            host.append(el('p', { class: 'text-muted', style: 'font-size:12px; margin:0 0 8px' }, `제출처마다 요구하는 항목이 달라서 직접 만드는 컬럼입니다(예: 학력의 소재지, 경력의 직위, 자격증의 등급). 이 항목에 최대 ${CC.MAX}개까지 추가되고, 등록·수정 폼, 목록, 검색, 양식 문서 매칭에 자동 반영됩니다. 기존 필드와 겹치는 이름은 새로 만들지 않고 기존 필드를 쓰도록 안내합니다.`));
+            host.append(el('div', { style: 'font-size:13px; font-weight:600; margin:6px 0' }, `사용 중 ${act.length}/${CC.MAX}`));
+            if (!act.length) host.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:6px 0' }, '아직 추가한 컬럼이 없습니다. 아래 추천에서 한 번에 추가하거나 직접 만드세요.'));
+            for (const d of act) {
+              const nameIn = el('input', { class: 'nm-input', value: d.label, maxlength: 20, style: 'flex:1; min-width:120px' });
+              nameIn.addEventListener('change', async () => {
+                if (!builtin) builtin = await builtinFor(baseCat);
+                const v = nameIn.value.trim(); if (v === d.label) return;
+                const chk = CC.checkLabel(baseCat.key, v, builtin, CC.load(), { ignoreId: d.id });
+                if (chk.level === 'block') { toast(chk.msg, 'error'); nameIn.value = d.label; return; }
+                if (chk.level === 'warn' && !confirmDialog(`${chk.msg}\n\n그래도 이 이름으로 바꿀까요?`)) { nameIn.value = d.label; return; }
+                patchDef(d.id, (x) => { x.label = v; return x; }); // id는 그대로라 저장된 값·양식 매핑이 유지된다
+              });
+              const row = el('div', { class: 'nm-card', style: 'padding:8px; margin-bottom:6px' }, [
+                el('div', { class: 'row', style: 'gap:6px; align-items:center; flex-wrap:wrap' }, [
+                  nameIn,
+                  el('span', { class: 'nm-badge', title: '종류는 만든 뒤 바꿀 수 없습니다(저장된 값 보호)' }, (CC.TYPES.find((t) => t[0] === d.type) || [])[1] || d.type),
+                  el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [el('input', { type: 'checkbox', checked: d.list || undefined, onchange: (e) => patchDef(d.id, (x) => { x.list = e.target.checked; return x; }) }), '목록에 표시']),
+                  el('span', { class: 'text-muted', style: 'font-size:11px' }, `값 입력 ${usage(d.id)}건`),
+                  el('button', { class: 'nm-btn', style: 'padding:2px 8px; font-size:12px', title: '숨김 보관 — 데이터는 남고 화면·양식에서만 빠집니다', onclick: () => { if (confirmDialog(`"${d.label}" 컬럼을 숨김 보관할까요?\n입력한 값은 지우지 않고, 나중에 복원할 수 있습니다.`)) patchDef(d.id, (x) => { x.archived = true; return x; }); } }, '숨김 보관'),
+                ]),
+                d.type === 'select' ? el('div', { class: 'nm-field', style: 'margin:6px 0 0' }, [el('label', { style: 'font-size:11px' }, '선택 목록 (쉼표로 구분)'), el('input', { class: 'nm-input', value: d.options.join(', '), onchange: (e) => patchDef(d.id, (x) => { x.options = e.target.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean); return x; }) })]) : null,
+                el('div', { class: 'nm-field', style: 'margin:6px 0 0' }, [el('label', { style: 'font-size:11px' }, '양식 머리글 별칭 (쉼표로 구분 · 양식에서 다른 이름으로 불러도 자동 연결)'), el('input', { class: 'nm-input', value: d.aliases.join(', '), placeholder: '예: 학교소재지, 지역', onchange: (e) => patchDef(d.id, (x) => { x.aliases = e.target.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean); return x; }) })]),
+              ]);
+              host.append(row);
+            }
+            // 추가
+            if (act.length < CC.MAX) {
+              const nameIn = el('input', { class: 'nm-input', placeholder: '새 컬럼 이름 (예: 소재지)', maxlength: 20, style: 'flex:1; min-width:140px' });
+              const typeSel = el('select', { class: 'nm-select', style: 'width:auto' }, CC.TYPES.map(([v, l]) => el('option', { value: v }, l)));
+              const optIn = el('input', { class: 'nm-input hidden', placeholder: '선택 목록: 학사, 석사, 박사', style: 'flex:1 1 100%' });
+              typeSel.addEventListener('change', () => optIn.classList.toggle('hidden', typeSel.value !== 'select'));
+              const go = async () => { const ok = await addColumn(nameIn.value, typeSel.value, optIn.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean)); if (ok) nameIn.value = ''; };
+              nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+              host.append(el('div', { style: 'font-size:13px; font-weight:600; margin:12px 0 4px' }, '새 컬럼 추가'), el('div', { class: 'row', style: 'gap:6px; flex-wrap:wrap' }, [nameIn, typeSel, el('button', { class: 'nm-btn nm-btn--primary', onclick: go }, '추가'), optIn]));
+              const presets = (CC.PRESETS[baseCat.key] || []).filter(([l]) => !CC.defs(baseCat.key, map).some((d) => CC.norm(d.label) === CC.norm(l)));
+              if (presets.length) host.append(el('div', { style: 'margin-top:8px' }, [el('span', { class: 'text-muted', style: 'font-size:11px' }, '추천(한 번에 추가): '), ...presets.map(([l, t, o]) => el('button', { class: 'nm-btn', style: 'padding:2px 10px; font-size:12px; margin:2px', onclick: () => addColumn(l, t, o || []) }, `+ ${l}`))]));
+            } else host.append(el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:10px' }, `최대 ${CC.MAX}개를 모두 사용 중입니다. 안 쓰는 컬럼을 숨김 보관하면 자리가 생깁니다.`));
+            // 숨김 보관
+            if (arch.length) {
+              host.append(el('div', { style: 'font-size:13px; font-weight:600; margin:14px 0 4px' }, `숨김 보관 ${arch.length}개`));
+              for (const d of arch) host.append(el('div', { class: 'row row--between', style: 'font-size:12px; padding:3px 0; align-items:center' }, [
+                el('span', {}, `${d.label} · 값 ${usage(d.id)}건`),
+                el('span', { class: 'row', style: 'gap:6px' }, [
+                  el('button', { class: 'nm-btn', style: 'padding:2px 8px; font-size:12px', disabled: act.length >= CC.MAX || undefined, onclick: () => patchDef(d.id, (x) => { x.archived = false; return x; }) }, '복원'),
+                  el('button', { class: 'nm-btn nm-btn--danger', style: 'padding:2px 8px; font-size:12px', onclick: async () => {
+                    const n = usage(d.id);
+                    if (!confirmDialog(`"${d.label}" 컬럼을 완전 삭제할까요?${n ? `\n입력된 값 ${n}건도 모두 지워지며 되돌릴 수 없습니다.` : ''}`)) return;
+                    try { if (n) await appState.purgeCareerExtraKey(baseCat.key, d.id); const m = CC.load(); m[baseCat.key] = CC.defs(baseCat.key, m).filter((x) => x.id !== d.id); commit(m); toast('완전 삭제했습니다.', 'success'); } catch (e) { toast(`삭제 실패: ${e.message || e}`, 'error'); }
+                  } }, '완전 삭제'),
+                ]),
+              ]));
+            }
+          }
+          paint();
+        },
+      });
+    }
+
+    function openRecordForm(baseCat, existing) {
+      const cat = effective(baseCat);
       openModal({
         title: existing ? `${cat.label} 수정` : `${cat.label} 추가`,
         contentBuilder(body, close) {
@@ -604,7 +724,13 @@
           for (const f of cat.fields) {
             const input = buildFieldInput(f, existing);
             inputs[f.name] = input;
-            form.append(el('div', { class: 'nm-field' }, [el('label', {}, f.label), input]));
+            const fieldKids = [el('label', {}, f.label), input];
+            // 자동완성: 같은 사용자 컬럼에 전에 입력한 값을 후보로(텍스트형만)
+            if (f.custom && f.type === 'text') {
+              const seen = [...new Set((appState.career[cat.key] || []).map((r) => cv(r, f.name)).filter((v) => v !== '' && v != null).map(String))].slice(0, 30);
+              if (seen.length) { const id = `dl-${cat.key}-${f.name}`; input.setAttribute('list', id); fieldKids.push(el('datalist', { id }, seen.map((v) => el('option', { value: v })))); }
+            }
+            form.append(el('div', { class: 'nm-field' }, fieldKids));
           }
           const submitBtn = el('button', { class: 'nm-btn nm-btn--primary', type: 'submit', style: 'width:100%' }, '저장');
           // v7.33.0: 저장 전에 처음부터 파일을 담아 둔다(저장하면 Supabase에 등록되고 담은 파일도 함께 첨부 — 저장 후 별도 첨부 단계 없음).
@@ -620,12 +746,15 @@
           form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const data = {};
+            const extraRaw = {};
             for (const f of cat.fields) {
               let v = inputs[f.name].value;
+              if (f.custom) { extraRaw[f.def.id] = v; continue; } // 사용자 컬럼은 extra(jsonb)로 따로 저장
               if (f.type === 'number') v = v === '' ? null : Number(v);
               else v = v === '' ? null : v;
               data[f.name] = v;
             }
+            if (cat.customFields && cat.customFields.length) data.extra = window.CareerCols.toExtra(cat.customFields.map((f) => f.def), extraRaw);
             try {
               if (existing) {
                 await appState.updateCareerRecord(cat.key, existing.id, data);

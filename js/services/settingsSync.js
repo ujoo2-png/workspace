@@ -30,6 +30,8 @@
     'workspace:stocks:customProvider',
     // v7.33.0 — OpenDART(전자공시) API 키.
     'workspace:stocks:dartKey',
+    // v7.34.0 — 이력/경력 사용자 컬럼 정의(카테고리별 최대 5개).
+    'workspace:career:customCols',
     // v7.25.0 — 오늘의 시황·환율 표시 on/off.
     'workspace:market:fxEnabled',
     // v7.26.0 — 환율 데이터 출처(공공데이터포털 / 커스텀 API)와 선택한 커스텀 API id.

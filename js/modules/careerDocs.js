@@ -48,6 +48,13 @@
     return payload;
   }
 
+  // v7.34.0 사용자 컬럼 정의를 양식 엔진(필드 목록·동의어 사전)에 등록한다 — 분석/데이터셋 계산 전에 항상 호출.
+  function registerCols() {
+    const CC = window.CareerCols; if (!CC) return;
+    FT.registerCustom(Object.fromEntries(FT.CAT_KEYS.map((k) => [k, CC.defs(k)])));
+  }
+  registerCols();
+
   function renderCareerDocuments(host) {
     host.innerHTML = '';
     host.classList.add('cd-host');
@@ -283,6 +290,7 @@
     // 편집 화면
     // ================================================================
     function datasetFor(options) {
+      registerCols();
       return FT.buildDataset({ career: appState.career, basic: appState.careerBasic, profile: appState.profile, todayIso: todayISO(), order: options.order || 'asc' });
     }
     function findRec(cat, id) { return (appState.career[cat] || []).find((r) => r.id === id) || null; }
@@ -407,10 +415,52 @@
         statusLine.classList.toggle('cd-dirty', isDirty());
       }
 
+      // ---- v7.34.0 사용자 컬럼: ① 양식에 있는데 연결할 필드가 없는 열 → 컬럼 만들기 제안 ② 사용 중인 사용자 컬럼의 빈 값 점검 ----
+      async function createColumnFor(cat, label) {
+        const CC = window.CareerCols; const map = CC.load();
+        if (CC.active(cat, map).length >= CC.MAX) { toast(`${FT.CATS[cat].label} 컬럼이 이미 ${CC.MAX}개입니다. 이력/경력 → ⚙ 컬럼 설정에서 안 쓰는 컬럼을 숨겨 주세요.`, 'error'); return; }
+        const chk = CC.checkLabel(cat, label, FT.builtinTerms(cat), map);
+        if (chk.level === 'block') { toast(chk.msg, 'error'); return; }
+        if (chk.level === 'warn' && !confirmDialog(`${chk.msg}\n\n그래도 "${label}" 컬럼을 새로 만들까요?`)) return;
+        const arr = CC.defs(cat, map); arr.push(CC.clean({ id: CC.newId(map), label, type: /일|일자|날짜|년월|기간/.test(label) ? 'date' : 'text', list: true }));
+        map[cat] = arr; CC.save(map); registerCols();
+        toast(`${FT.CATS[cat].label}에 "${label}" 컬럼을 만들었습니다. 데이터를 입력한 뒤 "다시 매칭"으로 반영하세요.`, 'success');
+        drawBanners();
+      }
+      function drawCustomColBanners() {
+        const CC = window.CareerCols; if (!CC) return;
+        const seen = new Set();
+        for (const rep of S.mapping.repeats || []) for (const label of rep.unmatched || []) {
+          const k = `${rep.category}:${CC.norm(label)}`; if (seen.has(k) || !label) continue; seen.add(k);
+          banners.append(el('div', { class: 'cd-banner cd-banner--info', style: 'display:flex; gap:8px; align-items:center; flex-wrap:wrap' }, [
+            el('span', {}, `💡 ${FT.CATS[rep.category].label} 표의 "${label}" 열은 연결된 필드가 없어 비워집니다.`),
+            el('button', { class: 'nm-btn', style: 'padding:2px 10px; font-size:12px', onclick: () => createColumnFor(rep.category, label) }, `"${label}" 컬럼 만들기`),
+          ]));
+        }
+        // 빈 값 점검(표 열 + 단독 칸)
+        const blank = new Map();
+        const note = (cat, d, rec) => { const key = `${cat}:${d.id}`; if (!blank.has(key)) blank.set(key, { cat, d, recs: [] }); blank.get(key).recs.push(rec); };
+        for (const rep of S.mapping.repeats || []) {
+          const defs = Object.fromEntries(CC.defs(rep.category).map((d) => [`x_${d.id}`, d]));
+          for (const c of rep.cols) if (defs[c.source]) for (const m of CC.missing((ds.lists || {})[rep.category] || [], [defs[c.source]])) note(rep.category, defs[c.source], m.rec);
+        }
+        for (const f of S.mapping.fields || []) {
+          const m = /^([a-z]+)\.(latest|\d+)\.(x_[a-z0-9]+)$/.exec(f.source || ''); if (!m) continue;
+          const d = CC.defs(m[1]).find((x) => `x_${x.id}` === m[3]); if (!d) continue;
+          const rec = m[2] === 'latest' ? (ds.latest || {})[m[1]] : ((ds.lists || {})[m[1]] || [])[Number(m[2]) - 1];
+          if (rec && CC.rawValue(rec, d) === '') note(m[1], d, rec);
+        }
+        for (const { cat, d, recs } of blank.values()) {
+          const uniq = [...new Map(recs.map((r) => [r.id, r])).values()];
+          banners.append(el('div', { class: 'cd-banner cd-banner--warn' }, `⚠ ${FT.CATS[cat].label} "${d.label}" 값이 비어 있는 ${uniq.length}건: ${uniq.slice(0, 3).map((r) => String(r[FT.CATS[cat].titleField] || '').slice(0, 14)).join(', ')}${uniq.length > 3 ? ' …' : ''} — 이력/경력에서 입력하면 양식에 채워집니다.`));
+        }
+      }
+
       // ---- 배너(경고) ----
       function drawBanners() {
         banners.innerHTML = '';
         for (const w of S.mapping.warnings || []) banners.append(el('div', { class: 'cd-banner cd-banner--warn' }, `⚠ ${w}`));
+        drawCustomColBanners();
         if (!S.bytes) {
           const fi = el('input', { type: 'file', class: 'hidden' });
           fi.addEventListener('change', async () => {

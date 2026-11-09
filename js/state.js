@@ -51,10 +51,10 @@
   const STAGE_NEW_COLS = ['parent_id', 'progress', 'is_milestone', 'depends_on', 'baseline_start', 'baseline_end', 'legacy_group', 'memo'];
   const BRIEFING_TOPIC_NEW_COLS = ['search_terms', 'priority_keywords', 'site_urls'];
   const CHALLENGE_NEW_COLS = ['freq_type', 'freq_days', 'freq_times'];
-  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
-  const MIGRATION_0028_HINT = '0028 마이그레이션(supabase/combined/all_migrations_0001_to_0031.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0025_HINT = '0025 마이그레이션(supabase/combined/all_migrations_0001_to_0033.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0026_HINT = '0026 마이그레이션(supabase/combined/all_migrations_0001_to_0033.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0024_HINT = '0024 마이그레이션(supabase/combined/all_migrations_0001_to_0033.sql)을 Supabase SQL Editor에서 실행해 주세요.';
+  const MIGRATION_0028_HINT = '0028 마이그레이션(supabase/combined/all_migrations_0001_to_0033.sql)을 Supabase SQL Editor에서 실행해 주세요.';
   // 첨부 목록용 메타 컬럼(본문 data 제외) + 본문 메모리 캐시 상한(LRU)
   const ATTACH_META_COLS = 'id,user_id,owner_table,owner_id,name,mime_type,size,created_at';
   const ATTACH_CACHE_MAX_CHARS = 60 * 1024 * 1024;
@@ -1540,18 +1540,42 @@
 
     // ---- 이력/경력 관리 (7개 카테고리 공통 CRUD) ----
     // key: CAREER_TABLES의 키(education/certifications/trainings/memberships/awards/experiences/photos)
+    // v7.34.0: 사용자 컬럼 값은 행의 extra(jsonb)에 들어간다. jsonb는 통째로 교체되므로 수정 때는 항상 "최신 행의 extra + 변경분"으로 병합해서 보낸다.
+    _careerExtraError(e) {
+      const msg = String((e && e.message) || e);
+      if (/extra/i.test(msg) && /(column|schema cache|PGRST204|42703)/i.test(msg)) return new Error('사용자 컬럼을 저장할 칸(extra)이 없습니다. 0033 마이그레이션(supabase/combined/all_migrations_0001_to_0033.sql)을 Supabase SQL Editor에서 실행해 주세요.');
+      return e;
+    }
     async addCareerRecord(key, data) {
       const table = CAREER_TABLES[key];
       const existing = this.career[key] || [];
       const maxOrder = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+      const payload = { ...data };
+      if (payload.extra) { payload.extra = window.CareerCols.mergeExtra({}, payload.extra); if (!Object.keys(payload.extra).length) delete payload.extra; }
       // 등록 직후 바로 첨부파일을 붙일 수 있도록(다른 메뉴와 동일한 패턴), 생성된 행을 반환한다.
-      const row = await this.store.create(table, { ...data, user_id: this.user.id, sort_order: maxOrder + 1 });
+      let row;
+      try { row = await this.store.create(table, { ...payload, user_id: this.user.id, sort_order: maxOrder + 1 }); } catch (e) { throw this._careerExtraError(e); }
       await this.refreshAll();
       return row;
     }
     async updateCareerRecord(key, id, patch) {
-      await this.store.update(CAREER_TABLES[key], id, patch);
+      const table = CAREER_TABLES[key];
+      const p = { ...patch };
+      if (p.extra) {
+        let base = ((this.career[key] || []).find((r) => r.id === id) || {}).extra;
+        try { const fresh = await this.store.get(table, id); if (fresh) base = fresh.extra; } catch { /* 최신 행을 못 읽으면 화면의 값으로 병합 */ }
+        p.extra = window.CareerCols.mergeExtra(base, p.extra);
+      }
+      try { await this.store.update(table, id, p); } catch (e) { throw this._careerExtraError(e); }
       return this.refreshAll();
+    }
+    /** 사용자 컬럼을 "완전 삭제"할 때: 그 카테고리 모든 행에서 해당 키를 지운다(숨김 보관은 이 함수를 쓰지 않는다). */
+    async purgeCareerExtraKey(key, colId) {
+      const table = CAREER_TABLES[key];
+      const rows = (this.career[key] || []).filter((r) => r.extra && Object.prototype.hasOwnProperty.call(r.extra, colId));
+      for (const r of rows) await this.store.update(table, r.id, { extra: window.CareerCols.withoutKey(r.extra, colId) });
+      await this.refreshAll();
+      return rows.length;
     }
     async deleteCareerRecord(key, id) {
       await this.store.softDelete(CAREER_TABLES[key], id);

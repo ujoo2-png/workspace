@@ -159,7 +159,43 @@
   for (const [role, words] of Object.entries(ROLE_SRC)) {
     for (const w of words) addDict(normKey(w), role === 'seq' ? { t: 'seq' } : { t: 'role', role });
   }
-  const DICT_KEYS_LONG = [...DICT.keys()].filter((k) => k.length >= 3).sort((a, b) => b.length - a.length);
+  let DICT_KEYS_LONG = [...DICT.keys()].filter((k) => k.length >= 3).sort((a, b) => b.length - a.length);
+
+  // v7.34.0 사용자 컬럼: 카테고리별 정의를 CATS(필드 목록)와 DICT(양식 머리글 자동 인식)에 런타임으로 등록한다.
+  // 내장 동의어가 항상 우선(addDict는 덮어쓰지 않음). 숨김(archived) 컬럼은 등록하지 않는다 → 새 매칭·선택지에 안 나온다.
+  const CUSTOM_DICT_KEYS = new Set();
+  const CUSTOM_OVERRIDDEN = new Map(); // 사용자 컬럼이 덮어쓴 "역할 단어"(예: 소재지) 원본 — 재등록 때 복원
+  function registerCustom(defsByCat) {
+    for (const k of CUSTOM_DICT_KEYS) { if (CUSTOM_OVERRIDDEN.has(k)) DICT.set(k, CUSTOM_OVERRIDDEN.get(k)); else DICT.delete(k); }
+    CUSTOM_DICT_KEYS.clear(); CUSTOM_OVERRIDDEN.clear();
+    for (const cat of CAT_KEYS) {
+      CATS[cat].fields = CATS[cat].fields.filter((f) => !/^x_/.test(f[0]));
+      for (const d of (defsByCat && defsByCat[cat]) || []) {
+        if (d.archived) continue;
+        const name = `x_${d.id}`;
+        CATS[cat].fields.push([name, d.label, d.type === 'date' ? 'date' : 'text', false, true]);
+        for (const w of [d.label, ...(d.aliases || [])]) {
+          const k = normKey(w); if (!k) continue;
+          const cur = DICT.get(k);
+          if (cur && cur.custom) { if (!cur.byCat[cat]) cur.byCat[cat] = name; continue; }
+          if (cur && cur.t !== 'role') continue; // 내장 카테고리 단어가 항상 우선
+          // 역할 단어(소재지·기간 등)는 사용자가 이 이름으로 컬럼을 만들었으면 사용자 정의를 우선한다. 다른 카테고리 표에서는 원래 역할 의미로 되돌린다(fallback).
+          if (cur) CUSTOM_OVERRIDDEN.set(k, cur);
+          DICT.set(k, { t: 'cat', cat, f: name, custom: true, byCat: { [cat]: name }, fallback: cur || null });
+          CUSTOM_DICT_KEYS.add(k);
+        }
+      }
+    }
+    DICT_KEYS_LONG = [...DICT.keys()].filter((k) => k.length >= 3).sort((a, b) => b.length - a.length);
+  }
+  /** 내장 필드 라벨 + 동의어(정규화) — 새 사용자 컬럼 이름이 기존 필드와 겹치는지 검사할 때 쓴다. */
+  function builtinTerms(cat) {
+    const out = []; const seen = new Set();
+    const push = (term, label, fromLabel) => { if (term && !seen.has(term + label)) { seen.add(term + label); out.push({ term, label, fromLabel: !!fromLabel }); } };
+    for (const f of CATS[cat].fields) { if (/^x_/.test(f[0])) continue; push(normKey(f[1]), f[1], true); }
+    for (const [src, words] of Object.entries(DICT_SRC)) { if (!src.startsWith(cat + '.')) continue; const fname = src.split('.')[1]; const def = CATS[cat].fields.find((x) => x[0] === fname); for (const w of words) push(normKey(w), def ? def[1] : w, false); }
+    return out;
+  }
 
   /** 라벨 한 칸 → 후보 변형(전체 / 괄호 제거 / 괄호 안 / 구분자로 나눈 부분) */
   function labelVariants(text) {
@@ -569,7 +605,7 @@
           repeats.push({
             id: `r:${t.ti}:${r}`, kind: 'repeat', category: cat, title: CATS[cat].label, loc: `${tableName(model, t)}${model.kind === 'xlsx' ? '' : ''} ${r + 1}행 헤더`,
             confidence: hdr.confidence, level: confLevel(hdr.confidence), capacity: cap,
-            cols: hdr.cols.map((x) => ({ c: x.c, label: x.label, source: x.source, confidence: x.confidence })),
+            cols: hdr.cols.map((x) => ({ c: x.c, label: x.label, source: x.source, confidence: x.confidence })), unmatched: hdr.unknown || [],
             target: { k: 'rows', ti: t.ti, header: r, first, cap },
           });
           r += cap + 1;
@@ -695,10 +731,11 @@
     const row = t.rows[r];
     const masters = row.filter((x) => !x.covered && !x.virtual && x.text.trim());
     if (masters.length < 2) return null;
-    const rec = [];
+    const rec = []; const unknown = [];
     for (const cell of masters) {
       if (cell.text.length > 40) continue;
       const hit = lookupLabel(cell.text);
+      if (!hit && !/^[\d\s.]+$/.test(cell.text)) unknown.push(oneLine(cell.text));
       if (hit && hit.entry.t !== 'photo' && ['cat', 'role', 'seq'].includes(hit.entry.t)) rec.push({ cell, hit });
       else if (hit && (hit.entry.t === 'basic' || hit.entry.t === 'summary')) rec.push({ cell, hit, other: true });
     }
@@ -711,7 +748,7 @@
     if (!adjacent) return null;
     // 카테고리 결정: 명시 항목 다수결 → 힌트
     const votes = {};
-    for (const x of listRec) if (x.hit.entry.t === 'cat') votes[x.hit.entry.cat] = (votes[x.hit.entry.cat] || 0) + 1;
+    for (const x of listRec) if (x.hit.entry.t === 'cat') { if (x.hit.entry.custom) { for (const c of Object.keys(x.hit.entry.byCat)) votes[c] = (votes[c] || 0) + 1; } else votes[x.hit.entry.cat] = (votes[x.hit.entry.cat] || 0) + 1; }
     let cat = null;
     const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
     if (sorted.length) cat = sorted[0][0];
@@ -723,9 +760,11 @@
     const cols = [];
     let confSum = 0;
     for (const x of listRec) {
-      const e = x.hit.entry;
+      let e = x.hit.entry;
       let source = null;
       let conf = 0;
+      // 사용자 컬럼 단어: 이 표의 카테고리에 정의가 있으면 그 컬럼, 없으면 원래(역할 단어) 의미로
+      if (e.t === 'cat' && e.custom) { if (e.byCat[cat]) e = { t: 'cat', cat, f: e.byCat[cat] }; else if (e.fallback) e = e.fallback; else continue; }
       if (e.t === 'seq') { source = 'seq'; conf = 0.85; } else if (e.t === 'cat') {
         if (e.cat === cat) { source = e.f; conf = 0.9 * x.hit.weight; } else { source = null; }
       } else if (e.t === 'role') {
@@ -741,7 +780,7 @@
     // 같은 소스가 둘 이상이면 앞의 것만(예: 기간 두 번)
     const seenSrc = new Set();
     const uniq = cols.filter((x) => { if (x.source === 'seq') return true; if (seenSrc.has(x.source)) return false; seenSrc.add(x.source); return true; });
-    return { cat, cols: uniq, confidence: Math.round((confSum / cols.length) * 100) / 100 };
+    return { cat, cols: uniq, unknown, confidence: Math.round((confSum / cols.length) * 100) / 100 };
   }
 
   // ------------------------------------------------------------------
@@ -780,10 +819,11 @@
     if (!rec) return '';
     const def = fieldDef(cat, f);
     const kind = def ? def[2] : 'text';
-    if (kind === 'date') return CL.formatDate(rec[f], fmt);
+    const raw = /^x_/.test(f) ? (rec.extra && typeof rec.extra === 'object' ? rec.extra[f.slice(2)] : undefined) : rec[f];
+    if (kind === 'date') return CL.formatDate(raw, fmt);
     if (kind === 'period') { const [a, b] = CATS[cat].periodOf; return CL.periodText(rec[a], rec[b], fmt, CATS[cat].openLabel(rec)); }
     if (kind === 'duration') return rec.start_date ? CL.itemDuration(rec, todayIso) : '';
-    const v = rec[f];
+    const v = raw;
     return v === null || v === undefined ? '' : String(v);
   }
 
@@ -924,7 +964,7 @@
   }
 
   const api = {
-    CATS, CAT_KEYS, BASIC_FIELDS, SUMMARY_FIELDS, normKey, lookupLabel, labelVariants, findTokens, resolveToken, inlineBlanks, scalarSourceOf,
+    registerCustom, builtinTerms, CATS, CAT_KEYS, BASIC_FIELDS, SUMMARY_FIELDS, normKey, lookupLabel, labelVariants, findTokens, resolveToken, inlineBlanks, scalarSourceOf,
     buildDocxModel, buildXlsxModel, paraText, analyze, detectHeaderRow, buildDataset, resolveSource, recordField, sourceKind, repeatRows, repeatRowFor, buildInitialValues,
     reapplyOptions, unmatchedItems, summarizeRecord, sourceLabel, scalarSourceOptions, repeatSourceOptions, isBlankText, colLetter, locOf, confLevel, fieldDef,
   };

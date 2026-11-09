@@ -34,5 +34,13 @@
     }
     return toolsPromise;
   }
+  // v7.34.0: 사용자 컬럼 이름 검사용 — 내장 동의어 사전만 필요하므로 가벼운 두 파일만 불러온다(1MB 라이브러리 불필요).
+  let coreP = null;
+  function loadFormCore() {
+    if (window.FormTemplate) return Promise.resolve();
+    if (!coreP) { coreP = loadScript('js/utils/xmlTree.js').then(() => loadScript('js/services/formTemplate.js')); coreP.catch(() => { coreP = null; }); }
+    return coreP;
+  }
+  window.loadFormCore = loadFormCore;
   window.loadFormTools = loadFormTools;
 })();
