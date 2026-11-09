@@ -85,6 +85,8 @@
       stream.getTracks().forEach((t) => t.stop());
     }
   }
+  window.readClipboardImages = readClipboardImages; // v7.36.0: 문화생활 포스터 '스냅샷 추가'가 재사용
+  window.captureScreenFile = captureScreenFile;
   /** 첨부 영역 하나에 붙여넣기/캡처 기능을 붙인다. onFiles(File[])로 결과를 넘긴다. 반환: 버튼들. */
   function attachCaptureTools(container, dropzone, onFiles) {
     bindDocumentPaste();

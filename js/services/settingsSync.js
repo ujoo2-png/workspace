@@ -62,6 +62,7 @@
     'workspace:reports:tiles', // v7.21.0 — 리포트 페이지 사용자 구성 타일 JSON
     'workspace:diagram:settings', // v7.32.0 — 다이어그램 스튜디오 설정(스킨·크기·상세도·팔레트 등)
     'workspace:diagram:profiles', // v7.32.0 — 다이어그램 설정 프로필 묶음
+    'workspace:feed:diag', // v7.36.0 — 피드/API 소스별 수집 이력(최근 20회) JSON
     'workspace:charts:prefs', // v7.21.0 — 차트별 보기 방식(막대/꺾은선/영역) 선택 JSON
   ];
   const SYNCED_SET = new Set(SYNCED_KEYS);

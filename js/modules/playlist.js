@@ -304,6 +304,31 @@
             posterFileInput,
             posterPreview,
           ]));
+          // v7.36.0: 스냅샷 추가 — 클립보드 이미지(Win+Shift+S 등) 또는 화면 캡처를 가져와 포스터 영역만 잘라 쓴다. Ctrl+V도 된다.
+          async function useSnapshot(getFile) {
+            try {
+              const f = await getFile();
+              const dataUrl = await window.openSnapshotCropper(Array.isArray(f) ? f[0] : f);
+              if (!dataUrl) return;
+              posterInput.value = dataUrl; posterPreview.src = dataUrl; posterPreview.style.display = '';
+              toast('스냅샷을 포스터로 넣었습니다. 저장하면 반영됩니다.', 'success');
+            } catch (err) {
+              if (err && err.name === 'NotAllowedError') toast('권한이 거부되었습니다. 캡처 후 이 칸을 클릭하고 Ctrl+V로 붙여넣어 주세요.', 'error');
+              else toast(err.message || '스냅샷을 가져오지 못했습니다.', 'error');
+            }
+          }
+          const snapZone = el('div', { class: 'row wrap snap-zone', tabindex: '0', style: 'gap:6px; align-items:center; padding:6px; border:1px dashed var(--border); border-radius:8px', title: '이 영역을 클릭한 뒤 Ctrl+V로 캡처 이미지를 붙여넣을 수도 있습니다' }, [
+            el('button', { type: 'button', class: 'nm-btn snap-paste', onclick: () => useSnapshot(() => window.readClipboardImages()) }, '📋 스냅샷 붙여넣기'),
+            navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia ? el('button', { type: 'button', class: 'nm-btn snap-capture', onclick: () => useSnapshot(() => window.captureScreenFile()) }, '🖥 화면 캡처') : null,
+            el('span', { class: 'text-muted', style: 'font-size:12px' }, '또는 여기를 클릭하고 Ctrl+V'),
+          ]);
+          snapZone.addEventListener('paste', (e) => {
+            const files = window.imageFilesFromItems(e.clipboardData && e.clipboardData.items);
+            if (!files.length) return;
+            e.preventDefault(); e.stopPropagation();
+            useSnapshot(async () => window.namedCaptureFiles(files, new Date()));
+          });
+          posterField.append(snapZone);
 
           form.append(
             field('종류', typeSelect(existing?.content_type)),

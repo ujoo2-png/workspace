@@ -145,8 +145,8 @@
       q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); flt.q = q.value; flt.focusSearch = true; redraw(); } });
       const sel = (cls, key, opts, title) => el('select', { class: `nm-select ${cls}`, title, style: 'width:auto', onchange: (e) => { flt[key] = e.target.value; redraw(); } },
         opts.map(([v, l]) => el('option', { value: v, selected: flt[key] === v || undefined }, l)));
-      const feedOpts = [['', '피드: 전체'], ['topic', '🔎 주제 검색(마법사)'], ['rss', '📡 RSS 전체'], ['md', '📝 마크다운 전체'],
-        ...appState.feedSources.map((s) => [s.id, `${s.type === 'markdown' ? '📝' : '📡'} ${s.name}`])];
+      const feedOpts = [['', '피드: 전체'], ['topic', '🔎 주제 검색(마법사)'], ['rss', '📡 RSS 전체'], ['md', '📝 마크다운 전체'], ['api', '🏛 공공 API 전체'],
+        ...appState.feedSources.map((s) => [s.id, `${s.type === 'markdown' ? '📝' : s.type === 'api' ? '🏛' : '📡'} ${s.name}`])];
       const topicOpts = [['', '주제: 전체'], ...appState.briefingTopics.map((t) => [t.id, `#${t.name}`])];
       const date = (key, label) => el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [label, el('input', { class: `nm-input brf-${key}`, type: 'date', value: flt[key], style: 'width:auto', onchange: (e) => { flt[key] = e.target.value; redraw(); } })]);
       const active = flt.q || flt.from || flt.to || flt.sourceId || flt.topicId || flt.read !== 'all' || flt.priority || flt.scope !== 'all';
@@ -181,11 +181,14 @@
         container.append(el('div', { class: 'empty-state' }, '아직 수집된 항목이 없습니다. 관심주제·피드 소스를 등록한 뒤 "지금 가져오기"를 눌러보세요.'));
         return;
       }
+      // 검색 모듈(js/utils/briefingSearch.js)이 배포에서 빠졌어도 목록 자체는 보이게 한다(검색만 비활성).
+      const searchOk = ['parseNaturalQuery', 'filterBriefingItems', 'mergeBriefingFilters'].every((k) => typeof window[k] === 'function');
+      if (!searchOk) container.append(el('div', { class: 'nm-banner nm-banner--warning', style: 'margin-bottom:10px' }, '⚠ 검색 모듈(js/utils/briefingSearch.js)을 불러오지 못했습니다. 배포에서 파일이 빠졌습니다 — 목록만 표시합니다.'));
       const ctx = { sources: appState.feedSources, topics: appState.briefingTopics, priorityFn: (it, t) => window.priorityHits(it, t) };
-      const parsed = window.parseNaturalQuery(flt.q, ctx);
-      const eff = window.mergeBriefingFilters({ ...flt, text: [], exclude: [] }, parsed);
-      const rows = window.filterBriefingItems(appState.briefingItems, eff, ctx);
-      drawItemFilters(parsed, rows.length);
+      const parsed = searchOk ? window.parseNaturalQuery(flt.q, ctx) : { text: [], exclude: [], chips: [] };
+      const eff = searchOk ? window.mergeBriefingFilters({ ...flt, text: [], exclude: [] }, parsed) : null;
+      const rows = searchOk ? window.filterBriefingItems(appState.briefingItems, eff, ctx) : appState.briefingItems.slice();
+      if (searchOk) drawItemFilters(parsed, rows.length);
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '조건에 맞는 항목이 없습니다. 검색어를 줄이거나 [초기화]를 눌러 보세요.'));
         return;
@@ -280,17 +283,19 @@
           headCheck.checked = selectedIds.size === rows.length && rows.length > 0;
         });
         list.append(
-          el('div', { class: `item-row ${item.is_read ? 'item-row--done' : ''}` }, [
+          el('div', { class: `item-row ${item.is_read ? 'item-row--done' : 'item-row--unread'}` }, [
             el('div', { style: 'display:flex; align-items:center; padding-right:8px' }, check),
             el('div', { class: 'item-row__main' }, [
               el('div', { class: 'item-row__title' }, [
+                !item.is_read ? el('span', { class: 'unread-dot', title: '안 읽음' }) : null,
+                (() => { const dd = window.FeedDiag ? window.FeedDiag.deadlineInDays(item.summary) : null; return dd !== null && dd >= 0 && dd <= 3 ? el('span', { class: 'nm-badge nm-badge--danger', style: 'margin-right:6px' }, dd === 0 ? '오늘 마감' : `D-${dd}`) : null; })(),
                 hitsOf(item).length ? el('span', { class: 'nm-badge nm-badge--warning', title: `우선 검색어: ${hitsOf(item).join(', ')}`, style: 'margin-right:6px' }, '⭐ 우선') : null,
                 el('a', { href: item.link, target: '_blank', rel: 'noopener', onclick: () => !item.is_read && appState.markBriefingItemRead(item.id) }, item.title),
               ]),
               el(
                 'div',
                 { class: 'item-row__meta' },
-                `${topic ? '#' + topic.name + ' · ' : ''}${source ? source.name : window.deriveSourceLabel(item)}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
+                `${source && source.type === 'api' ? '🏛 ' : source && source.type === 'markdown' ? '📝 ' : '📡 '}${topic ? '#' + topic.name + ' · ' : ''}${source ? source.name : window.deriveSourceLabel(item)}${item.published_at ? ' · ' + new Date(item.published_at).toLocaleDateString('ko-KR') : ''}`
               ),
               item.summary ? el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:4px' }, item.summary) : null,
             ]),
@@ -415,92 +420,134 @@
       window.Reorder.enable(list, 'briefingTopics');
     }
 
+    // v7.36.0: 소스 카드 — 연결 문제는 "카드 안"에 원인·조치·수정 바로가기로 보여 준다(별도 경고 배너 없음).
+    const openFlags = new Set(); // 상세 펼침 상태
     function drawSources() {
-      container.append(el('button', { class: 'nm-btn nm-btn--primary', style: 'margin-bottom:12px', onclick: () => openSourceForm() }, '+ 피드 소스 등록'));
-      const rows = window.Reorder.sort('feedSources', appState.feedSources); // v7.31.0
+      const FD = window.FeedDiag;
+      container.append(el('div', { class: 'row wrap', style: 'gap:8px; margin-bottom:12px' }, [
+        el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openSourceForm() }, '+ 소스 등록'),
+        el('button', { class: 'nm-btn', title: '켜진 소스를 모두 저장 없이 시험합니다', onclick: testAll }, '🔍 전체 테스트'),
+      ]));
+      const rows = window.Reorder.sort('feedSources', appState.feedSources);
       if (!rows.length) {
-        container.append(el('div', { class: 'empty-state' }, '등록된 피드 소스가 없습니다. RSS 주소를 등록해보세요. (예: 각 언론사/블로그의 RSS 주소)'));
+        container.append(el('div', { class: 'empty-state' }, '등록된 소스가 없습니다. RSS 주소·마크다운·공공데이터 API를 등록해 보세요.'));
         return;
       }
-      // v7.24.0(아이디어 5): 오래 실패한 소스를 목록 맨 위에 경고로 모아 보여준다. "마지막 수집일"이
-      // 생겼으니, 7일 이상 수집이 안 됐거나 마지막 결과가 오류/0건인 활성 소스를 한눈에 알 수 있게 한다.
-      const STALE_DAYS = 7;
-      const stale = rows.filter((s) => s.enabled !== false && isStaleSource(s, STALE_DAYS));
-      if (stale.length) {
-        const warn = el('div', { class: 'nm-banner nm-banner--warning', style: 'margin-bottom:10px; align-items:flex-start' }, [
-          el('div', {}, [
-            el('strong', {}, `⚠ 확인이 필요한 피드 소스 ${stale.length}개`),
-            el('div', { class: 'text-muted', style: 'font-size:12px; margin-top:2px' }, stale.map((s) => `${s.name} (${staleReason(s, STALE_DAYS)})`).join(' · ')),
-          ]),
-        ]);
-        container.append(warn);
-      }
-      // v7.24.0: 목록을 "이름 / 종류 / 상태 / 등록일 / 마지막 수집일" 컬럼 형태로 보여준다.
-      // 행을 클릭하면 작은 팝업이 열리고(수정·삭제 아이콘은 팝업 안에 표시), 마우스를 올린
-      // 행의 우측 상단에 아이콘이 나타난다. 테이블 대신 grid를 써서 좁은 화면에서도 무너지지 않게 한다.
+      if (FD) FD.prune(appState.feedSources.map((x) => x.id));
       const fmt = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—');
-      const table = el('div', { class: 'source-table' });
-      table.append(
-        el('div', { class: 'source-table__head' }, [
-          el('div', {}, '이름'),
-          el('div', {}, '종류'),
-          el('div', {}, '상태'),
-          el('div', {}, '등록일'),
-          el('div', {}, '마지막 수집일'),
-        ])
-      );
+      const typeLabel = (t) => (t === 'markdown' ? '마크다운' : t === 'api' ? 'API' : 'RSS');
+      const grid = el('div', { class: 'source-cards' });
       for (const s of rows) {
-        // 소스 관제: 사용자 제어(활성/비활성)와 시스템 판단(정상/불안정/오류/미실행)을 분리해서 보여준다.
-        const status = !s.last_run_at ? { label: '미실행', cls: '' } : s.last_result === 'success' ? { label: '정상', cls: 'nm-badge--success' } : s.last_result === 'empty' ? { label: '불안정(0건)', cls: 'nm-badge--warning' } : { label: '오류', cls: 'nm-badge--critical' };
-        const rowEl = el('div', { class: 'source-table__row', role: 'button', tabindex: '0', title: '클릭하면 상세 팝업이 열립니다', 'data-rid': s.id }, [
-          el('div', { class: 'source-table__name' }, [window.Reorder.grip(), ` ${s.name} ${s.enabled === false ? '(비활성)' : ''}`]),
-          el('div', {}, [el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS')]),
-          el('div', {}, [el('span', { class: `nm-badge ${status.cls}` }, status.label)]),
-          el('div', { class: 'source-table__date' }, fmt(s.created_at)),
-          el('div', { class: 'source-table__date' }, fmt(s.last_run_at)),
-          // 마우스를 올린 행의 우측 상단에 나타나는 수정·삭제 아이콘.
-          el('div', { class: 'source-table__actions' }, [
-            el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: (e) => { e.stopPropagation(); openSourceForm(s); } }, '✎'),
-            el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: (e) => { e.stopPropagation(); removeSource(s); } }, '🗑'),
-          ]),
+        const st = FD ? FD.summary(s) : { state: 'unrun', label: '미실행', cls: '' };
+        const last = st.last;
+        const bad = FD && FD.needsAttention(st);
+        const card = el('div', { class: `source-card ${bad ? 'is-bad' : ''}`, 'data-rid': s.id });
+        const testOut = el('div', { class: 'source-card__test', style: 'display:none' });
+        const head = el('div', { class: 'source-card__head' }, [
+          window.Reorder.grip(),
+          el('div', { class: 'source-card__name', title: s.name }, s.name),
+          el('span', { class: 'nm-badge' }, typeLabel(s.type)),
+          el('span', { class: `nm-badge ${st.cls}` }, st.label),
+          el('span', { style: 'flex:1' }),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '테스트 수집(저장 안 함)', onclick: () => runTest(s, testOut) }, '▶'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '켜기/끄기', onclick: async () => { await appState.updateFeedSource(s.id, { enabled: s.enabled === false }); } }, s.enabled === false ? '⏻' : '⏸'),
+          el('button', { class: 'nm-btn nm-btn--icon', title: '수정', onclick: () => openSourceForm(s) }, '✎'),
+          el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger', title: '삭제', onclick: () => removeSource(s) }, '🗑'),
         ]);
-        const openDetail = () => openSourceDetail(s, status);
-        rowEl.addEventListener('click', openDetail);
-        rowEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); } });
-        table.append(rowEl);
+        const bits = [];
+        bits.push(`마지막 수집 ${fmt(last ? last.at : s.last_run_at)}`);
+        if (st.rate) bits.push(`7일 성공 ${st.rate.ok}/${st.rate.total}`);
+        if (st.avgMs != null) bits.push(`평균 ${(st.avgMs / 1000).toFixed(1)}초`);
+        if (st.newestAgeDays != null) bits.push(`최신 글 ${st.newestAgeDays <= 0 ? '오늘' : `${st.newestAgeDays}일 전`}`);
+        if (last && last.added != null && !last.test) bits.push(`새로 저장 ${last.added}건`);
+        card.append(head, el('div', { class: 'source-card__meta' }, bits.join(' · ')));
+        if (s.type !== 'markdown') {
+          const apiName = s.type === 'api' ? ((window.listCustomApis && window.listCustomApis().find((a) => a.id === s.endpoint)) || {}).name : null;
+          card.append(el('div', { class: 'source-card__url' }, s.type === 'api' ? `API: ${apiName || '(삭제된 API)'}` : (s.endpoint || '—')));
+        }
+        // 카드 안 진단 — 문제가 있을 때만.
+        if (bad) {
+          const dg = FD.diagnose(s, last || { result: s.last_result, error: s.last_result === 'error' ? '' : '' });
+          const note = el('div', { class: 'source-card__note' });
+          const noteHead = el('button', { type: 'button', class: 'source-card__note-head', title: '클릭하면 이 소스의 수정 화면으로 이동합니다', onclick: () => openSourceForm(s, { note: dg }) }, [
+            el('strong', {}, `⚠ ${dg.headline || '확인이 필요합니다'}`),
+            el('span', { class: 'text-muted' }, ' — 눌러서 수정하기 ›'),
+          ]);
+          note.append(noteHead);
+          if (dg.why) note.append(el('div', { class: 'source-card__why' }, dg.why));
+          for (const t of dg.tips || []) note.append(el('div', { class: 'source-card__why' }, `· ${t}`));
+          if (dg.fixes.length) note.append(el('div', { class: 'row wrap', style: 'gap:6px; margin-top:6px' }, dg.fixes.map((f) => el('button', { type: 'button', class: 'nm-btn nm-btn--sm', onclick: () => runFix(s, f, testOut, dg) }, f.label))));
+          card.append(note);
+        } else if (st.state === 'unrun' && s.enabled !== false) {
+          card.append(el('div', { class: 'source-card__meta' }, '아직 수집 전입니다. ▶ 로 먼저 시험해 보세요.'));
+        }
+        if (testRes.has(s.id)) showTest(testOut, testRes.get(s.id));
+        card.append(testOut);
+        grid.append(card);
       }
-      container.append(table);
-      window.Reorder.enable(table, 'feedSources');
+      container.append(grid);
+      window.Reorder.enable(grid, 'feedSources');
     }
 
-    // 피드 소스 상세 팝업 — 주소 전체·마지막 수집 결과·등록일을 보여주고 수정/삭제로 이어진다.
-    function openSourceDetail(s, status) {
-      openModal({
-        title: `${s.name} — 피드 소스`,
-        width: '460px',
-        contentBuilder(body) {
-          const row = (label, value) => el('div', { class: 'nm-field' }, [el('label', {}, label), el('div', { style: 'word-break:break-all; font-size:13px' }, value)]);
-          const endpointIsUrl = s.type !== 'markdown';
-          body.append(
-            el('div', { class: 'stack', style: 'gap:10px' }, [
-              el('div', { class: 'row wrap', style: 'gap:6px; align-items:center' }, [
-                el('div', { class: 'item-row__title' }, `${s.name} ${s.enabled === false ? '(비활성)' : ''}`),
-                el('span', { class: 'nm-badge' }, s.type === 'markdown' ? '마크다운' : 'RSS'),
-                el('span', { class: `nm-badge ${status.cls}` }, status.label),
-                el('span', { class: `nm-badge ${s.enabled === false ? '' : 'nm-badge--success'}` }, s.enabled === false ? '비활성' : '활성'),
-              ]),
-              row('등록일', s.created_at ? String(s.created_at).slice(0, 19).replace('T', ' ') : '—'),
-              row('마지막 수집일', s.last_run_at ? String(s.last_run_at).slice(0, 19).replace('T', ' ') : '아직 실행하지 않았습니다'),
-              endpointIsUrl
-                ? row('RSS 주소', el('a', { href: s.endpoint, target: '_blank', rel: 'noopener' }, s.endpoint || '—'))
-                : row('마크다운 본문', el('div', { style: 'max-height:200px; overflow:auto; white-space:pre-wrap; background:var(--surface-alt, #f4f6fb); padding:8px; border-radius:8px' }, (s.endpoint || '').slice(0, 2000) + ((s.endpoint || '').length > 2000 ? '…' : ''))),
-            ])
-          );
-          const editBtn = el('button', { class: 'nm-btn nm-btn--primary', style: 'flex:1', onclick: () => { close(); openSourceForm(s); } }, '✎ 수정');
-          const delBtn = el('button', { class: 'nm-btn nm-btn--danger', style: 'flex:1', onclick: async () => { if (!confirmDialog(`"${s.name}" 피드 소스를 삭제할까요?`)) return; close(); await removeSource(s); } }, '🗑 삭제');
-          body.append(el('div', { class: 'row', style: 'gap:8px; margin-top:14px' }, [editBtn, delBtn]));
-        },
-      });
+    const testRes = new Map(); // 소스 id → 마지막 테스트 결과(카드를 다시 그려도 유지)
+    function showTest(out, r) {
+      out.style.display = ''; out.innerHTML = '';
+      if (r.ok) {
+        out.append(el('div', {}, `✅ 연결 성공 · ${r.n}건 · ${(r.ms / 1000).toFixed(1)}초 · 관심주제에 맞는 새 글 ${r.newMatch}건(이미 저장 ${r.dup}건)`));
+        for (const it of r.sample) out.append(el('div', { class: 'text-muted', style: 'font-size:12px; word-break:break-all' }, `· ${it.title}`));
+        if (!r.n) out.append(el('div', {}, '⚠ 열리지만 글이 0건입니다.'));
+        else if (!r.newMatch && !r.dup) out.append(el('div', {}, '⚠ 가져온 글이 모두 관심주제와 맞지 않습니다 → 🏷 관심주제 키워드를 점검하세요.'));
+      } else {
+        out.append(el('div', {}, `❌ ${r.error}`));
+        for (const a of (r.attempts || [])) out.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `· ${a.via}: ${String(a.msg || '').slice(0, 100)}`));
+      }
+    }
+    async function runTest(s, out) {
+      out.style.display = ''; out.textContent = '시험 중…';
+      const r = await appState.testFeedSource(s);
+      testRes.set(s.id, r);
+      appState.dispatchEvent(new Event('change')); // 카드 상태 배지·이력을 새로 그린다(결과는 testRes에서 복원)
+    }
+    async function testAll() {
+      const list = appState.feedSources.filter((x) => x.enabled !== false && x.type !== 'crawl');
+      toast(`${list.length}개 소스를 시험합니다…`);
+      for (let i = 0; i < list.length; i += 3) await Promise.all(list.slice(i, i + 3).map((x) => appState.testFeedSource(x)));
+      appState.dispatchEvent(new Event('change'));
+      toast('시험을 마쳤습니다. 카드에서 결과를 확인하세요.', 'success');
+    }
+    // 카드 안 조치 버튼
+    async function runFix(s, f, out, dg) {
+      if (f.id === 'edit') return openSourceForm(s, { note: dg });
+      if (f.id === 'retry') return runTest(s, out);
+      if (f.id === 'topic') { tab = 'topics'; draw(); return; }
+      if (f.id === 'https') {
+        await appState.updateFeedSource(s.id, { endpoint: String(s.endpoint).replace(/^http:/i, 'https:') });
+        const fresh = appState.feedSources.find((x) => x.id === s.id) || s;
+        toast('https 주소로 바꿨습니다. 시험합니다…'); return runTest(fresh, out);
+      }
+      if (f.id === 'md') {
+        return openModal({ title: '마크다운으로 등록하는 법', contentBuilder(body) { body.append(el('div', { class: 'stack', style: 'gap:8px; font-size:13px' }, [
+          el('div', {}, '사이트가 자동 접속을 막으면 브라우저에서 기사 목록 페이지를 열어 제목과 주소를 복사해 붙여넣는 방법이 있습니다.'),
+          el('pre', { class: 'wizard-md' }, '- [기사 제목](https://example.com/article1)\n- [다른 기사](https://example.com/article2)'),
+          el('div', { class: 'text-muted' }, '소스 등록 → 종류: 마크다운 붙여넣기. 링크가 관심주제와 맞는 것만 브리핑에 들어갑니다.'),
+        ])); } });
+      }
+      if (f.id === 'kstartup') {
+        const apis = (window.listCustomApis && window.listCustomApis()) || [];
+        const api = apis.find((a) => a.id === s.endpoint);
+        if (!api) return toast('연결된 API를 찾을 수 없습니다. 수정에서 다시 선택하세요.', 'error');
+        window.upsertCustomApi({ ...api, urlTemplate: window.FeedDiag.KSTARTUP_URL });
+        toast('K-Startup 사업공고 URL로 바꿨습니다. 시험합니다…', 'success');
+        return runTest(s, out);
+      }
+      if (f.id === 'discover') {
+        out.style.display = ''; out.textContent = 'RSS 주소를 찾는 중… (최대 20초)';
+        const r = await window.discoverFeedsFor(s.endpoint);
+        out.innerHTML = '';
+        if (!r.verified.length) { out.append(el('div', {}, '열리는 RSS 주소를 찾지 못했습니다. 사이트가 RSS를 제공하지 않으면 📝 마크다운 방식이 대안입니다.')); r.unverified.forEach((u) => out.append(el('div', { class: 'text-muted', style: 'font-size:12px' }, `· 시도: ${u}`))); return; }
+        out.append(el('div', {}, '✅ 열리는 RSS 주소를 찾았습니다. 눌러서 교체하세요:'));
+        for (const v of r.verified) out.append(el('button', { type: 'button', class: 'nm-btn nm-btn--sm', style: 'margin:3px 4px 0 0', onclick: async () => { await appState.updateFeedSource(s.id, { endpoint: v.url }); toast('주소를 교체했습니다.', 'success'); } }, `${v.url} (${v.n}건)`));
+      }
     }
 
     // 개발계획서 9.2 "항목 스크랩 클릭 → Knowledge" 연동: 원문 링크·요약을 문서로 저장하고 주제 태그를 상속한다.
@@ -648,17 +695,41 @@
       });
     }
 
-    function openSourceForm(existing) {
+    function openSourceForm(existing, opts = {}) {
       openModal({
         title: existing ? '피드 소스 수정' : '피드 소스 등록',
         contentBuilder(body, close) {
           const form = el('form', { class: 'stack' });
           const isMarkdown = existing?.type === 'markdown';
+          const isApi = existing?.type === 'api';
+          const apiList = (window.listCustomApis && window.listCustomApis()) || [];
+          // 카드의 "수정 의견"을 그대로 가져와 맨 위에 보여 준다.
+          if (opts.note && (opts.note.headline || opts.note.why)) {
+            const nb = el('div', { class: 'source-card__note', style: 'margin-bottom:4px' }, [el('strong', {}, `⚠ ${opts.note.headline}`), opts.note.why ? el('div', { class: 'source-card__why' }, opts.note.why) : null, ...(opts.note.tips || []).map((t) => el('div', { class: 'source-card__why' }, `· ${t}`))]);
+            body.append(nb);
+          }
           const typeSelect = el('select', { class: 'nm-select', name: 'type' }, [
             el('option', { value: 'rss', selected: !isMarkdown || undefined }, 'RSS 피드(주소)'),
             el('option', { value: 'markdown', selected: isMarkdown || undefined }, '마크다운 붙여넣기'),
+            el('option', { value: 'api', selected: isApi || undefined }, '공공데이터 API(설정의 커스텀 API)'),
           ]);
+          if (isApi) typeSelect.value = 'api'; else if (!isMarkdown) typeSelect.value = 'rss';
+          const apiSel = el('select', { class: 'nm-select', name: 'endpoint_api' }, [el('option', { value: '' }, apiList.length ? '— API 선택 —' : '(설정 → 커스텀 API에 먼저 등록하세요)'), ...apiList.map((a) => el('option', { value: a.id, selected: (existing?.endpoint === a.id) || undefined }, a.name || a.id))]);
+          const apiField = field('연결할 API (K-Startup·기업마당 등 공고 목록을 주는 API)', apiSel);
           const rssField = field('RSS 주소', el('input', { class: 'nm-input', type: 'url', name: 'endpoint_rss', placeholder: 'https://example.com/rss', value: !isMarkdown ? existing?.endpoint || '' : '' }));
+          const rssMsg = el('div', { class: 'text-muted', style: 'font-size:12px; word-break:break-all' });
+          rssField.append(el('div', { class: 'row wrap', style: 'gap:6px; margin-top:6px' }, [
+            el('button', { type: 'button', class: 'nm-btn nm-btn--sm', onclick: async () => {
+              const u = rssField.querySelector('input').value.trim(); if (!u) return toast('주소를 먼저 입력하세요.', 'error');
+              rssMsg.textContent = '확인 중… (최대 20초)';
+              try { const items = await window.fetchFeedItems(u); rssMsg.textContent = `✅ 열립니다 — 글 ${items.length}건. 첫 글: ${items[0] ? items[0].title : '(없음)'}`; return; } catch (e) { rssMsg.textContent = `❌ ${e.message} — RSS 주소를 찾아봅니다…`; }
+              const r = await window.discoverFeedsFor(u);
+              rssMsg.innerHTML = '';
+              if (!r.verified.length) { rssMsg.textContent = '열리는 RSS 주소를 찾지 못했습니다. 마크다운 붙여넣기를 사용해 보세요.'; return; }
+              rssMsg.append('찾은 RSS(눌러서 적용): ');
+              r.verified.forEach((v) => rssMsg.append(el('button', { type: 'button', class: 'nm-btn nm-btn--sm', style: 'margin:2px', onclick: () => { rssField.querySelector('input').value = v.url; rssMsg.textContent = `적용: ${v.url}`; } }, `${v.url} (${v.n}건)`)));
+            } }, '🔍 연결 확인 · RSS 주소 찾기'),
+          ]), rssMsg);
           const mdTextarea = el('textarea', { class: 'nm-textarea', name: 'endpoint_md', rows: 8, placeholder: '- [기사 제목](https://example.com/article) 한줄 설명' }, isMarkdown ? existing?.endpoint || '' : '');
           const mdFileInput = el('input', { class: 'nm-input', type: 'file', accept: '.md,.markdown,text/markdown,text/plain' });
           mdFileInput.addEventListener('change', () => {
@@ -690,8 +761,9 @@
           }, '🔍 링크 미리보기');
           mdField.append(el('div', { class: 'stack', style: 'gap:6px' }, [mdPreviewBtn, mdPreview]));
           function syncVisibility() {
-            rssField.style.display = typeSelect.value === 'markdown' ? 'none' : '';
+            rssField.style.display = typeSelect.value === 'rss' ? '' : 'none';
             mdField.style.display = typeSelect.value === 'markdown' ? '' : 'none';
+            apiField.style.display = typeSelect.value === 'api' ? '' : 'none';
           }
           typeSelect.addEventListener('change', syncVisibility);
           form.append(
@@ -699,6 +771,7 @@
             field('소스 종류', typeSelect),
             rssField,
             mdField,
+            apiField,
             field(
               '활성 상태',
               (() => {
@@ -715,9 +788,9 @@
             e.preventDefault();
             const fd = new FormData(form);
             const type = fd.get('type');
-            const endpoint = type === 'markdown' ? fd.get('endpoint_md') : fd.get('endpoint_rss');
+            const endpoint = type === 'markdown' ? fd.get('endpoint_md') : type === 'api' ? fd.get('endpoint_api') : fd.get('endpoint_rss');
             if (!endpoint || !String(endpoint).trim()) {
-              toast(type === 'markdown' ? '마크다운 본문을 입력해주세요.' : 'RSS 주소를 입력해주세요.', 'error');
+              toast(type === 'markdown' ? '마크다운 본문을 입력해주세요.' : type === 'api' ? 'API를 선택해주세요.' : 'RSS 주소를 입력해주세요.', 'error');
               return;
             }
             const data = { name: fd.get('name'), type, endpoint, enabled: fd.get('enabled') === 'true' };

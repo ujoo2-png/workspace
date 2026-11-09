@@ -84,3 +84,20 @@
   .source-table__row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
   .source-table__name { grid-column: 1 / -1; }
 }
+
+/* v7.36.0 — 피드 소스 카드(연결 문제는 카드 안에 진단·조치로 표시) */
+.source-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.source-card { background: var(--surface, #fff); border: 1px solid var(--border, #e3e7ef); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.source-card.is-bad { border-color: var(--warning, #e0a100); }
+.source-card__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.source-card__name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
+.source-card__meta { font-size: 12px; color: var(--text-muted); }
+.source-card__url { font-size: 12px; color: var(--text-muted); word-break: break-all; }
+.source-card__note { background: color-mix(in srgb, var(--warning, #e0a100) 14%, transparent); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.source-card__note-head { all: unset; cursor: pointer; display: block; width: 100%; }
+.source-card__note-head:hover strong { text-decoration: underline; }
+.source-card__why { font-size: 12px; margin-top: 3px; color: var(--text, inherit); }
+.source-card__test { background: var(--surface-alt, #f4f6fb); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.nm-btn--sm { padding: 3px 8px; font-size: 12px; }
+.item-row--unread .item-row__title a { font-weight: 700; }
+.unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary, #3b6cf6); margin-right: 6px; vertical-align: middle; }

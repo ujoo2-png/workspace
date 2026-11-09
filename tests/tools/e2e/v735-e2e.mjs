@@ -88,6 +88,17 @@ await page.click('button:has-text("+ 새 양식 문서")'); await page.waitForSe
 await page.fill('.nm-modal input[name=doc-title]', '업데이트 테스트');
 await page.setInputFiles('#cd-file-input', payload);
 await page.waitForSelector('.cd-editor', { timeout: 15000 }); await page.waitForSelector('.cd-sheet table', { timeout: 15000 });
+// v7.36.0: 칸막이로 미리보기 너비 조절
+{
+  const w0 = (await page.locator('.cd-right').boundingBox()).width; const sp = await page.locator('.cd-split').boundingBox();
+  await page.mouse.move(sp.x + 6, sp.y + 40); await page.mouse.down(); await page.mouse.move(sp.x - 194, sp.y + 40, { steps: 6 }); await page.mouse.up();
+  const w1 = (await page.locator('.cd-right').boundingBox()).width;
+  expect('칸막이를 왼쪽으로 끌면 미리보기가 넓어진다', w1 > w0 + 120, `${w0} -> ${w1}`);
+  const stored = await page.evaluate(() => localStorage.getItem('workspace:cd:previewW'));
+  expect('너비가 기억된다', Number(stored) > 0, String(stored));
+  await page.locator('.cd-split').dblclick(); const w2 = (await page.locator('.cd-right').boundingBox()).width;
+  expect('더블클릭하면 기본 너비로', Math.abs(w2 - w0) < 40, `${w2} vs ${w0}`);
+}
 const banner = await page.textContent('.cd-editor .cd-banners, .cd-editor').catch(() => '');
 expect('양식에 있는데 연결 칸이 없는 "지역" 열 → 컬럼 만들기 제안', (await page.locator('button:has-text("컬럼 만들기")').count()) >= 1);
 await page.click('button:has-text("\\"지역\\" 컬럼 만들기")').catch(async () => { await page.locator('button:has-text("컬럼 만들기")').first().click(); });

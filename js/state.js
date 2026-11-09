@@ -1143,6 +1143,42 @@
       return this.refreshAll();
     }
 
+    // 소스 한 개에서 항목을 가져온다(저장하지 않음). type: rss | markdown | api. 실패하면 던진다.
+    async fetchSourceItems(source) {
+      if (source.type === 'markdown') return { items: window.parseMarkdownLinks(source.endpoint) || [], meta: {} };
+      if (source.type === 'api') {
+        const apis = (window.listCustomApis && window.listCustomApis()) || [];
+        const api = apis.find((a) => a.id === source.endpoint);
+        if (!api) throw new Error('등록된 API를 찾을 수 없습니다(customApi) — 설정에서 삭제되었을 수 있습니다.');
+        const res = await window.fetchCustomApi(api, { force: true });
+        const out = window.FeedDiag.adaptApiItems(res.data);
+        if (!out.items.length) throw Object.assign(new Error(out.total ? `응답에서 제목/링크 항목을 읽지 못했습니다(필드: ${out.sampleKeys.slice(0, 8).join(', ')})` : 'API 응답에서 목록을 찾지 못했습니다(내용이 비어 있음)'), { sampleKeys: out.sampleKeys });
+        return { items: out.items, meta: { total: out.total, sampleKeys: out.sampleKeys } };
+      }
+      return { items: await window.fetchFeedItems(source.endpoint), meta: {} };
+    }
+    // 개발계획서 6-3 "테스트 수집": 저장 없이 연결·파싱·주제 매칭만 시험하고 진단 이력에 남긴다.
+    async testFeedSource(source, { record = true } = {}) {
+      const t0 = Date.now();
+      const topics = this.briefingTopics.filter((t) => t.active !== false);
+      try {
+        const { items, meta } = await this.fetchSourceItems(source);
+        const hashes = new Set(this.briefingItems.map((i) => i.item_hash));
+        let matchN = 0, dupN = 0;
+        for (const it of items) {
+          if (hashes.has(window.simpleHash(`${it.title}|${it.link}`))) { dupN++; continue; }
+          if (!topics.length || topics.some((t) => window.itemMatchesTopic(it, t))) matchN++;
+        }
+        const res = { ok: true, ms: Date.now() - t0, n: items.length, newMatch: matchN, dup: dupN, sample: items.slice(0, 3), meta };
+        if (record) window.FeedDiag.record(source.id, { result: items.length ? 'success' : 'empty', n: items.length, ms: res.ms, test: true });
+        return res;
+      } catch (e) {
+        const res = { ok: false, ms: Date.now() - t0, error: e.message, attempts: e.attempts || [], sampleKeys: e.sampleKeys };
+        if (record) window.FeedDiag.record(source.id, { result: 'error', error: e.message, ms: res.ms, test: true, attempts: (e.attempts || []).map((x) => ({ via: x.via, msg: String(x.msg || '').slice(0, 120), status: x.status })) });
+        return res;
+      }
+    }
+
     // 활성화된 피드 소스를 전부 가져와 활성 주제와 매칭한 뒤, 새 항목만 저장한다.
     // (user_id, item_hash) 유니크 제약과 동일한 효과를 로컬에서는 Set으로 낸다.
     // v7.35.0: ① 항목 하나의 저장 실패(예: 날짜 형식 → HTTP 400)가 수집 전체를 멈추지 않게 항목별로 처리하고,
@@ -1151,7 +1187,7 @@
       const { fetchFeedItems, itemMatchesTopic, simpleHash, parseMarkdownLinks, normalizeFeedDate } = window;
       // 'markdown' 타입은 RSS 엔드포인트가 아니라 사용자가 붙여넣은 본문(endpoint 컬럼에 그대로 저장)
       // 이므로 fetchFeedItems() 대신 parseMarkdownLinks()로 링크만 추출한다.
-      const sources = this.feedSources.filter((s) => s.enabled !== false && s.type !== 'crawl' && s.type !== 'api');
+      const sources = this.feedSources.filter((s) => s.enabled !== false && s.type !== 'crawl');
       const activeTopics = this.briefingTopics.filter((t) => t.active !== false);
       const existingHashes = new Set(this.briefingItems.map((i) => i.item_hash));
 
@@ -1185,11 +1221,14 @@
         const stat = { name: source.name, kind: source.type === 'markdown' ? 'md' : 'feed', fetched: 0, added: 0, dup: 0, skippedTopic: 0, failed: 0, error: null, firstFailure: null };
         report.push(stat);
         let items = [];
+        const t0 = Date.now();
+        const diag = (extra) => { try { window.FeedDiag && window.FeedDiag.record(source.id, { ms: Date.now() - t0, ...extra }); } catch (e) { /* 기록 실패는 무시 */ } };
         try {
-          items = source.type === 'markdown' ? (parseMarkdownLinks(source.endpoint) || []) : await fetchFeedItems(source.endpoint);
+          items = (await this.fetchSourceItems(source)).items;
         } catch (e) {
           stat.error = e.message;
           errors.push(`${source.name}: ${e.message}`);
+          diag({ result: 'error', error: e.message, attempts: (e.attempts || []).map((x) => ({ via: x.via, msg: String(x.msg || '').slice(0, 120), status: x.status })) });
           // 소스 관제(개발계획서 9.3): 시스템이 판단하는 상태(정상/오류/미실행)를 사용자 on/off와 분리해 기록한다.
           await this.store.update('feed_sources', source.id, { last_result: 'error', last_run_at: nowIso() }).catch(() => {});
           continue;
@@ -1216,6 +1255,8 @@
         }
         // 한 건도 못 저장했는데 실패가 있었다면 "성공"으로 기록하지 않는다.
         const result = stat.failed && !stat.added ? 'error' : (items.length ? 'success' : 'empty');
+        const newest = items.map((i) => Date.parse(window.normalizeFeedDate ? window.normalizeFeedDate(i.publishedAt) : i.publishedAt)).filter((n) => !Number.isNaN(n)).sort((x, y) => y - x)[0];
+        diag({ result, n: items.length, added: stat.added, dup: stat.dup, skipped: stat.skippedTopic, failed: stat.failed, newest: newest ? new Date(newest).toISOString() : null, error: stat.error || (stat.failed ? `저장 실패(${stat.firstFailure})` : null) });
         await this.store.update('feed_sources', source.id, { last_result: result, last_run_at: nowIso() }).catch(() => {});
         if (stat.failed) errors.push(`${source.name}: ${stat.failed}건 저장 실패(${stat.firstFailure})`);
       }

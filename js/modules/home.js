@@ -287,6 +287,39 @@
       ]);
     }
 
+    // v7.36.0: 연결 관제 — 로그인 후 홈에서 한 번 점검(5분 캐시)하고 한 줄로 보고한다. 눌러서 펼치면 항목별 상태와 이동 링크.
+    let monitorOpen = false; let monitorBusy = false;
+    async function runMonitor(force) {
+      if (!window.ConnectionMonitor || monitorBusy) return;
+      monitorBusy = true; draw();
+      try { await window.ConnectionMonitor.run({ force }); } catch (e) { /* 점검 실패는 조용히 */ }
+      monitorBusy = false; draw();
+    }
+    function monitorCard() {
+      const M = window.ConnectionMonitor; const data = M && M.last();
+      const ICON = { ok: '🟢', warn: '🟡', error: '🔴', off: '⚪' };
+      const sm = data && data.summary;
+      const line = monitorBusy || !data ? '🛰 연결 점검 중…'
+        : `🛰 연결 관제 — ${ICON[sm.worst]} ${sm.error ? `문제 ${sm.error}` : sm.warn ? `주의 ${sm.warn}` : '모두 정상'} · 정상 ${sm.ok}${sm.off ? ` · 미설정 ${sm.off}` : ''}`;
+      const box = el('div', { class: 'nm-card monitor-card', style: 'padding:8px 12px; margin-bottom:16px' });
+      box.append(el('div', { class: 'row', style: 'gap:8px; align-items:center' }, [
+        el('button', { class: 'nm-btn', style: 'border:none; background:none; flex:1; text-align:left; font-weight:600', onclick: () => { monitorOpen = !monitorOpen; draw(); } }, `${line} ${monitorOpen ? '▴' : '▾'}`),
+        el('button', { class: 'nm-btn nm-btn--sm', disabled: monitorBusy || undefined, onclick: () => runMonitor(true) }, '다시 점검'),
+      ]));
+      if (monitorOpen && data) {
+        const groups = {};
+        for (const i of data.items) (groups[i.group] = groups[i.group] || []).push(i);
+        for (const [g, arr] of Object.entries(groups)) {
+          box.append(el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, g));
+          for (const i of arr) box.append(el('div', { class: 'row', style: 'gap:6px; font-size:13px; padding:2px 0' }, [
+            el('span', {}, ICON[i.state]), el('strong', {}, i.name), el('span', { class: 'text-muted', style: 'flex:1' }, i.msg),
+            i.fix ? el('button', { class: 'nm-btn nm-btn--sm', onclick: () => navigate(i.fix) }, '이동') : null,
+          ]));
+        }
+      }
+      return box;
+    }
+
     // 입장 애니메이션은 "처음 몇 초"만: 그 사이 데이터가 도착해 홈이 다시 그려져도 애니메이션이 처음부터 다시 시작(깜빡임)하지 않고
     // 경과 시간만큼 건너뛴 채 이어서 재생된다. 이후의 다시 그리기(알림 읽음 등)에는 입장 효과가 없다.
     let enterStart = null;
@@ -320,6 +353,7 @@
 
       container.append(heroCard());
       container.append(integrationStatusBar());
+      container.append(monitorCard());
 
       const widgets = {};
       widgets.clock = clockCard();
@@ -838,6 +872,7 @@
     loadClockWeather();
     loadWeatherAlerts();
     checkSupabaseConnection();
+    runMonitor(false);
     clockTimer = setInterval(tickClocks, 1000);
     // 1분마다 시간대(오전→오후→저녁→밤)가 바뀌었는지 다시 계산한다(예보는 캐시 TTL 20분 안에서는 네트워크 요청 없음).
     const wxTimer = setInterval(() => { if (!document.hidden) loadClockWeather(); }, 60000);

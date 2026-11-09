@@ -390,7 +390,23 @@
       if (!mapping) mapping = { version: 1, kind: doc.template_kind, fields: [], repeats: [], options: defaultOptions(), warnings: [] };
       if (!values) values = { scalars: {}, repeats: {}, photo: {} };
       values.photo = values.photo || {};
-      openEditor({ doc, title: doc.title, name: doc.template_name, kind: doc.template_kind, bytes, mapping, values, autoRefresh: !!opts.autoRefresh });
+      // v7.36.0: 문서를 열 때 자동으로 최신 등록 데이터와 맞춘다 — 빈칸·손대지 않은 칸만 채우고, 직접 고친 값은 건드리지 않는다.
+      // (예전 문서는 기준값(sync)이 없어 "바뀐 게 없음"으로 보일 수 있었다. 빈칸이면 기준값 없이도 채운다.)
+      let autoRefresh = !!opts.autoRefresh;
+      let autoMsg = '';
+      if (!autoRefresh && opts.silentSync !== false) {
+        try {
+          const r = await computeRefresh({ kind: doc.template_kind, bytes, mapping, values });
+          if (r.conflicts.length) autoRefresh = true; // 충돌은 사용자에게 물어야 하므로 편집 화면에서 확인창을 띄운다
+          else if (r.changes.length || r.added.fields.length || r.added.cols.length) {
+            mapping = r.mapping; values = r.values;
+            autoMsg = [...r.changes, r.added.fields.length + r.added.cols.length ? `새로 맞춰진 칸 ${r.added.fields.length + r.added.cols.length}개` : ''].filter(Boolean).join(', ');
+          } else if (!values.sync || values.sync.sig !== r.baseline.sig) { values.sync = r.baseline; }
+        } catch (e) { toast(`최신 정보를 확인하지 못했습니다: ${e.message || e}`, 'error'); }
+      }
+      if (!bytes && doc.template_attachment_id) toast('양식 원본을 읽지 못해 새 컬럼을 양식 칸에 자동으로 맞출 수 없습니다. 값은 이미 맞춰진 칸만 갱신됩니다.', 'error');
+      openEditor({ doc, title: doc.title, name: doc.template_name, kind: doc.template_kind, bytes, mapping, values, autoRefresh });
+      if (autoMsg) toast(`등록 데이터의 최신 내용을 자동 반영했습니다: ${autoMsg}. (저장하기 전까지 파일에는 반영되지 않습니다)`, 'success');
     }
 
     function openEditor(init) {
@@ -435,7 +451,23 @@
       const previewHead = el('div', { class: 'cd-preview__head' });
       const previewBody = el('div', { class: 'cd-preview__body' });
       right.append(el('div', { class: 'cd-preview' }, [previewHead, previewBody]));
-      grid.append(left, right);
+      // v7.36.0: 입력 영역과 미리보기 사이 칸막이 — 끌어서 너비 조절(키보드 ←/→, 더블클릭=기본값). 너비는 이 기기에 기억한다.
+      const split = el('div', { class: 'cd-split', role: 'separator', tabindex: '0', 'aria-orientation': 'vertical', title: '끌어서 미리보기 너비 조절 · 더블클릭: 기본값' });
+      const SPLIT_KEY = 'workspace:cd:previewW';
+      const clampW = (px) => Math.max(320, Math.min(px, Math.max(320, grid.clientWidth - 320 - 12)));
+      const setW = (px, persist) => { const w = Math.round(clampW(px)); grid.style.setProperty('--cd-right-w', `${w}px`); if (persist) { try { localStorage.setItem(SPLIT_KEY, String(w)); } catch (e) { /* 저장 불가 환경 */ } } return w; };
+      try { const saved = Number(localStorage.getItem(SPLIT_KEY)); if (saved >= 320) grid.style.setProperty('--cd-right-w', `${saved}px`); } catch (e) { /* 무시 */ }
+      let curW = () => right.getBoundingClientRect().width;
+      split.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); split.setPointerCapture(e.pointerId); split.classList.add('is-drag'); document.body.classList.add('cd-dragging');
+        const startX = e.clientX; const startW = curW();
+        const move = (ev) => setW(startW - (ev.clientX - startX), false);
+        const up = (ev) => { split.releasePointerCapture(ev.pointerId); split.classList.remove('is-drag'); document.body.classList.remove('cd-dragging'); split.removeEventListener('pointermove', move); split.removeEventListener('pointerup', up); split.removeEventListener('pointercancel', up); setW(curW(), true); };
+        split.addEventListener('pointermove', move); split.addEventListener('pointerup', up); split.addEventListener('pointercancel', up);
+      });
+      split.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setW(curW() + (e.key === 'ArrowLeft' ? 40 : -40), true); } });
+      split.addEventListener('dblclick', () => { grid.style.removeProperty('--cd-right-w'); try { localStorage.removeItem(SPLIT_KEY); } catch (e) { /* 무시 */ } });
+      grid.append(left, split, right);
       const finalsBox = el('div', { class: 'cd-finals' });
       const attachBox = el('div', { class: 'cd-attach' });
       root.append(topbar, banners, optionsBar, grid, finalsBox, attachBox);

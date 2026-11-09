@@ -38,10 +38,39 @@
 
   /** 같은 출처 프록시로 원본 XML 텍스트를 받는다. 프록시가 없으면(404) null. */
   async function fetchViaOwnProxy(url) {
-    const res = await fetch(`/api/custom-proxy?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) });
+    const res = await fetch(`/api/custom-proxy?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(20000) });
     if (res.status === 404) return null; // 로컬 데모 등 프록시 미배포 환경
-    if (!res.ok) throw new Error(`프록시 응답 오류(HTTP ${res.status})`);
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = j && j.error ? `: ${j.error}` : ''; } catch (e) { /* 본문이 JSON이 아님 */ }
+      throw Object.assign(new Error(`프록시 응답 오류(HTTP ${res.status})${detail}`), { status: res.status });
+    }
     return await res.text();
+  }
+
+  /** 받은 본문이 RSS/Atom이 아니라 일반 웹페이지(HTML)인지. 게시판 주소를 RSS 주소로 잘못 넣은 경우가 흔하다. */
+  const looksLikeHtml = (t) => /^\s*(<!doctype html|<html[\s>])/i.test(String(t || '').slice(0, 400));
+
+  /**
+   * 웹페이지 HTML에서 RSS/Atom 주소를 찾는다(<link rel="alternate" type="application/rss+xml" href="...">).
+   * 못 찾으면 널리 쓰이는 관례 경로(/feed, /rss, /rss.xml …)를 후보로 돌려준다.
+   * 순수 함수 — 네트워크를 쓰지 않는다.
+   */
+  function discoverFeedLinks(html, pageUrl) {
+    const found = [];
+    const base = (() => { try { return new URL(pageUrl); } catch (e) { return null; } })();
+    const abs = (h) => { try { return new URL(h, base || undefined).toString(); } catch (e) { return null; } };
+    const re = /<link\b[^>]*>/gi; let m;
+    while ((m = re.exec(String(html || '')))) {
+      const tag = m[0];
+      if (!/rel\s*=\s*["']?alternate/i.test(tag)) continue;
+      if (!/type\s*=\s*["']?application\/(rss|atom)\+xml/i.test(tag)) continue;
+      const href = /href\s*=\s*["']([^"']+)["']/i.exec(tag);
+      const u = href && abs(href[1].replace(/&amp;/g, '&'));
+      if (u && !found.includes(u)) found.push(u);
+    }
+    const guesses = base ? ['/feed', '/rss', '/rss.xml', '/feed.xml', '/atom.xml', '/index.xml'].map((p) => `${base.origin}${p}`) : [];
+    return { found, guesses: guesses.filter((g) => !found.includes(g)) };
   }
 
   /** 공개 프록시(rss2json)로 JSON을 받는다. 자체 프록시가 없는 환경의 폴백. */
@@ -87,27 +116,46 @@
     return items;
   }
 
+  /** 공개 CORS 프록시(allorigins)로 원본 텍스트를 받는다. 마지막 수단 — 피드 주소(공개 URL)만 보낸다. */
+  async function fetchViaAllOrigins(url) {
+    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw Object.assign(new Error(`공개 프록시 오류(HTTP ${res.status})`), { status: res.status });
+    return await res.text();
+  }
+
+  /**
+   * RSS/Atom 항목을 가져온다. 순서: ① 자체 프록시 → ② (http면) https로 바꿔 재시도 → ③ rss2json → ④ allorigins.
+   * 실패하면 시도별 사유를 담은 Error를 던지고, err.attempts = [{via, msg, status, html}]에 구조화해 둔다
+   * (피드 소스 카드의 진단·추천이 이 값을 쓴다).
+   */
   async function fetchFeedItems(feedUrl) {
-    const attemptErrors = [];
-    // 1) 자체 프록시 + 직접 XML 파싱 (가장 안정적)
+    const attempts = [];
+    const urls = [feedUrl];
+    if (/^http:\/\//i.test(feedUrl)) urls.push(feedUrl.replace(/^http:/i, 'https:'));
+    for (const u of urls) {
+      try {
+        const xml = await fetchViaOwnProxy(u);
+        if (xml === null) { attempts.push({ via: '자체 프록시', msg: '프록시 미배포' }); break; }
+        if (looksLikeHtml(xml)) throw Object.assign(new Error('RSS가 아니라 일반 웹페이지(HTML)를 받았습니다'), { html: xml });
+        const items = parseFeedXml(xml);
+        if (!items.length) throw new Error('피드에서 항목을 찾지 못했습니다');
+        return items;
+      } catch (e) {
+        attempts.push({ via: u === feedUrl ? '자체 프록시' : '자체 프록시(https로 재시도)', msg: e.message, status: e.status, html: e.html });
+        if (e.html) break; // 웹페이지를 받았다면 https로 바꿔도 같다
+      }
+    }
+    try { return await fetchViaRss2Json(feedUrl); } catch (e) { attempts.push({ via: 'RSS 변환 서비스', msg: e.message }); }
     try {
-      const xml = await fetchViaOwnProxy(feedUrl);
-      if (xml === null) throw Object.assign(new Error('프록시 미배포'), { noProxy: true });
+      const xml = await fetchViaAllOrigins(feedUrl);
+      if (looksLikeHtml(xml)) throw new Error('RSS가 아니라 일반 웹페이지(HTML)입니다');
       const items = parseFeedXml(xml);
-      if (!items.length) throw new Error('피드에서 항목을 찾지 못했습니다.');
-      return items;
-    } catch (e) {
-      attemptErrors.push(`자체 프록시: ${e.message}`);
-      // 프록시 자체가 없는 환경이면 공개 프록시로 넘어간다. 그 밖의 오류(파싱 실패 등)도
-      // 공개 프록시가 성공할 수 있으므로 계속 시도한다.
-    }
-    // 2) 공개 변환 서비스(rss2json) 폴백
-    try {
-      return await fetchViaRss2Json(feedUrl);
-    } catch (e) {
-      attemptErrors.push(`RSS 변환 서비스: ${e.message}`);
-    }
-    throw new Error(attemptErrors.join(' / '));
+      if (items.length) return items;
+      throw new Error('항목을 찾지 못했습니다');
+    } catch (e) { attempts.push({ via: '공개 프록시', msg: e.message }); }
+    const err = new Error(attempts.map((a) => `${a.via}: ${a.msg}`).join(' / '));
+    err.attempts = attempts;
+    throw err;
   }
 
   // 포함 키워드 중 하나라도 매치 + 제외 키워드는 전부 없어야 함. 포함 키워드가 없으면 전부 통과.
@@ -342,6 +390,26 @@
   window.itemMatchesTopic = itemMatchesTopic;
   window.simpleHash = simpleHash;
   window.normalizeFeedDate = normalizeFeedDate;
+  /** 소스 주소(또는 사이트 첫 화면)에서 RSS 후보를 찾고, 실제로 열리는 것만 남긴다. → {verified:[{url,n}], unverified:[url]} */
+  async function discoverFeedsFor(url) {
+    let origin = url; try { origin = new URL(url).origin + '/'; } catch (e) { /* 그대로 */ }
+    const cand = []; const tryPages = [url, origin].filter((v, i, a) => a.indexOf(v) === i);
+    for (const pg of tryPages) {
+      try {
+        const html = await fetchViaOwnProxy(pg);
+        if (html && looksLikeHtml(html)) { const r = discoverFeedLinks(html, pg); cand.push(...r.found, ...r.guesses); }
+      } catch (e) { /* 다음 페이지 */ }
+    }
+    const uniq = cand.filter((v, i, a) => a.indexOf(v) === i).slice(0, 8);
+    const verified = []; const unverified = [];
+    for (const c of uniq) {
+      try { const items = await fetchFeedItems(c); if (items.length) { verified.push({ url: c, n: items.length }); continue; } } catch (e) { /* 열리지 않음 */ }
+      unverified.push(c);
+    }
+    return { verified, unverified: unverified.slice(0, 3) };
+  }
+  window.discoverFeedsFor = discoverFeedsFor;
+  window.discoverFeedLinks = discoverFeedLinks;
   window.sourceHealth = sourceHealth;
   window.isStaleSource = isStaleSource;
   window.staleReason = staleReason;

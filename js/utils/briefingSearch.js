@@ -118,7 +118,8 @@
       if (f.sourceId) {
         if (f.sourceId === 'topic') { if (it.source_id) return false; }
         else if (f.sourceId === 'md') { const s = srcById.get(it.source_id); if (!s || s.type !== 'markdown') return false; }
-        else if (f.sourceId === 'rss') { const s = srcById.get(it.source_id); if (!s || s.type === 'markdown') return false; }
+        else if (f.sourceId === 'rss') { const s = srcById.get(it.source_id); if (!s || s.type === 'markdown' || s.type === 'api') return false; }
+        else if (f.sourceId === 'api') { const s = srcById.get(it.source_id); if (!s || s.type !== 'api') return false; }
         else if (it.source_id !== f.sourceId) return false;
       }
       if (f.from || f.to) {
