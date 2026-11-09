@@ -518,3 +518,5 @@ a { color: var(--accent); }
 .trending-item__poster { width: 120px; height: 170px; object-fit: cover; border-radius: var(--radius-sm); background: var(--surface-2); }
 .trending-item__poster--empty { display: flex; align-items: center; justify-content: center; }
 .trending-item__title { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.attach-dropzone--paste:focus { outline: 2px solid var(--accent); outline-offset: 2px; }

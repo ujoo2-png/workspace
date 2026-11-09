@@ -42,15 +42,28 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const upstream = await fetch(parsed.toString());
+    // v7.35.0: 많은 언론사/블로그 RSS가 User-Agent 없는 요청(서버리스 기본값)을 403/406으로 거절한다.
+    // 일반 브라우저처럼 보이는 헤더를 보내고, 응답이 없는 서버에 오래 매달리지 않도록 시간 제한(15초)을 둔다.
+    const upstream = await fetch(parsed.toString(), {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WorkSpaceFeedReader/1.0; +https://ejaeyoung.vercel.app) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, text/html;q=0.8, */*;q=0.5',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.7',
+      },
+    });
     const text = await upstream.text();
     res.status(upstream.status);
     // 응답 Content-Type을 최대한 그대로 전달해, 클라이언트가 JSON인지 아닌지 스스로 판단하게 한다.
     const contentType = upstream.headers.get('content-type');
     if (contentType) res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
+    // 성공 응답만 잠깐 캐시한다. 오류(403/429/5xx 등)를 5분간 캐시하면 서버가 풀려도 계속 실패로 보이기 때문.
+    res.setHeader('Cache-Control', upstream.ok ? 's-maxage=300, stale-while-revalidate=600' : 'no-store');
     res.send(text);
   } catch (e) {
-    res.status(502).json({ error: '대상 서버에 연결하지 못했습니다.' });
+    res.setHeader('Cache-Control', 'no-store');
+    const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    res.status(timedOut ? 504 : 502).json({ error: timedOut ? '대상 서버가 15초 안에 응답하지 않았습니다.' : '대상 서버에 연결하지 못했습니다.' });
   }
 };

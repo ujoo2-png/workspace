@@ -95,7 +95,7 @@ test('parseFeedXml: Atom(entry/link href/published/summary)', () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].title, 'Atom 글');
   assert.equal(items[0].link, 'https://b.com/x');
-  assert.equal(items[0].publishedAt, '2026-10-20T09:00:00Z');
+  assert.equal(items[0].publishedAt, '2026-10-20T09:00:00.000Z');
 });
 
 test('parseFeedXml: 엔티티(&amp;)를 해제한다', () => {
