@@ -37,6 +37,8 @@
 .cd-statusline.cd-dirty { color: var(--warning); font-weight: 700; }
 .cd-banner { border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; margin-bottom: 6px; }
 .cd-banner--warn { background: var(--warning-soft); border: 1px solid var(--warning); }
+.cd-banner--info { background: var(--bg-hover, rgba(80,120,255,.08)); border: 1px solid var(--border); }
+.career-colmgr-btn { white-space: nowrap; }
 .cd-banner--err { background: var(--danger-soft); border: 1px solid var(--danger); }
 .cd-options { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; }
 .cd-opt { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
