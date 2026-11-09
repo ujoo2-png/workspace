@@ -922,6 +922,153 @@
     return extra ? `${title} (${extra})` : title;
   }
 
+
+  // ------------------------------------------------------------------
+  // 7-2) 최신 정보 업데이트 (v7.35.0) — 양식 문서를 등록 데이터의 최신 상태로 맞춘다.
+  // ------------------------------------------------------------------
+  // 원칙: 사용자가 직접 고친 값은 함부로 덮어쓰지 않는다. 이를 위해 문서에 "기준값(sync)"을 함께 저장한다
+  // = 마지막으로 등록 데이터에서 자동으로 채운 값. 현재값이 기준값과 같으면 "손대지 않은 값"이므로 안전하게 갱신,
+  // 다르면 "직접 고친 값"이므로 충돌로 분류해 사용자가 고르게 한다.
+  const jstr = (v) => JSON.stringify(v == null ? null : v);
+  function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+
+  /** 등록 데이터의 지문. 문서에 저장된 지문과 다르면 "등록 데이터가 바뀌었다"는 뜻. */
+  function dataSignature(ds, defs) {
+    return hashStr(jstr({ b: ds.basic, l: ds.lists, p: (ds.photos || []).map((x) => x.id), d: defs || null }));
+  }
+
+  /** 현재 자동 계산 값을 기준값으로 만든다. initial = buildInitialValues() 결과. */
+  function makeBaseline(initial, sig) {
+    return { sig: sig || null, at: new Date().toISOString(), scalars: { ...(initial.scalars || {}) }, repeats: JSON.parse(jstr(initial.repeats || {})) };
+  }
+
+  /** 옛 분석(저장된 mapping)에 새 분석(양식 재분석 결과)을 합친다. 사용자가 고른 연결은 유지하고, 새로 맞춰진 칸만 채택한다. */
+  function mergeMapping(oldM, fresh) {
+    const added = { fields: [], cols: [] };
+    const oldF = new Map((oldM.fields || []).map((f) => [f.id, f]));
+    const fields = fresh.fields.map((nf) => {
+      const of = oldF.get(nf.id);
+      if (!of) { added.fields.push(nf.label || nf.id); return nf; }
+      if ((!of.source || of.source === 'none') && nf.source && nf.source !== 'none') { added.fields.push(nf.label || nf.id); return { ...of, source: nf.source, suggested: nf.suggested, confidence: nf.confidence }; }
+      return of;
+    });
+    for (const of of oldF.values()) if (!fields.some((f) => f.id === of.id)) fields.push(of); // 양식에서 사라진 칸도 일단 유지
+    const oldR = new Map((oldM.repeats || []).map((r) => [r.id, r]));
+    const repeats = fresh.repeats.map((nr) => {
+      const or = oldR.get(nr.id);
+      if (!or) { added.cols.push(`${nr.title}`); return nr; }
+      const cols = nr.cols.map((nc) => {
+        const oc = or.cols.find((x) => x.c === nc.c);
+        if (!oc) { added.cols.push(`${nr.title} · ${nc.label}`); return nc; }
+        if ((!oc.source || oc.source === 'none') && nc.source && nc.source !== 'none') { added.cols.push(`${nr.title} · ${nc.label}`); return { ...oc, source: nc.source, confidence: nc.confidence }; }
+        return oc;
+      });
+      return { ...or, cols, unmatched: nr.unmatched || [] };
+    });
+    for (const or of oldR.values()) if (!repeats.some((r) => r.id === or.id)) repeats.push(or);
+    return { fields, repeats, added };
+  }
+
+  /**
+   * @param {{mapping:object, values:object, ds:object, options:object, sig?:string}} a  mapping은 mergeMapping() 이후의 것
+   * @returns {{values, baseline, changes:string[], conflicts:object[], counts:{scalars:number, rows:number, cells:number}}}
+   */
+  function refreshValues({ mapping, values, ds, options, sig, oldMapping }) {
+    const fmt = options.dateFormat || CL.DEFAULT_DATE_FORMAT;
+    const base = values.sync || null;
+    const out = { scalars: { ...(values.scalars || {}) }, repeats: {}, photo: { ...(values.photo || {}) } };
+    const conflicts = [];
+    const counts = { scalars: 0, rows: 0, cells: 0 };
+    const baselineScalars = {};
+    const baselineRepeats = {};
+
+    // (a) 개별 항목
+    for (const f of mapping.fields) {
+      if (f.kind === 'photo') continue;
+      if (!f.source || f.source === 'none' || f.source === 'manual') continue;
+      const latest = resolveSource(ds, f.source, fmt);
+      baselineScalars[f.id] = latest;
+      const cur = out.scalars[f.id] == null ? '' : String(out.scalars[f.id]);
+      const b = base && base.scalars ? base.scalars[f.id] : undefined;
+      if (cur === latest) continue;
+      if (b !== undefined && b === latest) continue; // 등록 데이터가 안 바뀜 → 사용자가 고친 값 그대로 둠
+      if (b !== undefined ? cur === b : cur === '') { out.scalars[f.id] = latest; counts.scalars++; continue; }
+      conflicts.push({ kind: 'scalar', id: f.id, label: f.label || f.id, current: cur, latest });
+    }
+
+    // (b) 반복 표
+    for (const rep of mapping.repeats) {
+      const latestRows = repeatRows(ds, rep, fmt);
+      baselineRepeats[rep.id] = JSON.parse(jstr(latestRows));
+      const oldRep = oldMapping && (oldMapping.repeats || []).find((r) => r.id === rep.id);
+      const oldIdx = (c) => (oldRep ? oldRep.cols.findIndex((x) => x.c === c) : rep.cols.findIndex((x) => x.c === c));
+      const curRowsRaw = (values.repeats && values.repeats[rep.id]) || [];
+      // 열 구성이 바뀌었을 수 있어(새 컬럼 매칭) 현재 행을 새 열 순서로 옮긴다. 새 열은 undefined.
+      const curRows = curRowsRaw.map((r) => ({ src: r.src, cells: rep.cols.map((col) => { const j = oldIdx(col.c); return j >= 0 ? r.cells[j] : undefined; }) }));
+      const baseRowsRaw = base && base.repeats ? base.repeats[rep.id] : undefined;
+      const baseRows = baseRowsRaw ? baseRowsRaw.map((r) => ({ src: r.src, cells: rep.cols.map((col) => { const j = oldIdx(col.c); return j >= 0 ? r.cells[j] : undefined; }) })) : undefined;
+      const curBySrc = new Map(curRows.filter((r) => r.src).map((r) => [r.src, r]));
+      const baseBySrc = new Map((baseRows || []).filter((r) => r.src).map((r) => [r.src, r]));
+      const latestBySrc = new Map(latestRows.map((r) => [r.src, r]));
+      const merged = [];
+      for (const lr of latestRows) {
+        const cr = curBySrc.get(lr.src);
+        if (!cr) {
+          // 사용자가 일부러 뺀 행(기준값에는 있었는데 현재는 없음)은 되살리지 않는다.
+          if (baseBySrc.has(lr.src)) continue;
+          merged.push({ src: lr.src, cells: lr.cells.slice() }); counts.rows++; continue;
+        }
+        const br = baseBySrc.get(lr.src);
+        const cells = cr.cells.map((cv, i) => {
+          const lv = lr.cells[i];
+          const col = rep.cols[i];
+          if (col.source === 'seq') return lv; // 번호는 위치 기준 자동
+          if (col.source === 'manual' || col.source === 'none') return cv == null ? '' : cv;
+          const cur = cv == null ? '' : String(cv);
+          if (cur === lv) return cur;
+          const bv = br ? br.cells[i] : undefined;
+          if (bv !== undefined && bv === lv) return cur; // 데이터 안 바뀜 → 직접 고친 값 유지
+          if (bv !== undefined ? cur === bv : (cv === undefined || cur === '')) { counts.cells++; return lv; }
+          conflicts.push({ kind: 'cell', id: rep.id, src: lr.src, col: i, label: `${rep.title} ${merged.length + 1}행 · ${rep.cols[i].label || ''}`, current: cur, latest: lv });
+          return cur;
+        });
+        merged.push({ src: lr.src, cells });
+      }
+      // 등록 데이터에서 삭제된 기록의 행: 손대지 않았으면 빼고, 고쳐 둔 행은 남긴다.
+      for (const cr of curRows) {
+        if (!cr.src || latestBySrc.has(cr.src)) continue;
+        const br = baseBySrc.get(cr.src);
+        const untouched = br && jstr(br.cells.map((x) => x == null ? '' : x)) === jstr(cr.cells.map((x) => x == null ? '' : x));
+        if (untouched) { counts.rows++; continue; }
+        merged.push(cr);
+      }
+      // 직접 추가한 행(src 없음)은 맨 아래에 그대로 둔다.
+      for (const cr of curRows) if (!cr.src) merged.push({ src: null, cells: cr.cells.map((x) => (x == null ? '' : x)) });
+      // 번호(seq) 열 재계산
+      merged.forEach((r, i) => rep.cols.forEach((col, ci) => { if (col.source === 'seq') r.cells[ci] = String(i + 1); }));
+      out.repeats[rep.id] = merged;
+    }
+    for (const id of Object.keys(values.repeats || {})) if (!out.repeats[id]) out.repeats[id] = values.repeats[id];
+
+    const photoF = mapping.fields.find((f) => f.kind === 'photo');
+    if (photoF && photoF.source === 'photo' && !out.photo[photoF.id] && ds.photos.length) out.photo[photoF.id] = ds.photos[ds.photos.length - 1].id;
+
+    const changes = [];
+    if (counts.scalars) changes.push(`개별 항목 ${counts.scalars}개 갱신`);
+    if (counts.rows) changes.push(`표 행 ${counts.rows}건 추가/정리`);
+    if (counts.cells) changes.push(`표 칸 ${counts.cells}개 갱신`);
+    const baseline = { sig: sig || null, at: new Date().toISOString(), scalars: baselineScalars, repeats: baselineRepeats };
+    return { values: { ...out, sync: baseline }, baseline, changes, conflicts, counts };
+  }
+
+  /** 충돌 한 건을 최신 값으로 적용(사용자가 "최신으로 덮어쓰기"를 고른 경우). */
+  function applyConflict(values, c) {
+    if (c.kind === 'scalar') { values.scalars[c.id] = c.latest; return values; }
+    const row = (values.repeats[c.id] || []).find((r) => r.src === c.src);
+    if (row) row.cells[c.col] = c.latest;
+    return values;
+  }
+
   // ------------------------------------------------------------------
   // 8) 소스 선택지(UI 드롭다운용)
   // ------------------------------------------------------------------
@@ -966,7 +1113,7 @@
   const api = {
     registerCustom, builtinTerms, CATS, CAT_KEYS, BASIC_FIELDS, SUMMARY_FIELDS, normKey, lookupLabel, labelVariants, findTokens, resolveToken, inlineBlanks, scalarSourceOf,
     buildDocxModel, buildXlsxModel, paraText, analyze, detectHeaderRow, buildDataset, resolveSource, recordField, sourceKind, repeatRows, repeatRowFor, buildInitialValues,
-    reapplyOptions, unmatchedItems, summarizeRecord, sourceLabel, scalarSourceOptions, repeatSourceOptions, isBlankText, colLetter, locOf, confLevel, fieldDef,
+    reapplyOptions, dataSignature, makeBaseline, mergeMapping, refreshValues, applyConflict, unmatchedItems, summarizeRecord, sourceLabel, scalarSourceOptions, repeatSourceOptions, isBlankText, colLetter, locOf, confLevel, fieldDef,
   };
   globalThis.FormTemplate = api;
   if (typeof window !== 'undefined') window.FormTemplate = api;

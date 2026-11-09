@@ -47,8 +47,12 @@
       result = await appState.collectBriefingItems();
     } catch (e) {
       console.warn('브리핑 자동 수집 실패:', e);
+      settingsSet(LAST_RUN_KEY, ''); // v7.35.0: 완전히 실패한 날은 "오늘 수집함"으로 치지 않는다(다음 로그인/새로고침 때 다시 시도)
       return { ran: true, newCount: 0, reason: 'error' };
     }
+    // 모든 소스가 실패(또는 저장 실패)해서 한 건도 못 가져왔다면 같은 날 다시 시도할 수 있게 표시를 되돌린다.
+    const rep = result && result.report;
+    if (rep && rep.length && !result.newCount && rep.every((r) => r.error || r.failed)) settingsSet(LAST_RUN_KEY, '');
     const newCount = result?.newCount || 0;
     settingsSet(LAST_COUNT_KEY, String(newCount));
     if (newCount > 0) {

@@ -1145,10 +1145,12 @@
 
     // 활성화된 피드 소스를 전부 가져와 활성 주제와 매칭한 뒤, 새 항목만 저장한다.
     // (user_id, item_hash) 유니크 제약과 동일한 효과를 로컬에서는 Set으로 낸다.
+    // v7.35.0: ① 항목 하나의 저장 실패(예: 날짜 형식 → HTTP 400)가 수집 전체를 멈추지 않게 항목별로 처리하고,
+    //          ② 소스별 결과(가져옴/새로 저장/중복/주제 불일치/저장 실패)를 report로 돌려줘 "왜 안 됐는지"를 화면에 보여준다.
     async collectBriefingItems() {
-      const { fetchFeedItems, itemMatchesTopic, simpleHash, parseMarkdownLinks } = window;
+      const { fetchFeedItems, itemMatchesTopic, simpleHash, parseMarkdownLinks, normalizeFeedDate } = window;
       // 'markdown' 타입은 RSS 엔드포인트가 아니라 사용자가 붙여넣은 본문(endpoint 컬럼에 그대로 저장)
-      // 이므로 fetchFeedItems() 대신 parseMarkdownLinks()로 링크만 추출한다(아래 루프에서 분기).
+      // 이므로 fetchFeedItems() 대신 parseMarkdownLinks()로 링크만 추출한다.
       const sources = this.feedSources.filter((s) => s.enabled !== false && s.type !== 'crawl' && s.type !== 'api');
       const activeTopics = this.briefingTopics.filter((t) => t.active !== false);
       const existingHashes = new Set(this.briefingItems.map((i) => i.item_hash));
@@ -1156,52 +1158,68 @@
       let fetchedCount = 0;
       let newCount = 0;
       const errors = [];
+      const report = [];
+      const nowIso = () => new Date().toISOString();
+
+      // 저장 한 건. 실패하면 던지지 않고 사유를 돌려준다.
+      const saveItem = async (row, stat) => {
+        try {
+          await this.store.create('briefing_items', {
+            user_id: this.user.id,
+            ...row,
+            title: String(row.title || '(제목 없음)').slice(0, 500),
+            link: String(row.link || '').trim(),
+            summary: row.summary ? String(row.summary).slice(0, 1000) : null,
+            published_at: normalizeFeedDate ? normalizeFeedDate(row.published_at) : null,
+            is_read: false,
+          });
+          existingHashes.add(row.item_hash);
+          stat.added++; newCount++;
+        } catch (e) {
+          stat.failed++;
+          if (!stat.firstFailure) stat.firstFailure = String(e && e.message ? e.message : e).slice(0, 160);
+        }
+      };
 
       for (const source of sources) {
+        const stat = { name: source.name, kind: source.type === 'markdown' ? 'md' : 'feed', fetched: 0, added: 0, dup: 0, skippedTopic: 0, failed: 0, error: null, firstFailure: null };
+        report.push(stat);
         let items = [];
         try {
           items = source.type === 'markdown' ? (parseMarkdownLinks(source.endpoint) || []) : await fetchFeedItems(source.endpoint);
         } catch (e) {
+          stat.error = e.message;
           errors.push(`${source.name}: ${e.message}`);
           // 소스 관제(개발계획서 9.3): 시스템이 판단하는 상태(정상/오류/미실행)를 사용자 on/off와 분리해 기록한다.
-          await this.store.update('feed_sources', source.id, { last_result: 'error', last_run_at: new Date().toISOString() }).catch(() => {});
+          await this.store.update('feed_sources', source.id, { last_result: 'error', last_run_at: nowIso() }).catch(() => {});
           continue;
         }
-        // v7.24.0: 마크다운 소스가 0건이면 "왜"인지 알려준다. 예전에는 상태만 '불안정(0건)'으로
-        // 찍고 끝나서 사용자가 원인을 알 수 없었다(파싱이 안 되는 것처럼 보임).
+        // 마크다운 소스가 0건이면 "왜"인지 알려준다.
         if (source.type === 'markdown' && !items.length) {
           const body = String(source.endpoint || '');
           const hasHttp = /https?:\/\//i.test(body);
-          errors.push(`${source.name}: 링크를 찾지 못했습니다(${hasHttp ? '주소는 있지만 [제목](주소) 형식이 아닙니다' : '본문에 http(s) 주소가 없습니다'}).`);
+          stat.error = `링크를 찾지 못했습니다(${hasHttp ? '주소는 있지만 [제목](주소) 형식이 아닙니다' : '본문에 http(s) 주소가 없습니다'}).`;
+          errors.push(`${source.name}: ${stat.error}`);
         }
+        stat.fetched = items.length;
         fetchedCount += items.length;
-        await this.store
-          .update('feed_sources', source.id, { last_result: items.length ? 'success' : 'empty', last_run_at: new Date().toISOString() })
-          .catch(() => {});
         for (const item of items) {
           const hash = simpleHash(`${item.title}|${item.link}`);
-          if (existingHashes.has(hash)) continue;
+          if (existingHashes.has(hash)) { stat.dup++; continue; }
           // 실제 스키마의 unique(user_id, item_hash) 제약과 맞추기 위해 항목당 주제 하나만 매칭한다
           // (우선순위가 가장 높은=priority 숫자가 큰 주제 하나를 고른다).
           const matched = activeTopics.length
             ? activeTopics.filter((t) => itemMatchesTopic(item, t)).sort((a, b) => (b.priority || 0) - (a.priority || 0))[0]
             : undefined;
-          if (activeTopics.length && !matched) continue; // 주제가 있는데 아무것도 안 맞으면 스킵
-          await this.store.create('briefing_items', {
-            user_id: this.user.id,
-            topic_id: matched ? matched.id : null,
-            source_id: source.id,
-            title: item.title,
-            link: item.link,
-            summary: item.summary,
-            published_at: item.publishedAt,
-            item_hash: hash,
-            is_read: false,
-          });
-          existingHashes.add(hash);
-          newCount++;
+          if (activeTopics.length && !matched) { stat.skippedTopic++; continue; } // 주제가 있는데 아무것도 안 맞으면 스킵
+          await saveItem({ topic_id: matched ? matched.id : null, source_id: source.id, title: item.title, link: item.link, summary: item.summary, published_at: item.publishedAt, item_hash: hash }, stat);
         }
+        // 한 건도 못 저장했는데 실패가 있었다면 "성공"으로 기록하지 않는다.
+        const result = stat.failed && !stat.added ? 'error' : (items.length ? 'success' : 'empty');
+        await this.store.update('feed_sources', source.id, { last_result: result, last_run_at: nowIso() }).catch(() => {});
+        if (stat.failed) errors.push(`${source.name}: ${stat.failed}건 저장 실패(${stat.firstFailure})`);
       }
+
       // 간편 설정 주제(사이트/검색어를 등록한 주제)는 피드 소스를 따로 만들지 않아도 자기 검색 주소로 직접 수집한다.
       const MAX_TOTAL_TOPIC_FEEDS = 30;
       let budget = MAX_TOTAL_TOPIC_FEEDS;
@@ -1211,26 +1229,25 @@
         budget -= feeds.length;
         for (let i = 0; i < feeds.length; i += 3) {
           const batch = feeds.slice(i, i + 3);
-          const results = await Promise.all(batch.map((f) => fetchFeedItems(f.url).then((items) => ({ f, items }), (e) => ({ f, error: e }))));
+          const results = await Promise.all(batch.map((f) => fetchFeedItems(f.url).then((its) => ({ f, items: its }), (e) => ({ f, error: e }))));
           for (const r of results) {
-            if (r.error) { errors.push(`${topic.name} · ${r.f.label}: ${r.error.message}`); continue; }
+            const stat = { name: `${topic.name} · ${r.f.label}`, kind: 'topic', fetched: 0, added: 0, dup: 0, skippedTopic: 0, failed: 0, error: null, firstFailure: null };
+            report.push(stat);
+            if (r.error) { stat.error = r.error.message; errors.push(`${topic.name} · ${r.f.label}: ${r.error.message}`); continue; }
+            stat.fetched = r.items.length;
             fetchedCount += r.items.length;
             for (const item of r.items) {
-              if (window.itemHasExcluded(item, topic)) continue;
+              if (window.itemHasExcluded(item, topic)) { stat.skippedTopic++; continue; }
               const hash = simpleHash(`${item.title}|${item.link}`);
-              if (existingHashes.has(hash)) continue;
-              await this.store.create('briefing_items', {
-                user_id: this.user.id, topic_id: topic.id, source_id: null,
-                title: item.title, link: item.link, summary: item.summary, published_at: item.publishedAt, item_hash: hash, is_read: false,
-              });
-              existingHashes.add(hash);
-              newCount++;
+              if (existingHashes.has(hash)) { stat.dup++; continue; }
+              await saveItem({ topic_id: topic.id, source_id: null, title: item.title, link: item.link, summary: item.summary, published_at: item.publishedAt, item_hash: hash }, stat);
             }
+            if (stat.failed) errors.push(`${stat.name}: ${stat.failed}건 저장 실패(${stat.firstFailure})`);
           }
         }
       }
       await this.refreshAll();
-      return { fetchedCount, newCount, errors };
+      return { fetchedCount, newCount, errors, report };
     }
 
     // ---- Knowledge ----

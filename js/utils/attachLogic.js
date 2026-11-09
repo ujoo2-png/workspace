@@ -40,6 +40,34 @@
     return new Blob([bytes], { type: mime });
   }
 
+  // v7.35.0: 캡처 화면 붙여넣기 — 순수 헬퍼(테스트 가능)
+  const EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp' };
+  /** 캡처_20261109_142930.png 형태의 파일명. 같은 초에 여러 장이면 index로 구분. */
+  function captureFileName(now, mime, index) {
+    const d = now instanceof Date ? now : new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    return `캡처_${stamp}${index ? `_${index + 1}` : ''}.${EXT_BY_MIME[mime] || 'png'}`;
+  }
+  /** 붙여넣기 이벤트/클립보드에서 이미지 Blob만 추린다. items: DataTransferItemList 또는 [{type, getAsFile}] */
+  function imageFilesFromItems(items) {
+    const out = [];
+    for (const it of Array.from(items || [])) {
+      if (it && it.kind !== 'string' && /^image\//.test(it.type || '')) {
+        const f = typeof it.getAsFile === 'function' ? it.getAsFile() : null;
+        if (f) out.push(f);
+      }
+    }
+    return out;
+  }
+  /** 이미지 Blob들을 의미 있는 이름의 File로 바꾼다(클립보드 이미지는 보통 "image.png"라 구분이 안 된다). */
+  function namedCaptureFiles(blobs, now) {
+    return blobs.map((b, i) => new File([b], captureFileName(now, b.type, blobs.length > 1 ? i : 0), { type: b.type || 'image/png' }));
+  }
+
+  window.captureFileName = captureFileName;
+  window.imageFilesFromItems = imageFilesFromItems;
+  window.namedCaptureFiles = namedCaptureFiles;
   window.ATTACH_LIMITS = ATTACH_LIMITS;
   window.attachmentLimit = attachmentLimit;
   window.formatBytes = formatBytes;

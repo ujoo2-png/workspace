@@ -29,6 +29,91 @@
     return btn;
   }
 
+
+  // ---- v7.35.0: 캡처한 화면 붙여넣기 / 화면 캡처 (모든 메뉴 공통 — 이 컴포넌트를 쓰는 곳은 자동 적용) ----
+  // 1) Ctrl+V: Win+Shift+S, PrtSc, 맥의 ⌘⇧4(Ctrl 추가) 등으로 클립보드에 복사한 이미지를 그대로 붙여넣는다.
+  // 2) 📋 붙여넣기 버튼: 클립보드의 이미지를 읽는다(브라우저가 권한을 물을 수 있음).
+  // 3) 🖥 화면 캡처 버튼: 브라우저의 화면 공유 선택창에서 탭/창/화면을 고르면 한 장을 찍어 담는다(PC 브라우저, https 필요).
+  const livePanels = []; // 붙여넣기 대상 후보(가장 나중에 그려진 살아있는 패널이 받는다)
+  let pasteBound = false;
+  function isTextTarget(t) {
+    if (!t || !t.tagName) return false;
+    const tag = t.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || t.isContentEditable === true;
+  }
+  function bindDocumentPaste() {
+    if (pasteBound) return;
+    pasteBound = true;
+    document.addEventListener('paste', (e) => {
+      const files = window.imageFilesFromItems(e.clipboardData && e.clipboardData.items);
+      if (!files.length) return; // 텍스트 붙여넣기는 건드리지 않는다
+      for (let i = livePanels.length - 1; i >= 0; i--) if (!livePanels[i].container.isConnected) livePanels.splice(i, 1);
+      const target = livePanels[livePanels.length - 1];
+      if (!target) return;
+      // 글자 입력칸에 붙여넣는 중이면(이미지가 같이 있어도) 방해하지 않는다. 단, 첨부 영역 안에서는 항상 가로챈다.
+      if (isTextTarget(e.target) && !target.container.contains(e.target)) return;
+      e.preventDefault();
+      target.onFiles(window.namedCaptureFiles(files, new Date()));
+    });
+  }
+  async function readClipboardImages() {
+    if (!navigator.clipboard || !navigator.clipboard.read) throw new Error('이 브라우저는 버튼으로 클립보드를 읽을 수 없습니다. 이미지를 복사한 뒤 이 영역을 클릭하고 Ctrl+V를 눌러 주세요.');
+    const items = await navigator.clipboard.read();
+    const blobs = [];
+    for (const it of items) {
+      const type = it.types.find((t) => /^image\//.test(t));
+      if (type) blobs.push(await it.getType(type));
+    }
+    if (!blobs.length) throw new Error('클립보드에 이미지가 없습니다. 화면 캡처(Win+Shift+S 등)를 한 뒤 다시 눌러 주세요.');
+    return window.namedCaptureFiles(blobs, new Date());
+  }
+  async function captureScreenFile() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) throw new Error('이 브라우저/기기에서는 화면 캡처를 지원하지 않습니다. 캡처 후 Ctrl+V로 붙여넣어 주세요.');
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false, preferCurrentTab: false });
+    try {
+      const video = document.createElement('video');
+      video.srcObject = stream; video.muted = true;
+      await video.play();
+      await new Promise((r) => setTimeout(r, 350)); // 첫 프레임이 그려질 때까지 잠깐 대기
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('캡처 이미지를 만들지 못했습니다.');
+      return window.namedCaptureFiles([blob], new Date())[0];
+    } finally {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+  }
+  /** 첨부 영역 하나에 붙여넣기/캡처 기능을 붙인다. onFiles(File[])로 결과를 넘긴다. 반환: 버튼들. */
+  function attachCaptureTools(container, dropzone, onFiles) {
+    bindDocumentPaste();
+    livePanels.push({ container, onFiles });
+    dropzone.setAttribute('tabindex', '0');
+    dropzone.classList.add('attach-dropzone--paste');
+    dropzone.addEventListener('paste', (e) => {
+      const files = window.imageFilesFromItems(e.clipboardData && e.clipboardData.items);
+      if (!files.length) return;
+      e.preventDefault(); e.stopPropagation();
+      onFiles(window.namedCaptureFiles(files, new Date()));
+    });
+    const wrap = (fn, busyText, btn) => async () => {
+      const label = btn.textContent; btn.disabled = true; btn.textContent = busyText;
+      try { const r = await fn(); onFiles(Array.isArray(r) ? r : [r]); }
+      catch (err) { if (err && err.name === 'NotAllowedError') toast('권한이 거부되었습니다. 브라우저 주소창의 권한 설정을 확인하거나 Ctrl+V로 붙여넣어 주세요.', 'error'); else toast(err.message || '실패했습니다.', 'error'); }
+      finally { btn.disabled = false; btn.textContent = label; }
+    };
+    const pasteBtn = el('button', { type: 'button', class: 'nm-btn attach-paste-btn', title: '복사해 둔 캡처 이미지를 붙여넣기 (Ctrl+V도 됩니다)' }, '📋 붙여넣기');
+    pasteBtn.onclick = wrap(readClipboardImages, '⏳ 읽는 중…', pasteBtn);
+    const btns = [pasteBtn];
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+      const capBtn = el('button', { type: 'button', class: 'nm-btn attach-capture-btn', title: '화면/창/탭을 골라 지금 모습을 한 장 찍어 첨부합니다' }, '🖥 화면 캡처');
+      capBtn.onclick = wrap(captureScreenFile, '⏳ 캡처 중…', capBtn);
+      btns.push(capBtn);
+    }
+    return btns;
+  }
+
   // container 안에 첨부 목록 + 업로드 버튼을 그려넣는다. ownerTable/ownerId 레코드가 바뀌거나
   // appState가 change 이벤트를 낼 때마다 다시 그리도록 호출부에서 redraw()를 다시 불러도 된다.
   function renderAttachmentsPanel(container, ownerTable, ownerId) {
@@ -96,7 +181,7 @@
     // 되도록 해 줘" 요청). 파일 탐색기에서 드래그해온 파일을 dropzone 위에 놓으면
     // 클릭 업로드와 동일하게 addAttachment()가 호출된다.
     const dropzone = el('div', { class: 'attach-dropzone' }, [
-      el('span', { class: 'text-muted', style: 'font-size:12px' }, `여기로 파일을 드래그하거나, 버튼으로 추가하세요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
+      el('span', { class: 'text-muted', style: 'font-size:12px' }, `여기로 파일을 드래그하거나, 버튼으로 추가하세요. 캡처한 화면은 Ctrl+V로 바로 붙여넣을 수 있어요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
     ]);
     let dragCounter = 0;
     dropzone.addEventListener('dragenter', (e) => {
@@ -121,8 +206,9 @@
       await handleFiles(files);
     });
 
+    const captureBtns = attachCaptureTools(container, dropzone, handleFiles);
     container.append(
-      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px' }, [addBtn, limitNote, fileInput]),
+      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap' }, [addBtn, ...captureBtns, limitNote, fileInput]),
       dropzone,
       list
     );
@@ -177,7 +263,7 @@
     fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
     const addBtn = el('button', { type: 'button', class: 'nm-btn', onclick: () => fileInput.click() }, '+ 파일 담기');
     const dropzone = el('div', { class: 'attach-dropzone' }, [
-      el('span', { class: 'text-muted', style: 'font-size:12px' }, `저장 전에 여기로 파일을 드래그하거나 버튼으로 담으세요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
+      el('span', { class: 'text-muted', style: 'font-size:12px' }, `저장 전에 여기로 파일을 드래그하거나 버튼으로 담으세요. 캡처한 화면은 Ctrl+V로 붙여넣을 수 있어요 (파일당 ${window.attachmentLimitLabel(ownerTable)})`),
     ]);
     let dragCounter = 0;
     dropzone.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropzone.classList.add('attach-dropzone--active'); });
@@ -185,8 +271,9 @@
     dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter = Math.max(0, dragCounter - 1); if (dragCounter === 0) dropzone.classList.remove('attach-dropzone--active'); });
     dropzone.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropzone.classList.remove('attach-dropzone--active'); addFiles(e.dataTransfer?.files); });
 
+    const captureBtns = attachCaptureTools(container, dropzone, addFiles);
     container.append(
-      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px' }, [addBtn, fileInput]),
+      el('div', { class: 'row', style: 'gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap' }, [addBtn, ...captureBtns, fileInput]),
       dropzone,
       list
     );

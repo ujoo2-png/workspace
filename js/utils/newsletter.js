@@ -4,7 +4,8 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const safeHref = (u) => { try { const x = new URL(String(u || '')); return /^https?:$/.test(x.protocol) ? x.href : '#'; } catch { return '#'; } };
   const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
-  const ts = (it) => { const t = Date.parse(it.published_at || ''); return Number.isNaN(t) ? 0 : t; };
+  // 발행일을 읽을 수 없는 항목(마크다운·날짜 없는 피드)은 수집일로 대신해 "오래된 항목"으로 밀려나지 않게 한다.
+  const ts = (it) => { const t = Date.parse(it.published_at || it.created_at || ''); return Number.isNaN(t) ? 0 : t; };
   const WD = ['일', '월', '화', '수', '목', '금', '토'];
   function dateLabel(d) { return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WD[d.getDay()]})`; }
 

@@ -146,18 +146,20 @@
         el('th', {}, '첨부'), el('th', {}, '작업'),
       ])]));
       const tbody = el('tbody', {});
+      const sigNow = currentSig();
       rows.forEach((d, idx) => {
         const attCount = appState.getAttachments(TABLE, d.id).length;
         tbody.append(el('tr', { dataset: { id: d.id } }, [
           el('td', {}, [el('input', { type: 'checkbox', checked: ui.selected.has(d.id) || undefined, onchange: (e) => { if (e.target.checked) ui.selected.add(d.id); else ui.selected.delete(d.id); drawList(); } })]),
           el('td', {}, String(idx + 1)),
-          el('td', { style: 'cursor:pointer', onclick: () => openEditorFor(d) }, [el('strong', {}, d.title || '(제목 없음)')]),
+          el('td', { style: 'cursor:pointer', onclick: () => openEditorFor(d) }, [el('strong', {}, d.title || '(제목 없음)'), isStale(d, sigNow) ? el('span', { class: 'nm-badge nm-badge--warning cd-stale-badge', style: 'margin-left:6px', title: '이력/경력 등록 내용이 이 문서를 마지막으로 맞춘 뒤 바뀌었습니다' }, '🔔 데이터 변경됨') : null]),
           el('td', {}, [el('span', { class: `cd-kind cd-kind--${d.template_kind}`, title: d.template_kind }, `${KIND_ICON[d.template_kind] || '📄'} ${d.template_kind}`), ' ', el('span', { class: 'cd-tname' }, d.template_name)]),
           el('td', {}, [el('span', { class: `cd-badge cd-badge--${d.status}` }, STATUS_LABEL[d.status] || d.status)]),
           el('td', {}, fmtDT(d.updated_at || d.created_at)),
           el('td', {}, [el('button', { class: 'nm-btn nm-btn--icon', title: '첨부파일(양식 원본·최종본)', onclick: () => window.openAttachmentsModal(TABLE, d.id, d.title) }, attCount ? `📎${attCount}` : '📎')]),
           el('td', {}, [el('div', { class: 'icon-row' }, [
             el('button', { class: 'nm-btn nm-btn--icon cd-act-edit', title: '편집', onclick: () => openEditorFor(d) }, '✎'),
+            el('button', { class: 'nm-btn nm-btn--icon cd-act-refresh', title: '최신 정보로 업데이트(이력/경력의 새 등록·수정·컬럼을 반영, 직접 고친 값은 보존)', onclick: (e) => refreshFromList(d, e.currentTarget) }, '🔄'),
             el('button', { class: 'nm-btn nm-btn--icon cd-act-download', title: d.finals && d.finals.length ? '최종본 다운로드' : '현재 저장된 값으로 파일 만들어 다운로드', onclick: (e) => downloadDoc(d, e.currentTarget) }, '⬇'),
             el('button', { class: 'nm-btn nm-btn--icon cd-act-dup', title: '복제(다른 회사 양식 등으로 새 임시저장 문서 만들기)', onclick: async () => { try { await appState.duplicateCareerDocument(d.id); toast('복제했습니다(임시저장).', 'success'); } catch (e) { toast(`복제 실패: ${e.message || e}`, 'error'); } } }, '⧉'),
             el('button', { class: 'nm-btn nm-btn--icon nm-btn--danger cd-act-delete', title: '삭제', onclick: async () => { if (!confirmDialog(`"${d.title}" 문서를 삭제할까요? (양식 원본과 최종본 파일도 함께 삭제됩니다)`)) return; try { await appState.deleteCareerDocuments([d.id]); toast('삭제했습니다.', 'success'); } catch (e) { toast(`삭제 실패: ${e.message || e}`, 'error'); } } }, '🗑'),
@@ -296,15 +298,79 @@
     function findRec(cat, id) { return (appState.career[cat] || []).find((r) => r.id === id) || null; }
     const defaultOptions = () => ({ dateFormat: CL.DEFAULT_DATE_FORMAT, order: 'asc', addRows: true });
 
+    // ---- v7.35.0 최신 정보 업데이트 ----
+    // 등록 데이터의 지문(정렬 순서와 무관하게 항상 오름차순 기준). 문서에 저장된 지문과 다르면 "등록 데이터가 바뀜".
+    function currentSig() { registerCols(); return FT.dataSignature(datasetFor({ order: 'asc' }), window.CareerCols ? window.CareerCols.load() : null); }
+    function isStale(d, sigNow) { const sy = d && d.field_values && d.field_values.sync; return !!(sy && sy.sig && sy.sig !== sigNow); }
+    /** 양식 원본을 다시 분석해 새로 맞춰진 칸을 합치고, 직접 고친 값은 보존한 채 등록 데이터의 최신 값을 반영한다. */
+    async function computeRefresh({ kind, bytes, mapping, values }) {
+      registerCols();
+      const options = { ...defaultOptions(), ...(mapping.options || {}) };
+      const ds = datasetFor(options);
+      let merged = { fields: mapping.fields || [], repeats: mapping.repeats || [], added: { fields: [], cols: [] } };
+      let warnings = mapping.warnings || [];
+      if (bytes) {
+        const res = await FE.analyzeTemplate(bytes, kind);
+        merged = FT.mergeMapping(mapping, res.analysis);
+        warnings = res.warnings || warnings;
+      }
+      const newMapping = { ...mapping, options, fields: merged.fields, repeats: merged.repeats, warnings };
+      const r = FT.refreshValues({ mapping: newMapping, values: { scalars: {}, repeats: {}, photo: {}, ...values }, ds, options, sig: currentSig(), oldMapping: mapping });
+      return { mapping: newMapping, ds, added: merged.added, ...r };
+    }
+    function refreshSummary(r) {
+      const parts = [...r.changes];
+      if (r.added.fields.length || r.added.cols.length) parts.push(`새로 맞춰진 칸 ${r.added.fields.length + r.added.cols.length}개`);
+      if (r.conflicts.length) parts.push(`직접 고친 값과 충돌 ${r.conflicts.length}건(확인 필요)`);
+      return parts;
+    }
+    /** 충돌 목록을 보여주고, 고른 항목만 최신 값으로 덮어쓴다. onDone(values)로 결과 전달. */
+    function openConflictModal(conflicts, values, onDone) {
+      openModal({
+        title: '⚠ 직접 고친 값과 최신 등록 데이터가 다릅니다', width: '640px',
+        contentBuilder(body, closeModal) {
+          const picks = conflicts.map(() => false);
+          body.append(el('p', { class: 'text-muted', style: 'font-size:13px' }, '직접 고친 값은 기본으로 유지됩니다. 등록 데이터의 최신 값으로 바꾸려는 항목만 체크하세요.'));
+          const list = el('div', { class: 'cd-conflicts', style: 'max-height:50vh; overflow:auto' });
+          conflicts.forEach((c, i) => list.append(el('label', { class: 'item-row cd-conflict', style: 'display:block; cursor:pointer; padding:6px 0' }, [
+            el('input', { type: 'checkbox', class: 'cd-conflict-pick', onchange: (e) => { picks[i] = e.target.checked; } }), ' ',
+            el('strong', {}, c.label), el('div', { class: 'text-muted', style: 'font-size:12px; margin-left:22px' }, `내가 고친 값: ${c.current || '(빈칸)'}  →  최신 등록 값: ${c.latest || '(빈칸)'}`),
+          ])));
+          body.append(list, el('div', { class: 'row', style: 'gap:8px; margin-top:12px; flex-wrap:wrap' }, [
+            el('button', { class: 'nm-btn nm-btn--primary cd-conflict-apply', onclick: () => { conflicts.forEach((c, i) => { if (picks[i]) FT.applyConflict(values, c); }); closeModal(); onDone(values, picks.filter(Boolean).length); } }, '선택한 항목만 최신으로'),
+            el('button', { class: 'nm-btn cd-conflict-all', onclick: () => { conflicts.forEach((c) => FT.applyConflict(values, c)); closeModal(); onDone(values, conflicts.length); } }, '모두 최신으로'),
+            el('button', { class: 'nm-btn cd-conflict-keep', onclick: () => { closeModal(); onDone(values, 0); } }, '모두 내 값 유지'),
+          ]));
+        },
+      });
+    }
+    /** 목록에서의 원클릭: 문서를 열지 않고 갱신해 임시저장한다. 충돌이 있으면 편집 화면에서 확인하도록 연다. */
+    async function refreshFromList(d, btn) {
+      if (btn) btn.disabled = true;
+      try {
+        let bytes = null;
+        if (d.template_attachment_id) { try { bytes = await attachmentBytes(d.template_attachment_id); } catch (e) { /* 원본 없이도 값은 갱신 */ } }
+        const mapping = d.mapping && d.mapping.fields ? JSON.parse(JSON.stringify(d.mapping)) : null;
+        const values = d.field_values && d.field_values.scalars ? JSON.parse(JSON.stringify(d.field_values)) : null;
+        if (!mapping || !values) { await openEditorFor(d, { autoRefresh: true }); return; }
+        const r = await computeRefresh({ kind: d.template_kind, bytes, mapping, values });
+        if (r.conflicts.length) { await openEditorFor(d, { autoRefresh: true }); return; }
+        const parts = refreshSummary(r);
+        await appState.updateCareerDocument(d.id, { mapping: r.mapping, field_values: r.values, status: parts.length && d.status === 'saved' ? 'draft' : d.status });
+        toast(parts.length ? `최신으로 업데이트했습니다: ${parts.join(', ')}.${d.status === 'saved' ? ' 최종본 파일은 편집 화면에서 "저장"하면 새로 만들어집니다.' : ''}` : '이미 최신 상태입니다.', 'success');
+      } catch (e) { toast(`업데이트 실패: ${e.message || e}`, 'error'); } finally { if (btn) btn.disabled = false; }
+    }
+
     function openEditorNew({ title, name, kind, bytes, analysis, warnings, stats, fromDoc }) {
       const options = defaultOptions();
       const ds = datasetFor(options);
       const mapping = { version: 1, kind, fields: analysis.fields, repeats: analysis.repeats, options, warnings, stats };
       const values = FT.buildInitialValues(analysis, ds, options);
+      values.sync = FT.makeBaseline(values, currentSig());
       openEditor({ doc: null, title, name, kind, bytes, mapping, values, fromDoc });
     }
 
-    async function openEditorFor(doc) {
+    async function openEditorFor(doc, opts = {}) {
       let bytes = null;
       if (doc.template_attachment_id) {
         try { bytes = await attachmentBytes(doc.template_attachment_id); } catch (e) { toast(`양식 원본을 불러오지 못했습니다: ${e.message || e}`, 'error'); }
@@ -318,12 +384,13 @@
           const options = (mapping && mapping.options) || defaultOptions();
           mapping = { version: 1, kind: doc.template_kind, fields: analysis.fields, repeats: analysis.repeats, options, warnings };
           values = FT.buildInitialValues(analysis, datasetFor(options), options);
+          values.sync = FT.makeBaseline(values, currentSig());
         } catch (e) { toast(`양식을 분석하지 못했습니다: ${e.message || e}`, 'error'); return; }
       }
       if (!mapping) mapping = { version: 1, kind: doc.template_kind, fields: [], repeats: [], options: defaultOptions(), warnings: [] };
       if (!values) values = { scalars: {}, repeats: {}, photo: {} };
       values.photo = values.photo || {};
-      openEditor({ doc, title: doc.title, name: doc.template_name, kind: doc.template_kind, bytes, mapping, values });
+      openEditor({ doc, title: doc.title, name: doc.template_name, kind: doc.template_kind, bytes, mapping, values, autoRefresh: !!opts.autoRefresh });
     }
 
     function openEditor(init) {
@@ -351,6 +418,7 @@
       let previewTimer = null;
       let sheetIdx = 0;
       let lastSheets = [];
+      let lastStale = null;
 
       const snapshot = () => JSON.stringify([S.title, S.mapping.options, S.mapping.fields.map((f) => f.source), S.mapping.repeats.map((r) => r.cols.map((c) => c.source)), S.values]);
       if (S.docId) S.saved = snapshot();
@@ -385,6 +453,7 @@
       const badge = el('span', { class: 'cd-badge' });
       const btnDraft = el('button', { class: 'nm-btn cd-save-draft', onclick: () => persist({ final: false }) }, '💾 임시저장');
       const btnFinal = el('button', { class: 'nm-btn nm-btn--primary cd-save-final', onclick: () => persist({ final: true }) }, '✅ 저장 (최종본 만들기)');
+      const btnRefresh = el('button', { class: 'nm-btn cd-refresh', title: '이력/경력에 새로 등록·수정한 내용(컬럼 추가 포함)을 다시 읽어 이 문서에 반영합니다. 직접 고친 값은 덮어쓰기 전에 물어봅니다.', onclick: () => doRefresh() }, '🔄 최신 정보로 업데이트');
       const btnDl = el('button', { class: 'nm-btn cd-download-now', title: '지금 화면의 값으로 파일을 만들어 받습니다(저장하지 않음)', onclick: () => downloadNow() }, '⬇ 지금 상태 받기');
       const btnHwpx = el('button', { class: 'nm-btn cd-download-hwpx hidden', title: '한글(.hwpx) 양식으로 올린 문서를 같은 .hwpx 파일로 받습니다(표 안의 값만 되씀)', onclick: () => downloadHwpx() }, '⬇ 한글(.hwpx)로 받기');
       async function detectHwpx() {
@@ -403,7 +472,7 @@
         el('button', { class: 'nm-btn cd-back', onclick: () => requestClose() }, '← 목록'),
         el('div', { class: 'cd-title-wrap' }, [window.nmField('문서 제목', titleInput, { required: true })]),
         el('div', { class: 'cd-top-meta' }, [el('span', { class: 'cd-kind' }, `${KIND_ICON[S.kind]} ${S.name}`), badge, statusLine]),
-        el('div', { class: 'cd-top-actions' }, [btnDraft, btnFinal, btnDl, btnHwpx]),
+        el('div', { class: 'cd-top-actions' }, [btnRefresh, btnDraft, btnFinal, btnDl, btnHwpx]),
       );
       detectHwpx();
       function updateStatusLine() {
@@ -456,11 +525,45 @@
         }
       }
 
+      // ---- v7.35.0 최신 정보 업데이트 ----
+      async function doRefresh() {
+        btnRefresh.disabled = true;
+        const prevLabel = btnRefresh.textContent; btnRefresh.textContent = '⏳ 확인 중…';
+        try {
+          const r = await computeRefresh({ kind: S.kind, bytes: S.bytes, mapping: S.mapping, values: S.values });
+          const parts = refreshSummary(r);
+          const apply = (values, overwritten) => {
+            S.mapping = r.mapping; S.values = values; ds = datasetFor(S.mapping.options);
+            drawBanners(); drawOptions(); drawMatching(); setTouched();
+            const done = [...r.changes];
+            if (r.added.fields.length || r.added.cols.length) done.push(`새로 맞춰진 칸 ${r.added.fields.length + r.added.cols.length}개`);
+            if (overwritten) done.push(`충돌 ${overwritten}건 최신으로 덮어씀`);
+            toast(done.length ? `최신으로 업데이트했습니다: ${done.join(', ')}.` : '변경 없음 — 직접 고친 값은 그대로 두었습니다.', 'success');
+          };
+          if (!parts.length) {
+            // 바뀐 것이 없어도 지문(sig)은 맞춰 둔다 → "등록 데이터 변경됨" 표시가 사라진다.
+            if (!S.values.sync || S.values.sync.sig !== r.baseline.sig) { S.values.sync = r.baseline; drawBanners(); setTouched(); }
+            toast('이미 최신 상태입니다.', 'success');
+          } else if (r.conflicts.length) {
+            openConflictModal(r.conflicts, r.values, apply);
+          } else {
+            apply(r.values, 0);
+          }
+        } catch (e) { toast(`업데이트 실패: ${e.message || e}`, 'error'); } finally { btnRefresh.disabled = false; btnRefresh.textContent = prevLabel; }
+      }
+      function rebaseline() { S.values.sync = FT.makeBaseline(FT.buildInitialValues({ fields: S.mapping.fields, repeats: S.mapping.repeats }, ds, S.mapping.options), currentSig()); }
+
       // ---- 배너(경고) ----
       function drawBanners() {
         banners.innerHTML = '';
         for (const w of S.mapping.warnings || []) banners.append(el('div', { class: 'cd-banner cd-banner--warn' }, `⚠ ${w}`));
         drawCustomColBanners();
+        if (S.docId && isStale({ field_values: S.values }, currentSig())) {
+          banners.append(el('div', { class: 'cd-banner cd-banner--info cd-stale' }, [
+            '🔔 이력/경력에 등록한 내용이 이 문서를 마지막으로 맞춘 뒤 바뀌었습니다. ',
+            el('button', { class: 'nm-btn cd-stale-btn', style: 'padding:2px 10px; font-size:12px', onclick: () => doRefresh() }, '지금 업데이트'),
+          ]));
+        }
         if (!S.bytes) {
           const fi = el('input', { type: 'file', class: 'hidden' });
           fi.addEventListener('change', async () => {
@@ -521,6 +624,7 @@
             });
           });
         }
+        rebaseline();
         setTouched();
         drawMatching();
       }
@@ -544,6 +648,7 @@
         // 개별 필드 중 #N 번호로 연결된 것은 새 순서로 다시 계산(손대지 않은 값만)
         S.values = FT.reapplyOptions({ fields: S.mapping.fields, repeats: S.mapping.repeats }, ds, { ...prev }, { ...S.mapping.options }, S.values);
         for (const f of S.mapping.fields) if (f.kind !== 'photo' && /^[a-z]+\.\d+\./.test(f.source) && !S.values.scalars[f.id]) S.values.scalars[f.id] = FT.resolveSource(ds, f.source, S.mapping.options.dateFormat);
+        rebaseline();
         setTouched();
         drawMatching();
       }
@@ -555,6 +660,7 @@
           ds = datasetFor(S.mapping.options);
           S.mapping.fields = analysis.fields; S.mapping.repeats = analysis.repeats; S.mapping.warnings = warnings;
           S.values = FT.buildInitialValues(analysis, ds, S.mapping.options);
+          rebaseline();
           drawBanners(); drawMatching(); setTouched();
           toast('다시 매칭했습니다.', 'success');
         } catch (e) { toast(`다시 매칭 실패: ${e.message || e}`, 'error'); }
@@ -937,11 +1043,12 @@
       editor = {
         // 화면 이동 등으로 정리될 때: 변경이 있으면 조용히 임시저장
         async destroy() { if (isDirty() && S.title.trim()) { try { await persist({ final: false, silent: true }); } catch (e) { /* noop */ } } clearInterval(autosaveTimer); clearTimeout(previewTimer); window.removeEventListener('beforeunload', onBeforeUnload); },
-        onChange() { updateStatusLine(); drawFinals(); },
+        onChange() { updateStatusLine(); drawFinals(); const st = !!(S.docId && isStale({ field_values: S.values }, currentSig())); if (st !== lastStale) { lastStale = st; drawBanners(); } },
         isDirty,
       };
 
       drawBanners(); drawOptions(); drawMatching(); drawFinals(); drawAttach(); updateStatusLine();
+      if (init.autoRefresh) doRefresh();
       autosaveTimer = setInterval(() => { if (isDirty() && !S.saving && S.title.trim()) persist({ final: false, silent: true }); }, AUTOSAVE_MS);
       schedulePreview(true);
       root.scrollIntoView && root.scrollIntoView({ block: 'start' });

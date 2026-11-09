@@ -10,8 +10,11 @@
     root.append(container);
     let tab = 'news'; // news | items | topics | sources
     let collecting = false;
+    let lastReport = null; // 가장 최근 수집 결과(소스별) — [수집 결과] 버튼으로 다시 볼 수 있다
     // 브리핑 목록 일괄 선택 상태(v7.24.0). 항목 id 집합으로 관리해 화면을 다시 그려도 유지된다.
     const selectedIds = new Set();
+    // v7.35.0 브리핑 목록 검색 조건(화면을 다시 그려도 유지)
+    const flt = { q: '', scope: 'all', from: '', to: '', dateField: 'published', sourceId: '', topicId: '', read: 'all', priority: false, sort: 'priority', focusSearch: false };
 
     function draw() {
       container.innerHTML = '';
@@ -19,6 +22,7 @@
         el('div', { class: 'page-header' }, [
           el('h1', {}, '관심주제 브리핑'),
           el('div', { class: 'row', style: 'gap:8px' }, [
+            lastReport ? el('button', { class: 'nm-btn brf-report-btn', title: '소스별로 몇 건을 가져와 몇 건을 저장했는지, 안 된 이유를 봅니다', onclick: () => openCollectReport(lastReport) }, '📋 수집 결과') : null,
             el('button', { class: 'nm-btn', onclick: () => openTopicWizard() }, '🪄 마법사'),
           el(
             'button',
@@ -60,17 +64,55 @@
       draw();
       try {
         const result = await appState.collectBriefingItems();
+        lastReport = result;
         if (result.errors.length) {
-          toast(`${result.newCount}건 새로 수집, 일부 소스 실패: ${result.errors[0]}`, 'error');
+          toast(`${result.newCount}건 새로 수집, 일부 소스 문제 ${result.errors.length}건 — [수집 결과]에서 원인을 확인하세요.`, 'error');
         } else {
           toast(`${result.newCount}건을 새로 수집했습니다. (전체 ${result.fetchedCount}건 확인)`, 'success');
         }
+        // 새로 저장된 게 없거나 문제가 있으면 이유를 바로 보여 준다(예전에는 토스트 한 줄이라 원인을 알 수 없었다).
+        if (result.errors.length || !result.newCount) openCollectReport(result);
       } catch (e) {
         toast(e.message || '수집 중 오류가 발생했습니다.', 'error');
       } finally {
         collecting = false;
         draw();
       }
+    }
+
+    // v7.35.0: 소스별 수집 결과 — "왜 안 들어왔는지"를 사용자가 직접 볼 수 있게 한다.
+    function openCollectReport(result) {
+      const reasons = (r) => {
+        if (r.error) return `❌ ${r.error}`;
+        const bits = [];
+        if (r.failed) bits.push(`⚠ 저장 실패 ${r.failed}건${r.firstFailure ? ` (${r.firstFailure})` : ''}`);
+        if (r.skippedTopic) bits.push(`관심주제와 안 맞아 제외 ${r.skippedTopic}건`);
+        if (r.dup) bits.push(`이미 있음 ${r.dup}건`);
+        if (!r.fetched) bits.push('가져온 글 0건');
+        return bits.join(' · ') || '정상';
+      };
+      openModal({
+        title: '📋 수집 결과', width: '760px',
+        contentBuilder(body) {
+          const rep = result.report || [];
+          body.append(el('p', { class: 'text-muted', style: 'font-size:13px' }, `새로 저장 ${result.newCount}건 · 확인한 글 ${result.fetchedCount}건 · 소스 ${rep.length}곳`));
+          if (!rep.length) { body.append(el('div', { class: 'empty-state' }, '수집할 소스가 없습니다.')); return; }
+          const table = el('table', { class: 'data-table brf-report' });
+          table.append(el('thead', {}, el('tr', {}, ['소스', '종류', '가져옴', '새로 저장', '결과/원인'].map((h) => el('th', {}, h)))));
+          const tb = el('tbody', {});
+          for (const r of rep) tb.append(el('tr', { class: r.error || r.failed ? 'brf-report--bad' : '' }, [
+            el('td', {}, r.name), el('td', {}, { md: '📝 마크다운', feed: '📡 RSS', topic: '🔎 주제 검색' }[r.kind] || r.kind),
+            el('td', {}, String(r.fetched)), el('td', {}, String(r.added)), el('td', { style: 'font-size:12px' }, reasons(r)),
+          ]));
+          table.append(tb);
+          body.append(el('div', { class: 'data-table-wrap' }, table));
+          const tips = [];
+          if (rep.some((r) => r.skippedTopic && !r.added)) tips.push('관심주제의 "포함 키워드"가 좁으면 대부분 제외됩니다. 주제의 포함 키워드를 줄이거나 비워 보세요.');
+          if (rep.some((r) => r.error && /HTTP 4\d\d|프록시|403/.test(r.error))) tips.push('사이트가 접근을 막은 경우입니다(403 등). 다른 RSS 주소를 쓰거나 마크다운 소스로 붙여넣어 보세요.');
+          if (rep.some((r) => r.failed)) tips.push('저장 실패가 있으면 Supabase 테이블/제약 문제일 수 있습니다. 위 괄호의 메시지를 알려 주세요.');
+          if (tips.length) body.append(el('ul', { class: 'text-muted', style: 'font-size:12px; margin-top:8px' }, tips.map((t) => el('li', {}, t))));
+        },
+      });
     }
 
     function drawNews() {
@@ -92,12 +134,60 @@
       container.append(el('div', { html }));
     }
 
+    // ---- v7.35.0 브리핑 목록 검색 ----
+    // 자연어 한 줄("지난주 스마트팜 안 읽은 뉴스") + 세부 조건(범위·날짜·피드·주제·읽음·우선·정렬). 규칙 기반이라 AI가 아니며,
+    // 어떻게 해석했는지 칩으로 그대로 보여준다. 내용 검색은 수집 때 저장한 요약(최대 300자)만 대상이다.
+    function drawItemFilters(parsed, shown) {
+      const redraw = () => draw();
+      const q = el('input', { class: 'nm-input brf-q', type: 'search', value: flt.q, placeholder: '검색: 예) 지난주 스마트팜 안 읽은 뉴스 · 제목:보조금 · "정밀 농업" -광고', style: 'flex:1 1 320px; min-width:220px' });
+      let timer = null;
+      q.addEventListener('input', () => { flt.q = q.value; flt.focusSearch = true; clearTimeout(timer); timer = setTimeout(redraw, 250); });
+      q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); flt.q = q.value; flt.focusSearch = true; redraw(); } });
+      const sel = (cls, key, opts, title) => el('select', { class: `nm-select ${cls}`, title, style: 'width:auto', onchange: (e) => { flt[key] = e.target.value; redraw(); } },
+        opts.map(([v, l]) => el('option', { value: v, selected: flt[key] === v || undefined }, l)));
+      const feedOpts = [['', '피드: 전체'], ['topic', '🔎 주제 검색(마법사)'], ['rss', '📡 RSS 전체'], ['md', '📝 마크다운 전체'],
+        ...appState.feedSources.map((s) => [s.id, `${s.type === 'markdown' ? '📝' : '📡'} ${s.name}`])];
+      const topicOpts = [['', '주제: 전체'], ...appState.briefingTopics.map((t) => [t.id, `#${t.name}`])];
+      const date = (key, label) => el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [label, el('input', { class: `nm-input brf-${key}`, type: 'date', value: flt[key], style: 'width:auto', onchange: (e) => { flt[key] = e.target.value; redraw(); } })]);
+      const active = flt.q || flt.from || flt.to || flt.sourceId || flt.topicId || flt.read !== 'all' || flt.priority || flt.scope !== 'all';
+      container.append(el('div', { class: 'nm-card brf-filters', style: 'padding:10px; margin-bottom:10px' }, [
+        el('div', { class: 'row wrap', style: 'gap:8px; align-items:center' }, [
+          q,
+          sel('brf-scope', 'scope', [['all', '범위: 제목+요약'], ['title', '제목만'], ['content', '내용(요약)만']], '검색할 곳'),
+        ]),
+        el('div', { class: 'row wrap', style: 'gap:8px; align-items:center; margin-top:8px' }, [
+          sel('brf-datefield', 'dateField', [['published', '날짜 기준: 발행일'], ['collected', '날짜 기준: 수집일']], '기간 조건에 쓸 날짜'),
+          date('from', '부터'), date('to', '까지'),
+          sel('brf-feed', 'sourceId', feedOpts, '피드 구분'),
+          sel('brf-topic', 'topicId', topicOpts, '관심주제'),
+          sel('brf-read', 'read', [['all', '읽음: 전체'], ['unread', '안 읽음'], ['read', '읽음']], '읽음 상태'),
+          el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [el('input', { class: 'brf-prio', type: 'checkbox', checked: flt.priority || undefined, onchange: (e) => { flt.priority = e.target.checked; redraw(); } }), '⭐ 우선만']),
+          sel('brf-sort', 'sort', [['priority', '정렬: 우선→최신'], ['recent', '최신순'], ['old', '오래된순'], ['title', '제목순']], '정렬'),
+          active ? el('button', { class: 'nm-btn brf-reset', onclick: () => { Object.assign(flt, { q: '', scope: 'all', from: '', to: '', dateField: 'published', sourceId: '', topicId: '', read: 'all', priority: false, sort: 'priority' }); redraw(); } }, '초기화') : null,
+        ]),
+        el('div', { class: 'text-muted brf-summary', style: 'font-size:12px; margin-top:6px' }, [
+          `${shown}건 / 전체 ${appState.briefingItems.length}건`,
+          parsed.chips.length ? ` · 이렇게 이해했어요: ${parsed.chips.join(' · ')}` : '',
+          parsed.text.length ? ` · 검색어: ${parsed.text.map((t) => `"${t}"`).join(' + ')}` : '',
+        ]),
+      ]));
+      if (flt.focusSearch) { flt.focusSearch = false; q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch (e) { /* noop */ } }
+    }
+
     function drawItems() {
       const topicById = (id) => appState.briefingTopics.find((t) => t.id === id);
       const hitsOf = (it) => window.priorityHits(it, topicById(it.topic_id));
-      const rows = appState.briefingItems.slice().sort((a, b) => (hitsOf(b).length ? 1 : 0) - (hitsOf(a).length ? 1 : 0));
-      if (!rows.length) {
+      if (!appState.briefingItems.length) {
         container.append(el('div', { class: 'empty-state' }, '아직 수집된 항목이 없습니다. 관심주제·피드 소스를 등록한 뒤 "지금 가져오기"를 눌러보세요.'));
+        return;
+      }
+      const ctx = { sources: appState.feedSources, topics: appState.briefingTopics, priorityFn: (it, t) => window.priorityHits(it, t) };
+      const parsed = window.parseNaturalQuery(flt.q, ctx);
+      const eff = window.mergeBriefingFilters({ ...flt, text: [], exclude: [] }, parsed);
+      const rows = window.filterBriefingItems(appState.briefingItems, eff, ctx);
+      drawItemFilters(parsed, rows.length);
+      if (!rows.length) {
+        container.append(el('div', { class: 'empty-state' }, '조건에 맞는 항목이 없습니다. 검색어를 줄이거나 [초기화]를 눌러 보세요.'));
         return;
       }
       const buildMd = (onlyUnread) => window.briefingToMarkdown(rows, { topics: appState.briefingTopics, sources: appState.feedSources, date: new Date().toLocaleDateString('sv-SE'), onlyUnread });

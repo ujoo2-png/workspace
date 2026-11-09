@@ -2,6 +2,7 @@
 // 일반 <script> + CommonJS 겸용. 정의: { id, label, type:'text'|'date'|'number'|'select', options:[], list:bool, aliases:[], archived:bool }
 (function () {
   const KEY = 'workspace:career:customCols';
+  const MAX_OPTIONS = 50; // 선택 목록 한도
   const MAX = 5; // 카테고리마다
   const TYPES = [['text', '텍스트'], ['select', '선택 목록'], ['date', '날짜'], ['number', '숫자']];
   const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s 　:：*※★☆·ㆍ,.\-_/\\|~()（）[\]{}<>]/g, '');
@@ -15,7 +16,7 @@
     trainings: [['수료여부', 'select', ['수료', '미수료']], ['교육방식', 'select', ['온라인', '오프라인', '혼합']], ['교육비', 'number']],
     memberships: [['회원번호', 'text'], ['회원구분', 'text'], ['소재지', 'text']],
     awards: [['포상구분', 'text'], ['등급/순위', 'text'], ['포상번호', 'text']],
-    experiences: [['직위', 'text'], ['직급', 'text'], ['근무지', 'text'], ['퇴직사유', 'text']],
+    experiences: [['직위', 'select', ['사원', '대리', '과장', '차장', '부장', '선임', '책임', '수석']], ['직급', 'text'], ['근무지', 'text'], ['퇴직사유', 'text']],
     photos: [['규격', 'text'], ['용도', 'text'], ['촬영장소', 'text']],
   };
 
@@ -25,7 +26,17 @@
   const sync = () => (typeof window !== 'undefined' && window.settingsSync) || null;
   function load() { const s = sync(); return parse(s ? s.get(KEY) : (typeof localStorage !== 'undefined' ? localStorage.getItem(KEY) : '')); }
   function save(map) { const s = sync(); const v = JSON.stringify(map); if (s) s.set(KEY, v); else if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, v); }
-  const clean = (d) => ({ id: d.id, label: String(d.label || '').trim().slice(0, 20), type: TYPES.some((t) => t[0] === d.type) ? d.type : 'text', options: Array.isArray(d.options) ? d.options.map((x) => String(x).trim()).filter(Boolean).slice(0, 30) : [], list: d.list !== false, aliases: Array.isArray(d.aliases) ? d.aliases.map((x) => String(x).trim()).filter(Boolean).slice(0, 8) : [], archived: !!d.archived });
+  // v7.35.0: 선택 목록 입력 해석 — 쉼표(, 、)·세미콜론·세로선·줄바꿈으로 구분, 앞뒤 공백 제거, 중복(대소문자 무시) 제거.
+  function parseOptions(text) {
+    const seen = new Set(); const out = [];
+    for (const raw of String(text == null ? '' : text).split(/[,\u3001;|\n\r]+/)) {
+      const v = raw.trim().slice(0, 30); const k = v.toLowerCase();
+      if (!v || seen.has(k)) continue;
+      seen.add(k); out.push(v);
+    }
+    return out.slice(0, MAX_OPTIONS);
+  }
+  const clean = (d) => ({ id: d.id, label: String(d.label || '').trim().slice(0, 20), type: TYPES.some((t) => t[0] === d.type) ? d.type : 'text', options: Array.isArray(d.options) ? parseOptions(d.options.join(',')) : [], list: d.list !== false, aliases: Array.isArray(d.aliases) ? d.aliases.map((x) => String(x).trim()).filter(Boolean).slice(0, 8) : [], archived: !!d.archived });
   function defs(cat, map = load()) { return (Array.isArray(map[cat]) ? map[cat] : []).filter((d) => d && /^[a-z0-9]{3,12}$/.test(d.id || '')).map(clean); }
   const active = (cat, map) => defs(cat, map).filter((d) => !d.archived);
   const archived = (cat, map) => defs(cat, map).filter((d) => d.archived);
@@ -78,7 +89,7 @@
   /** 빈 값 점검: 어떤 컬럼들이 필요한데 비어 있는 레코드 */
   function missing(rows, defList) { const out = []; for (const r of rows || []) { if (r.deleted_at) continue; const miss = defList.filter((d) => rawValue(r, d) === ''); if (miss.length) out.push({ rec: r, cols: miss }); } return out; }
 
-  const api = { KEY, MAX, TYPES, PRESETS, norm, fieldName, isCustomName, idOfName, load, save, defs, active, archived, newId, clean, checkLabel, rawValue, display, toExtra, mergeExtra, withoutKey, missing };
+  const api = { parseOptions, MAX_OPTIONS, KEY, MAX, TYPES, PRESETS, norm, fieldName, isCustomName, idOfName, load, save, defs, active, archived, newId, clean, checkLabel, rawValue, display, toExtra, mergeExtra, withoutKey, missing };
   if (typeof window !== 'undefined') window.CareerCols = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

@@ -14,6 +14,26 @@
   // 경로를 1순위로 두고, 그게 없는 환경(로컬 file:// 등)에서만 공개 프록시로 폴백한다.
   // XML 파싱은 DOMParser 대신 js/utils/xmlTree.js의 무손실 파서를 쓴다(Node 테스트에서도 동작).
   const stripTags = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  // v7.35.0: 발행일 정규화. RSS의 pubDate는 "Mon, 09 Nov 2026 03:00:00 KST"처럼 DB(timestamptz)가
+  // 못 읽는 형식이 섞여 있다. 그대로 저장하면 Supabase가 HTTP 400으로 거절하고, 한 건의 실패가 수집 전체를
+  // 멈추게 했다(콘솔의 briefing_items 400). 여기서 ISO 문자열로 바꾸고, 읽을 수 없으면 null로 둔다.
+  const TZ_ABBR = { KST: '+0900', JST: '+0900', UTC: '+0000', GMT: '+0000', Z: '+0000', EST: '-0500', EDT: '-0400', CST: '-0600', CDT: '-0500', MST: '-0700', MDT: '-0600', PST: '-0800', PDT: '-0700' };
+  function normalizeFeedDate(raw) {
+    if (raw == null) return null;
+    let t = String(raw).trim();
+    if (!t) return null;
+    t = t.replace(/\s+(KST|JST|UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT)\s*$/i, (m, z) => ` ${TZ_ABBR[z.toUpperCase()]}`);
+    t = t.replace(/GMT\+?(-?\d{1,2})$/i, (m, h) => `${Number(h) < 0 ? '-' : '+'}${String(Math.abs(Number(h))).padStart(2, '0')}00`);
+    // "2026.11.09 14:30" / "2026-11-09 14:30:00" 처럼 시간대가 없는 형식은 한국 시간으로 간주한다.
+    // (브라우저의 Date 파서는 이런 문자열을 "지금 쓰는 기기의 시간대"로 읽어서 기기마다 결과가 달라지므로 직접 해석)
+    let d;
+    const m = /^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(t);
+    if (m) d = new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T${(m[4] || '0').padStart(2, '0')}:${m[5] || '00'}:${m[6] || '00'}+09:00`);
+    else d = new Date(t);
+    const y = d.getFullYear();
+    if (Number.isNaN(d.getTime()) || y < 1990 || y > 2100) return null;
+    return d.toISOString();
+  }
   const decodeXml = (s) => (window.XmlTree ? window.XmlTree.decode(s) : String(s || ''));
 
   /** 같은 출처 프록시로 원본 XML 텍스트를 받는다. 프록시가 없으면(404) null. */
@@ -33,7 +53,7 @@
     return (data.items || []).map((it) => ({
       title: it.title || '(제목 없음)',
       link: it.link,
-      publishedAt: it.pubDate || null,
+      publishedAt: normalizeFeedDate(it.pubDate),
       summary: stripTags(it.description).slice(0, 300),
     }));
   }
@@ -56,10 +76,10 @@
     const items = [];
     for (const node of nodes) {
       const title = decodeXml(text(node, 'title')) || '(제목 없음)';
-      const link = linkOf(node);
-      if (!link) continue;
+      const link = String(linkOf(node) || '').trim();
+      if (!/^https?:\/\//i.test(link)) continue; // DB 제약(link ~* '^https?://')을 어기는 항목은 처음부터 거른다
       // RSS는 pubDate, Atom은 published/updated.
-      const publishedAt = text(node, 'pubDate') || text(node, 'published') || text(node, 'updated') || text(node, 'dc:date') || null;
+      const publishedAt = normalizeFeedDate(text(node, 'pubDate') || text(node, 'published') || text(node, 'updated') || text(node, 'dc:date') || null);
       // RSS는 description, Atom은 summary/content.
       const raw = text(node, 'description') || text(node, 'summary') || text(node, 'content') || text(node, 'content:encoded') || '';
       items.push({ title, link, publishedAt, summary: stripTags(decodeXml(raw)).slice(0, 300) });
@@ -321,6 +341,7 @@
   window.fetchFeedItems = fetchFeedItems;
   window.itemMatchesTopic = itemMatchesTopic;
   window.simpleHash = simpleHash;
+  window.normalizeFeedDate = normalizeFeedDate;
   window.sourceHealth = sourceHealth;
   window.isStaleSource = isStaleSource;
   window.staleReason = staleReason;

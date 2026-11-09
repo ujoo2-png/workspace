@@ -671,12 +671,22 @@
               const row = el('div', { class: 'nm-card', style: 'padding:8px; margin-bottom:6px' }, [
                 el('div', { class: 'row', style: 'gap:6px; align-items:center; flex-wrap:wrap' }, [
                   nameIn,
-                  el('span', { class: 'nm-badge', title: '종류는 만든 뒤 바꿀 수 없습니다(저장된 값 보호)' }, (CC.TYPES.find((t) => t[0] === d.type) || [])[1] || d.type),
+                  el('span', { class: 'nm-badge', title: '날짜·숫자 종류는 만든 뒤 바꿀 수 없습니다(저장된 값 보호). 텍스트↔선택은 아래 목록 입력으로 전환됩니다' }, (CC.TYPES.find((t) => t[0] === d.type) || [])[1] || d.type),
                   el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [el('input', { type: 'checkbox', checked: d.list || undefined, onchange: (e) => patchDef(d.id, (x) => { x.list = e.target.checked; return x; }) }), '목록에 표시']),
                   el('span', { class: 'text-muted', style: 'font-size:11px' }, `값 입력 ${usage(d.id)}건`),
                   el('button', { class: 'nm-btn', style: 'padding:2px 8px; font-size:12px', title: '숨김 보관 — 데이터는 남고 화면·양식에서만 빠집니다', onclick: () => { if (confirmDialog(`"${d.label}" 컬럼을 숨김 보관할까요?\n입력한 값은 지우지 않고, 나중에 복원할 수 있습니다.`)) patchDef(d.id, (x) => { x.archived = true; return x; }); } }, '숨김 보관'),
                 ]),
-                d.type === 'select' ? el('div', { class: 'nm-field', style: 'margin:6px 0 0' }, [el('label', { style: 'font-size:11px' }, '선택 목록 (쉼표로 구분)'), el('input', { class: 'nm-input', value: d.options.join(', '), onchange: (e) => patchDef(d.id, (x) => { x.options = e.target.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean); return x; }) })]) : null,
+                (d.type === 'select' || d.type === 'text') ? el('div', { class: 'nm-field', style: 'margin:6px 0 0' }, [
+                  el('label', { style: 'font-size:11px' }, d.type === 'select' ? '선택 목록 (쉼표로 구분 · 비우면 다시 자유 입력)' : '선택 목록으로 바꾸기 (쉼표로 구분 · 예: 사원, 대리, 과장) — 입력하면 등록 때 목록에서 고릅니다'),
+                  el('input', { class: 'nm-input career-col-options', value: d.options.join(', '), placeholder: '사원, 대리, 과장, 차장, 부장', onchange: (e) => {
+                    const next = CC.parseOptions(e.target.value);
+                    const removed = d.options.filter((o) => !next.includes(o));
+                    const used = removed.filter((o) => (appState.career[baseCat.key] || []).some((r) => r.extra && r.extra[d.id] === o));
+                    if (used.length && !confirmDialog(`목록에서 뺀 값 중 이미 입력된 것이 있습니다: ${used.join(', ')}\n저장된 데이터는 지워지지 않고, 수정 화면에서 "목록에 없는 값"으로 표시됩니다. 계속할까요?`)) { e.target.value = d.options.join(', '); return; }
+                    patchDef(d.id, (x) => { x.options = next; x.type = next.length ? 'select' : 'text'; return x; });
+                  } }),
+                  d.type === 'select' ? el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:2px' }, `${d.options.length}개: ${d.options.join(' · ')}`) : null,
+                ]) : null,
                 el('div', { class: 'nm-field', style: 'margin:6px 0 0' }, [el('label', { style: 'font-size:11px' }, '양식 머리글 별칭 (쉼표로 구분 · 양식에서 다른 이름으로 불러도 자동 연결)'), el('input', { class: 'nm-input', value: d.aliases.join(', '), placeholder: '예: 학교소재지, 지역', onchange: (e) => patchDef(d.id, (x) => { x.aliases = e.target.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean); return x; }) })]),
               ]);
               host.append(row);
@@ -685,9 +695,18 @@
             if (act.length < CC.MAX) {
               const nameIn = el('input', { class: 'nm-input', placeholder: '새 컬럼 이름 (예: 소재지)', maxlength: 20, style: 'flex:1; min-width:140px' });
               const typeSel = el('select', { class: 'nm-select', style: 'width:auto' }, CC.TYPES.map(([v, l]) => el('option', { value: v }, l)));
-              const optIn = el('input', { class: 'nm-input hidden', placeholder: '선택 목록: 학사, 석사, 박사', style: 'flex:1 1 100%' });
-              typeSel.addEventListener('change', () => optIn.classList.toggle('hidden', typeSel.value !== 'select'));
-              const go = async () => { const ok = await addColumn(nameIn.value, typeSel.value, optIn.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean)); if (ok) nameIn.value = ''; };
+              const optIn = el('input', { class: 'nm-input career-newcol-options', placeholder: '선택 목록 (선택사항): 사원, 대리, 과장, 차장, 부장 — 입력하면 등록 때 목록에서 고릅니다', style: 'flex:1 1 100%' });
+              const syncType = () => { if (CC.parseOptions(optIn.value).length && typeSel.value === 'text') typeSel.value = 'select'; };
+              optIn.addEventListener('input', syncType);
+              typeSel.addEventListener('change', () => { if (typeSel.value !== 'select' && typeSel.value !== 'text') optIn.value = ''; optIn.disabled = typeSel.value === 'date' || typeSel.value === 'number'; });
+              const go = async () => {
+                const opts = CC.parseOptions(optIn.value);
+                let type = typeSel.value;
+                if (opts.length && type === 'text') type = 'select';
+                if (type === 'select' && !opts.length) { toast('"선택" 종류는 목록이 필요합니다. 쉼표로 구분해 입력해 주세요. (예: 사원, 대리, 과장)', 'error'); optIn.focus(); return; }
+                const ok = await addColumn(nameIn.value, type, opts);
+                if (ok) { nameIn.value = ''; optIn.value = ''; }
+              };
               nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
               host.append(el('div', { style: 'font-size:13px; font-weight:600; margin:12px 0 4px' }, '새 컬럼 추가'), el('div', { class: 'row', style: 'gap:6px; flex-wrap:wrap' }, [nameIn, typeSel, el('button', { class: 'nm-btn nm-btn--primary', onclick: go }, '추가'), optIn]));
               const presets = (CC.PRESETS[baseCat.key] || []).filter(([l]) => !CC.defs(baseCat.key, map).some((d) => CC.norm(d.label) === CC.norm(l)));
