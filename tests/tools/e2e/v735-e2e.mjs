@@ -164,11 +164,11 @@ await page.evaluate(async () => {
 await page.click('button:has-text("브리핑 목록")'); await page.waitForSelector('.brf-filters');
 const shown = async () => (await page.locator('.item-row').count());
 expect('필터 없이 4건', (await shown()) === 4, String(await shown()));
-await page.fill('.brf-q', '제목:보조금'); await page.waitForTimeout(500);
+await page.fill('.brf-q', '제목:보조금'); await page.click('.brf-go'); await page.waitForTimeout(400);
 expect('제목 검색', (await shown()) === 1);
-await page.fill('.brf-q', '내용:스마트팜'); await page.waitForTimeout(500);
+await page.fill('.brf-q', '내용:스마트팜'); await page.click('.brf-go'); await page.waitForTimeout(400);
 expect('내용(요약) 검색', (await shown()) === 1 && /반도체/.test(await page.textContent('.item-list')));
-await page.fill('.brf-q', '최근 3일 안 읽은 스마트팜'); await page.waitForTimeout(500);
+await page.fill('.brf-q', '최근 3일 안 읽은 스마트팜'); await page.click('.brf-go'); await page.waitForTimeout(400);
 const sum = await page.textContent('.brf-summary');
 expect('자연어: 기간·안 읽음·키워드를 이해하고 칩으로 보여줌', /최근 3일/.test(sum) && /안 읽음/.test(sum) && /"스마트팜"/.test(sum) && (await shown()) === 3, sum);
 await shot('06-briefing-search.png');
@@ -181,7 +181,7 @@ await page.click('.brf-reset'); await page.fill('.brf-from', new Date(Date.now()
 expect('날짜 조건(부터)', (await shown()) === 3, String(await shown()));
 await page.click('.brf-reset'); await page.check('.brf-prio'); await page.waitForTimeout(300);
 expect('⭐ 우선만', (await shown()) === 1);
-await page.click('.brf-reset'); await page.fill('.brf-q', '없는말없는말'); await page.waitForTimeout(500);
+await page.click('.brf-reset'); await page.fill('.brf-q', '없는말없는말'); await page.click('.brf-go'); await page.waitForTimeout(400);
 expect('결과 없음 안내', /조건에 맞는 항목이 없습니다/.test(await page.textContent('.page-header ~ *, body')));
 await page.click('.brf-reset'); await page.waitForTimeout(200);
 // 수집 결과 창: 가져오기 함수를 흉내 내서(네트워크 없음) 한 곳은 성공, 한 곳은 403
