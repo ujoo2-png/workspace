@@ -100,3 +100,10 @@
 .med-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--text-muted); align-items: center; }
 .med-legend .med-dot { width: 18px; height: 18px; font-size: 10px; vertical-align: middle; }
 .med-weekday { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+
+/* v7.37.0 차량 지표 대시보드 — 가로 3카드(좁은 화면은 2→1열) */
+.vehicle-chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .vehicle-chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .vehicle-chart-grid { grid-template-columns: minmax(0, 1fr); } }
+.vehicle-chart-card { padding: 10px 12px; }
+.vehicle-dup-banner { margin-bottom: 12px; border: 1px solid var(--warning, #e0a100); }

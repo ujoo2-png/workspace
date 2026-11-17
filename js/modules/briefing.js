@@ -16,6 +16,10 @@
     // v7.35.0 브리핑 목록 검색 조건(화면을 다시 그려도 유지)
     const flt = { q: '', scope: 'all', from: '', to: '', dateField: 'published', sourceId: '', topicId: '', read: 'all', priority: false, sort: 'priority', focusSearch: false };
 
+    const RECENT_KEY = 'workspace:briefing:recentQueries';
+    function loadRecent() { try { const raw = window.settingsSync && window.settingsSync.get(RECENT_KEY); const a = raw ? JSON.parse(raw) : []; return window.addRecentQuery(Array.isArray(a) ? a : [], ''); } catch (e) { return []; } }
+    function saveRecent(list) { try { window.settingsSync && window.settingsSync.set(RECENT_KEY, JSON.stringify((list || []).slice(0, 10))); } catch (e) { /* 저장 실패는 검색을 막지 않는다 */ } }
+
     function draw() {
       container.innerHTML = '';
       container.append(
@@ -139,10 +143,26 @@
     // 어떻게 해석했는지 칩으로 그대로 보여준다. 내용 검색은 수집 때 저장한 요약(최대 300자)만 대상이다.
     function drawItemFilters(parsed, shown) {
       const redraw = () => draw();
-      const q = el('input', { class: 'nm-input brf-q', type: 'search', value: flt.q, placeholder: '검색: 예) 지난주 스마트팜 안 읽은 뉴스 · 제목:보조금 · "정밀 농업" -광고', style: 'flex:1 1 320px; min-width:220px' });
-      let timer = null;
-      q.addEventListener('input', () => { flt.q = q.value; flt.focusSearch = true; clearTimeout(timer); timer = setTimeout(redraw, 250); });
-      q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); flt.q = q.value; flt.focusSearch = true; redraw(); } });
+      // v7.37.0: 입력만으로는 조회하지 않고 [조회] 버튼(또는 Enter)으로 실행한다. 조회한 검색어는 최근 검색어(최대 10개)에 남는다.
+      if (flt.draftQ == null) flt.draftQ = flt.q;
+      const q = el('input', { class: 'nm-input brf-q', type: 'search', value: flt.draftQ, placeholder: '검색: 예) 지난주 스마트팜 안 읽은 뉴스 · 제목:보조금 · "정밀 농업" -광고', style: 'flex:1 1 320px; min-width:220px' });
+      const runSearch = (text) => {
+        const v = text == null ? q.value : text;
+        flt.q = v.trim(); flt.draftQ = v.trim(); flt.focusSearch = true;
+        if (flt.q) saveRecent(window.addRecentQuery(loadRecent(), flt.q));
+        redraw();
+      };
+      q.addEventListener('input', () => { flt.draftQ = q.value; });
+      q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } });
+      const goBtn = el('button', { class: 'nm-btn nm-btn--primary brf-go', type: 'button', title: '검색어로 목록을 조회합니다(Enter와 같음)', onclick: () => runSearch() }, '🔍 조회');
+      const recent = loadRecent();
+      const recentRow = recent.length ? el('div', { class: 'row wrap brf-recent', style: 'gap:6px; align-items:center; margin-top:8px' }, [
+        el('span', { class: 'text-muted', style: 'font-size:12px' }, '최근 검색어'),
+        ...recent.map((t) => el('span', { class: 'brf-recent__chip', title: '눌러서 다시 조회' }, [
+          el('button', { type: 'button', class: 'brf-recent__txt', onclick: () => { q.value = t; runSearch(t); } }, t),
+          el('button', { type: 'button', class: 'brf-recent__x', 'aria-label': `"${t}" 삭제`, title: '이 검색어 삭제', onclick: (e) => { e.stopPropagation(); saveRecent(window.removeRecentQuery(loadRecent(), t)); flt.focusSearch = false; redraw(); } }, '×'),
+        ])),
+      ]) : null;
       const sel = (cls, key, opts, title) => el('select', { class: `nm-select ${cls}`, title, style: 'width:auto', onchange: (e) => { flt[key] = e.target.value; redraw(); } },
         opts.map(([v, l]) => el('option', { value: v, selected: flt[key] === v || undefined }, l)));
       const feedOpts = [['', '피드: 전체'], ['topic', '🔎 주제 검색(마법사)'], ['rss', '📡 RSS 전체'], ['md', '📝 마크다운 전체'], ['api', '🏛 공공 API 전체'],
@@ -153,8 +173,10 @@
       container.append(el('div', { class: 'nm-card brf-filters', style: 'padding:10px; margin-bottom:10px' }, [
         el('div', { class: 'row wrap', style: 'gap:8px; align-items:center' }, [
           q,
+          goBtn,
           sel('brf-scope', 'scope', [['all', '범위: 제목+요약'], ['title', '제목만'], ['content', '내용(요약)만']], '검색할 곳'),
         ]),
+        recentRow,
         el('div', { class: 'row wrap', style: 'gap:8px; align-items:center; margin-top:8px' }, [
           sel('brf-datefield', 'dateField', [['published', '날짜 기준: 발행일'], ['collected', '날짜 기준: 수집일']], '기간 조건에 쓸 날짜'),
           date('from', '부터'), date('to', '까지'),
@@ -163,10 +185,11 @@
           sel('brf-read', 'read', [['all', '읽음: 전체'], ['unread', '안 읽음'], ['read', '읽음']], '읽음 상태'),
           el('label', { class: 'row', style: 'gap:4px; align-items:center; font-size:12px' }, [el('input', { class: 'brf-prio', type: 'checkbox', checked: flt.priority || undefined, onchange: (e) => { flt.priority = e.target.checked; redraw(); } }), '⭐ 우선만']),
           sel('brf-sort', 'sort', [['priority', '정렬: 우선→최신'], ['recent', '최신순'], ['old', '오래된순'], ['title', '제목순']], '정렬'),
-          active ? el('button', { class: 'nm-btn brf-reset', onclick: () => { Object.assign(flt, { q: '', scope: 'all', from: '', to: '', dateField: 'published', sourceId: '', topicId: '', read: 'all', priority: false, sort: 'priority' }); redraw(); } }, '초기화') : null,
+          active ? el('button', { class: 'nm-btn brf-reset', onclick: () => { Object.assign(flt, { q: '', draftQ: '', scope: 'all', from: '', to: '', dateField: 'published', sourceId: '', topicId: '', read: 'all', priority: false, sort: 'priority' }); redraw(); } }, '초기화') : null,
         ]),
         el('div', { class: 'text-muted brf-summary', style: 'font-size:12px; margin-top:6px' }, [
           `${shown}건 / 전체 ${appState.briefingItems.length}건`,
+          flt.draftQ !== flt.q ? ' · 입력한 검색어는 [🔍 조회]를 눌러야 적용됩니다' : '',
           parsed.chips.length ? ` · 이렇게 이해했어요: ${parsed.chips.join(' · ')}` : '',
           parsed.text.length ? ` · 검색어: ${parsed.text.map((t) => `"${t}"`).join(' + ')}` : '',
         ]),

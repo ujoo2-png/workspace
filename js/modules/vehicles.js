@@ -130,6 +130,15 @@
       );
 
       const rows = window.Reorder.sort('vehicles', appState.vehicles.filter((v) => !v.deleted_at)); // v7.31.0: 끌어서 순서 변경
+      // v7.37.0: 같은 차량번호 카드가 둘 이상이면 알려 주고 한 번에 합칠 수 있게 한다.
+      for (const g of window.VehicleLogic.findDuplicateGroups(rows)) {
+        container.append(el('div', { class: 'nm-card vehicle-dup-banner' }, [
+          el('div', { class: 'row row--between wrap', style: 'gap:8px; align-items:center' }, [
+            el('div', {}, [el('strong', {}, `⚠ 차량번호 ${escapeHtml(g.vehicles[0].plate_number)} 카드가 ${g.vehicles.length}개입니다`), el('div', { class: 'text-muted', style: 'font-size:12px' }, '기록은 하나도 지우지 않고 하나의 카드로 합칩니다. 합치기 전에 내용을 보여 드려요.')]),
+            el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openMergeDialog(g) }, '카드 합치기'),
+          ]),
+        ]));
+      }
       if (!rows.length) {
         container.append(el('div', { class: 'empty-state' }, '등록된 차량이 없습니다.'));
         return;
@@ -218,13 +227,7 @@
               ),
             ]),
 
-            odometerSeries.length >= 2 || fuels.length >= 2
-              ? el('div', { class: 'row wrap', style: 'margin-top:12px; gap:16px' }, [
-                  odometerSeries.length >= 2 ? chartBlock('주행거리 추이(km)', window.simpleLineChart(odometerSeries.map((p) => p.date.slice(5)), odometerSeries.map((p) => p.odometer))) : null,
-                  fuelEfficiencyChart(fuels),
-                  unitPriceChart(fuels),
-                ].filter(Boolean))
-              : null,
+            vehicleCharts(v, fuels, maints, odometerSeries),
 
             el('div', { class: 'row', style: 'margin-top:12px; gap:8px' }, [
               el('button', { class: 'nm-btn', onclick: () => openMaintenanceForm(v) }, '+ 정비 기록'),
@@ -244,43 +247,83 @@
       window.Reorder.enable(stack, 'vehicles');
     }
 
-    function chartBlock(title, svgNode) {
-      return el('div', { style: 'min-width:260px; flex:1' }, [el('div', { class: 'text-muted', style: 'font-size:12px; margin-bottom:4px' }, title), svgNode]);
-    }
-
-    // 연비는 서로 다른 단위(거리 vs km/L)라 하나의 이중축 차트로 합치지 않고, 별도 막대 차트로
-    // 구간별(주유~주유) 연비를 보여준다.
-    function fuelEfficiencyChart(fuels) {
-      const clean = (fuels || [])
-        .filter((f) => typeof f.odometer === 'number')
-        .slice()
-        .sort((a, b) => (a.logged_at < b.logged_at ? -1 : 1));
-      if (clean.length < 2) return null;
-      const labels = [];
-      const values = [];
-      for (let i = 1; i < clean.length; i++) {
-        const km = clean[i].odometer - clean[i - 1].odometer;
-        const amount = clean[i].amount;
-        if (km > 0 && typeof amount === 'number' && amount > 0) {
-          labels.push((clean[i].logged_at || '').slice(5));
-          values.push(Number((km / amount).toFixed(1)));
+    // v7.37.0: health "📊 핵심 지표 대시보드"와 같은 방식 — 카드마다 제목+최근값, 독립된 기간 버튼(최근 10개/주간/월간/반기/분기/연간/최근3년),
+    // 공통 차트 킷(호버·표 보기·PNG/CSV·전체 화면). 가로 3카드 그리드. 기록이 부족한 지표는 "기록 없음"으로 자리만 유지한다.
+    const rangeState = {}; // `${vehicleId}:${metric}` → rangeKey (카드별 독립, 기본 raw10)
+    function vehicleCharts(v, fuels, maints, odoPoints) {
+      const VL = window.VehicleLogic;
+      const data = { fuels, maints, odoPoints };
+      const today = todayISO();
+      const grid = el('div', { class: 'vehicle-chart-grid' });
+      let any = false;
+      for (const def of VL.METRICS) {
+        const pts = VL.seriesFor(def.key, data);
+        if (pts.length) any = true;
+        const stateKey = `${v.id}:${def.key}`;
+        const cur = rangeState[stateKey] || 'raw10';
+        const agg = VL.aggregate(pts, cur, def.mode, today);
+        const last = pts[pts.length - 1];
+        const card = el('div', { class: 'nm-card health-dashboard-card vehicle-chart-card', dataset: { metric: def.key } }, [
+          el('div', { class: 'row row--between', style: 'align-items:baseline' }, [
+            el('strong', { style: 'font-size:13px' }, def.label),
+            el('span', { class: 'text-muted', style: 'font-size:12px' }, last ? `${Number(last.value).toLocaleString()}${def.unit}` : '-'),
+          ]),
+          el('div', { style: 'margin-top:6px' }, [el('div', { class: 'row wrap', style: 'gap:4px' }, VL.RANGES.map((r) => el('button', {
+            class: `nm-btn ${cur === r.key ? 'nm-btn--primary' : ''}`, style: 'padding:3px 8px; font-size:11px',
+            onclick: () => { rangeState[stateKey] = r.key; draw(); },
+          }, r.label)))]),
+        ]);
+        if (agg.hasAny) {
+          const box = el('div', { style: 'margin-top:6px' });
+          const useBar = def.mode === 'sum'; // 비용·주행량은 구간 합계 → 막대(기록 없는 구간=빈 막대)
+          const svg = useBar
+            ? window.simpleBarChart(agg.labels, agg.values.map((x) => x ?? 0), def.hue)
+            : window.targetLineChart(agg.labels, agg.values, { unit: def.unit, hue: def.hue, title: def.label });
+          if (svg && svg.__ck) { svg.__ck.unit = def.unit; svg.__ck.series[0].name = def.label; window.ChartKit.decorate(box, svg, { title: `차량 · ${v.name} · ${def.label}`, fileBase: `vehicle-${def.key}` }); }
+          else box.append(svg);
+          card.append(box);
+        } else {
+          card.append(el('div', { class: 'text-muted', style: 'font-size:12px; padding:14px 0; text-align:center' }, pts.length ? '이 기간에는 기록이 없습니다' : '기록 없음'));
         }
+        grid.append(card);
       }
-      if (!values.length) return null;
-      return chartBlock('구간별 연비(km/L·kWh)', window.simpleBarChart(labels, values, '#22c55e'));
+      if (!any) return null; // 기록이 하나도 없으면 빈 카드 6개 대신 아무것도 보이지 않는다
+      return el('div', { style: 'margin-top:12px' }, [
+        el('div', { style: 'font-size:13px; font-weight:700; margin-bottom:6px' }, '📊 차량 지표 대시보드'),
+        grid,
+        el('div', { class: 'text-muted', style: 'font-size:11px; margin-top:6px' }, '주행거리는 구간 마지막 값, 연비·단가는 평균, 비용·주행량은 합계입니다. 연비는 주유 기록의 주행거리·주유량으로 계산합니다.'),
+      ]);
     }
 
-    // 리터(또는 kWh)당 단가 추이 — 유가 변동을 간접적으로 보여준다(실시간 유가 API 대신
-    // 본인이 실제로 지불한 단가 기록을 기준으로 한다).
-    function unitPriceChart(fuels) {
-      const clean = (fuels || [])
-        .filter((f) => typeof f.amount === 'number' && f.amount > 0 && typeof f.cost === 'number' && f.cost > 0)
-        .slice()
-        .sort((a, b) => (a.logged_at < b.logged_at ? -1 : 1));
-      if (clean.length < 2) return null;
-      const labels = clean.map((f) => (f.logged_at || '').slice(5));
-      const values = clean.map((f) => Math.round(f.cost / f.amount));
-      return chartBlock('리터(kWh)당 단가 추이(원)', window.simpleLineChart(labels, values, '#f59e0b'));
+    // v7.37.0: 같은 차량번호 카드 합치기 — 미리보기(옮길 기록·정리될 중복·값 충돌)를 보여 주고 확인 후 실행.
+    function openMergeDialog(group) {
+      const VL = window.VehicleLogic;
+      const countOf = (x) => (appState.maintenanceByVehicle[x.id] || []).length + (appState.fuelLogsByVehicle[x.id] || []).length + (appState.odometerLogsByVehicle[x.id] || []).length + appState.getAttachments('vehicles', x.id).length;
+      const primary = VL.pickPrimary(group.vehicles, countOf);
+      const others = group.vehicles.filter((x) => x.id !== primary.id);
+      const attach = {};
+      for (const x of group.vehicles) attach[x.id] = appState.getAttachments('vehicles', x.id);
+      const plan = VL.planMerge(primary, others, { maint: appState.maintenanceByVehicle, fuel: appState.fuelLogsByVehicle, odo: appState.odometerLogsByVehicle, attach });
+      openModal({
+        title: '차량 카드 합치기',
+        contentBuilder(body, close) {
+          const rowOf = (x) => el('div', { class: 'row', style: 'gap:6px; font-size:13px' }, [el('strong', {}, escapeHtml(x.name)), el('span', { class: 'text-muted' }, `정비 ${(appState.maintenanceByVehicle[x.id] || []).length} · 주유 ${(appState.fuelLogsByVehicle[x.id] || []).length} · 주행 ${(appState.odometerLogsByVehicle[x.id] || []).length} · 첨부 ${attach[x.id].length}`), x.id === primary.id ? el('span', { class: 'nm-badge nm-badge--success' }, '대표(유지)') : el('span', { class: 'nm-badge' }, '합쳐짐')]);
+          const list = el('div', { class: 'stack', style: 'gap:6px' }, group.vehicles.map(rowOf));
+          const info = el('div', { class: 'stack', style: 'gap:4px; font-size:13px' }, [
+            el('div', {}, `✅ 대표 카드로 옮길 기록 ${plan.counts.move}건, 첨부 ${plan.counts.attach}개`),
+            el('div', {}, plan.counts.dup ? `♻ 모든 칸이 똑같은 중복 기록 ${plan.counts.dup}건은 하나로 정리합니다.` : '♻ 중복 기록은 없습니다(전부 보존).'),
+            Object.keys(plan.fieldPatch).length ? el('div', {}, `🧩 대표 카드의 빈 칸을 보완: ${Object.entries(plan.fieldPatch).map(([k, val]) => `${k}=${val}`).join(', ')}`) : null,
+            ...plan.conflicts.map((c) => el('div', { class: 'text-muted' }, `⚠ ${c.field}: "${c.kept}" 유지 / "${c.dropped}" (${c.note})`)),
+            el('div', { class: 'text-muted', style: 'font-size:12px' }, '합쳐진 카드는 휴지통 상태(삭제 표시)로 남아 데이터베이스에서 복구할 수 있습니다.'),
+          ]);
+          const go = el('button', { class: 'nm-btn nm-btn--primary', onclick: async () => {
+            go.disabled = true; go.textContent = '합치는 중…';
+            try { await appState.mergeVehicles(primary.id, others.map((x) => x.id), plan); toast('차량 카드를 합쳤습니다.', 'success'); close(); }
+            catch (err) { go.disabled = false; go.textContent = '다시 시도'; toast(`합치기에 실패했습니다(중간까지의 작업은 안전하게 보존됨): ${err.message || err}`, 'error'); }
+          } }, '합치기');
+          body.append(el('div', { class: 'stack' }, [list, info, el('div', { class: 'row', style: 'gap:8px; justify-content:flex-end' }, [el('button', { class: 'nm-btn', onclick: close }, '취소'), go])]));
+        },
+      });
     }
 
     // 오피넷 전국 평균 유가와 내 최근 주유 단가를 비교해 보여준다.
@@ -530,6 +573,10 @@
               insurance_expiry: fd.get('insurance_expiry') || null,
               registration_expiry: fd.get('registration_expiry') || null,
             };
+            // v7.37.0: 같은 차량번호가 이미 있으면 새 카드를 만들지 않는다(기록은 한 카드에 모은다).
+            const np = window.VehicleLogic.normPlate(data.plate_number);
+            const dupOf = np ? appState.vehicles.find((x) => !x.deleted_at && x.id !== existing?.id && window.VehicleLogic.normPlate(x.plate_number) === np) : null;
+            if (dupOf) { toast(`차량번호 ${data.plate_number}는 이미 "${dupOf.name}" 카드로 등록되어 있습니다. 그 카드에 기록해 주세요.`, 'error'); return; }
             try {
               if (existing) {
                 await appState.updateVehicle(existing.id, data);

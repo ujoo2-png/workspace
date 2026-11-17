@@ -101,3 +101,8 @@
 .nm-btn--sm { padding: 3px 8px; font-size: 12px; }
 .item-row--unread .item-row__title a { font-weight: 700; }
 .unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary, #3b6cf6); margin-right: 6px; vertical-align: middle; }
+.brf-recent__chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-alt, var(--surface)); font-size: 12px; max-width: 100%; }
+.brf-recent__txt { all: unset; cursor: pointer; padding: 3px 4px 3px 10px; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brf-recent__txt:hover { text-decoration: underline; }
+.brf-recent__x { all: unset; cursor: pointer; padding: 0 8px 1px 4px; color: var(--text-muted); font-size: 14px; line-height: 1; }
+.brf-recent__x:hover { color: var(--danger, #d33); }

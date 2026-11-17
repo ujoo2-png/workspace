@@ -67,7 +67,7 @@
   function renderPrograms(root) {
     const container = el('div', {});
     root.append(container);
-    let tab = 'programs'; // 'programs' | 'bookmarks'
+    let tab = 'programs'; // 'programs' | 'bookmarks' | 'promo'
     const revealedValues = new Map(); // program.id -> 복호화(또는 과거 평문) 된 값
     let selectedPrograms = new Set();
     let selectedBookmarks = new Set();
@@ -84,7 +84,9 @@
           el('div', { class: 'row', style: 'gap:8px' }, [
             tab === 'programs'
               ? el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openProgramForm() }, '+ 프로그램 등록')
-              : el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openBookmarkForm() }, '+ 즐겨찾기 등록'),
+              : tab === 'bookmarks'
+                ? el('button', { class: 'nm-btn nm-btn--primary', onclick: () => openBookmarkForm() }, '+ 즐겨찾기 등록')
+                : null,
           ]),
         ])
       );
@@ -93,10 +95,12 @@
         el('div', { class: 'quick-tabs' }, [
           tabBtn('programs', '🧩 내 프로그램'),
           tabBtn('bookmarks', '⭐ 즐겨찾기 URL'),
+          tabBtn('promo', '🎬 홍보 영상'),
         ])
       );
 
       if (tab === 'programs') container.append(programsSection());
+      else if (tab === 'promo') container.append(window.renderPromoVideo());
       else container.append(bookmarksSection());
     }
 
