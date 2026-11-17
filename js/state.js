@@ -682,6 +682,21 @@
       await this.store.update('vehicles', id, patch);
       return this.refreshAll();
     }
+    // v7.37.0: 같은 차량번호 카드를 하나로 합친다. plan = VehicleLogic.planMerge 결과.
+    // 안전 순서: ① 대표 카드 빈 칸 보완 → ② 기록·첨부를 대표로 이동 → ③ "완전히 같은" 중복만 삭제 → ④ 남은 카드는 소프트 삭제(복구 가능).
+    // 어느 단계에서든 실패하면 거기서 멈추고(카드는 그대로 남음) 오류를 던진다. 다시 실행해도 안전(이미 옮긴 기록은 대상이 아니다).
+    async mergeVehicles(primaryId, otherIds, plan) {
+      if (plan.fieldPatch && Object.keys(plan.fieldPatch).length) await this.store.update('vehicles', primaryId, plan.fieldPatch);
+      for (const id of plan.moves.maint) await this.store.update('vehicle_maintenance', id, { vehicle_id: primaryId });
+      for (const id of plan.moves.fuel) await this.store.update('vehicle_fuel_logs', id, { vehicle_id: primaryId });
+      for (const id of plan.moves.odo) await this.store.update('vehicle_odometer_logs', id, { vehicle_id: primaryId });
+      for (const id of plan.moves.attach) await this.store.update('attachments', id, { owner_id: primaryId });
+      for (const id of plan.dups.maint) await this.store.remove('vehicle_maintenance', id);
+      for (const id of plan.dups.fuel) await this.store.remove('vehicle_fuel_logs', id);
+      for (const id of plan.dups.odo) await this.store.remove('vehicle_odometer_logs', id);
+      for (const id of otherIds) await this.store.softDelete('vehicles', id);
+      return this.refreshAll();
+    }
     async deleteVehicle(id) {
       await this.store.softDelete('vehicles', id);
       return this.refreshAll();

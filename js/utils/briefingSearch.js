@@ -164,6 +164,22 @@
     };
   }
 
+  // v7.37.0: 최근 검색어(최대 10개, 가장 최근이 앞). 같은 검색어는 앞으로 올리고, 공백만 다른 것도 같은 것으로 본다.
+  const RECENT_MAX = 10;
+  const normQ = (q) => String(q == null ? '' : q).trim().replace(/\s+/g, ' ');
+  function addRecentQuery(list, q, max = RECENT_MAX) {
+    const v = normQ(q);
+    const seenQ = new Set();
+    const base = (Array.isArray(list) ? list : []).map(normQ).filter((x) => { if (!x) return false; const k = x.toLowerCase(); if (seenQ.has(k)) return false; seenQ.add(k); return true; });
+    if (!v) return base.slice(0, max);
+    return [v, ...base.filter((x) => x.toLowerCase() !== v.toLowerCase())].slice(0, max);
+  }
+  function removeRecentQuery(list, q) {
+    const v = normQ(q).toLowerCase();
+    return (Array.isArray(list) ? list : []).map(normQ).filter((x) => x && x.toLowerCase() !== v);
+  }
+  window.addRecentQuery = addRecentQuery;
+  window.removeRecentQuery = removeRecentQuery;
   window.parseNaturalQuery = parseNaturalQuery;
   window.filterBriefingItems = filterBriefingItems;
   window.mergeBriefingFilters = mergeFilters;
